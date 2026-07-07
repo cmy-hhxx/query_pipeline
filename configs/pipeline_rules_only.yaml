@@ -1,0 +1,52 @@
+name: question_pipeline_rules_only
+pipeline_version: v1
+
+input:
+  path: data/sample_questions.jsonl
+  text_field: question
+
+output:
+  dir: outputs/rules_only
+  labeled: labeled.jsonl
+  rejected: rejected.jsonl
+  skipped: skipped_low_score.jsonl
+  summary: run_summary.json
+
+work_dir: work/rules_only
+
+rules:
+  min_length: 6
+  finance_semantic: true
+  cleaning_version: finance_query_rules_v1
+
+dedup:
+  exact: true
+  minhash:
+    enabled: true
+    method: minhash_char_3gram
+    num_perm: 128
+    threshold: 0.85
+    normalization: null
+
+llm:
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-pro
+  api_key_env: DEEPSEEK_API_KEY
+  concurrency: 64
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+  cache: work/llm_cache.jsonl
+  classify:
+    enabled: false
+    prompt: configs/prompts/classify_complex.md
+    min_complexity_score: 3
+    min_question_length: 18
+  difficulty:
+    enabled: false
+    prompt: configs/prompts/label_difficulty.md
+
+steps:
+  - clean
+  - dedup_exact
+  - dedup_minhash

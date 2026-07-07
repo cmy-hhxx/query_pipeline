@@ -1,0 +1,50 @@
+name: question_pipeline_e2e
+pipeline_version: v1
+
+input:
+  path: data/e2e_sample.jsonl
+  text_field: question
+
+output:
+  dir: outputs/e2e
+  labeled: labeled.jsonl
+  rejected: rejected.jsonl
+  skipped: skipped_low_score.jsonl
+  summary: run_summary.json
+
+work_dir: work/e2e
+
+rules:
+  min_length: 6
+  finance_semantic: true
+
+dedup:
+  exact: true
+  minhash:
+    enabled: true
+    num_perm: 128
+    threshold: 0.85
+
+llm:
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-pro
+  api_key_env: DEEPSEEK_API_KEY
+  concurrency: 4
+  max_retries: 3
+  timeout_seconds: 90
+  cache: work/e2e/llm_cache.jsonl
+  classify:
+    enabled: true
+    prompt: configs/prompts/classify_complex.md
+    min_complexity_score: 3
+    min_question_length: 18
+  difficulty:
+    enabled: true
+    prompt: configs/prompts/label_difficulty.md
+
+steps:
+  - clean
+  - dedup_exact
+  - dedup_minhash
+  - llm_classify
+  - llm_difficulty

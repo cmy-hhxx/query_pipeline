@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.work/
+work/
+outputs/
+*.egg-info/
+.DS_Store
+.python-version
+old/

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>问句清洗分类 Pipeline 方案</title>
+  <style>
+    :root {
+      --bg: #f5f5f7; --panel: #ffffff; --ink: #1d1d1f; --muted: #6e6e73;
+      --hairline: #d2d2d7; --fill: #f0f0f3; --focus: rgba(29,29,31,0.16);
+      --radius: 8px; --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      --container: 1180px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink); }
+    .page { width: min(var(--container), calc(100% - 48px)); margin: 0 auto; padding: 32px 0 64px; }
+    h1 { font-size: 48px; font-weight: 720; margin: 0 0 8px; }
+    h2.section-title { font-size: 32px; font-weight: 700; margin: 0 0 16px; }
+    h3.panel-title { font-size: 18px; margin: 0; }
+    .hero p { color: var(--muted); font-size: 18px; max-width: 720px; }
+    .section { padding: 28px 0; scroll-margin-top: 24px; }
+    .panel { border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--panel); margin-bottom: 16px; overflow: hidden; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--hairline); background: rgba(255,255,255,0.9); }
+    .panel-body { padding: 16px 18px; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.55; background: var(--fill); border-radius: 6px; padding: 14px; max-height: 480px; overflow: auto; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 16px 0; }
+    .flow-step { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px; background: var(--panel); font-size: 13px; }
+    .flow-step strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid var(--hairline); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--fill); }
+    .copy-btn { border: 0; border-radius: 6px; background: var(--fill); color: var(--muted); font-size: 13px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .copy-btn:hover { color: var(--ink); background: #e8e8ed; }
+    .copy-btn.copied { color: var(--ink); box-shadow: 0 0 0 2px var(--focus); }
+    .nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+    .nav a { color: var(--ink); text-decoration: none; font-size: 13px; padding: 6px 12px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--panel); }
+    @media (max-width: 900px) { .flow { grid-template-columns: 1fr; } h1 { font-size: 36px; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>问句清洗分类 Pipeline</h1>
+      <p>Config 驱动的五步串行 pipeline：规则清洗 → 精确去重 → MinHash 近似去重 → LLM 九类分类 → LLM 难度评分。入口：<code>uv run python run.py -c configs/pipeline.yaml</code></p>
+    </section>
+
+    <nav class="nav" aria-label="页面导航">
+      <a href="#architecture">架构</a>
+      <a href="#stages">阶段说明</a>
+      <a href="#complexity">复杂度标准</a>
+      <a href="#categories">九类体系</a>
+      <a href="#difficulty">难度评分</a>
+      <a href="#prompts">提示词</a>
+      <a href="#schema">输出字段</a>
+      <a href="#config">配置</a>
+      <a href="#run">运行</a>
+    </nav>
+
+    <section id="architecture" class="section">
+      <h2 class="section-title">架构总览</h2>
+      <div class="flow">
+        <div class="flow-step"><strong>01 规则清洗</strong>Normalize + 通用拒绝 + 金融语义过滤 + complexity_score</div>
+        <div class="flow-step"><strong>02 精确去重</strong>dedup_key 哈希，保留首次出现</div>
+        <div class="flow-step"><strong>03 MinHash</strong>char 3-gram LSH，默认 threshold 0.85</div>
+        <div class="flow-step"><strong>04 LLM 分类</strong>is_complex + 九类，score≥3 门槛</div>
+        <div class="flow-step"><strong>05 LLM 难度</strong>0-5 连续分 + is_multi_turn</div>
+      </div>
+      <p style="color:var(--muted);font-size:14px;">分支输出：<code>rejected.jsonl</code>（规则/去重拒绝）、<code>skipped_low_score.jsonl</code>（未达 complexity 门槛）、<code>labeled.jsonl</code>（最终标注）</p>
+    </section>
+
+    <section id="stages" class="section">
+      <h2 class="section-title">阶段说明</h2>
+      <table>
+        <thead><tr><th>Step</th><th>模块</th><th>输入</th><th>输出</th><th>关键配置</th></tr></thead>
+        <tbody>
+          <tr><td>clean</td><td>steps/clean.py</td><td>JSONL question 字段</td><td>clean_passed + rejected</td><td>rules.min_length, rules.finance_semantic</td></tr>
+          <tr><td>dedup_exact</td><td>steps/dedup_exact.py</td><td>clean 通过记录</td><td>dedup_key_hash, duplicate_count</td><td>dedup.exact</td></tr>
+          <tr><td>dedup_minhash</td><td>steps/dedup_minhash.py</td><td>exact 去重后</td><td>minhash_dedup_report.json</td><td>dedup.minhash.threshold, num_perm</td></tr>
+          <tr><td>llm_classify</td><td>steps/llm_classify.py</td><td>score≥门槛记录</td><td>is_complex, category_id, judge_reason</td><td>llm.classify.min_complexity_score</td></tr>
+          <tr><td>llm_difficulty</td><td>steps/llm_difficulty.py</td><td>分类后记录</td><td>difficulty_score, difficulty_reason</td><td>llm.difficulty.prompt</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="complexity" class="section">
+      <h2 class="section-title">复杂度判定标准</h2>
+      <table>
+        <thead><tr><th>层级</th><th>机制</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>规则层</td><td>complexity_score 0-6</td><td>len_ge_30/80、analysis_or_judgement、finance_dimensions、multi_constraint_or_horizon、decision_or_action</td></tr>
+          <tr><td>门槛</td><td>score ≥ 3（可配置）</td><td>未达门槛写入 skipped_low_score.jsonl，不调用 LLM</td></tr>
+          <tr><td>LLM 层</td><td>is_complex</td><td>金融对象+约束+多步分析；排除简单查数、碎片、非金融、&lt;25字</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="categories" class="section">
+      <h2 class="section-title">九类分类体系</h2>
+      <table>
+        <thead><tr><th>ID</th><th>名称</th><th>主信号</th></tr></thead>
+        <tbody>
+          <tr><td>01</td><td>复杂取数计算类</td><td>多条件筛选、回测、统计</td></tr>
+          <tr><td>02</td><td>预测类</td><td>目标价、走势预测、情景推演</td></tr>
+          <tr><td>03</td><td>分析研究类</td><td>多维框架、产业链、因果分析</td></tr>
+          <tr><td>04</td><td>机会挖掘类</td><td>龙头、主题、事件驱动</td></tr>
+          <tr><td>05</td><td>资产配置类</td><td>组合、仓位、跨资产分配</td></tr>
+          <tr><td>06</td><td>账户诊断优化类</td><td>持仓审视、调仓建议</td></tr>
+          <tr><td>07</td><td>策略触发/设置类</td><td>条件触发、监控提醒</td></tr>
+          <tr><td>08</td><td>目标跟踪执行类</td><td>长期目标、动态调仓</td></tr>
+          <tr><td>09</td><td>动作类</td><td>PPT/Excel/报告等交付物</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="difficulty" class="section">
+      <h2 class="section-title">难度评分标准</h2>
+      <table>
+        <thead><tr><th>分数段</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td>0.0 – 1.9</td><td>直接查询、简单筛选/排序</td></tr>
+          <tr><td>2.0 – 3.4</td><td>信息整合、比较、普通研究</td></tr>
+          <tr><td>3.5 – 5.0</td><td>多维综合分析、预测、配置、情景推演</td></tr>
+        </tbody>
+      </table>
+      <p style="color:var(--muted);font-size:14px;">反模式：不因条件多、术语多自动给高分；category 信息仅作辅助上下文。</p>
+    </section>
+
+    <section id="prompts" class="section">
+      <h2 class="section-title">提示词全集</h2>
+      <p style="color:var(--muted);margin-bottom:16px;">以下提示词与 <code>configs/prompts/</code> 保持同步，点击右上角按钮可复制。</p>
+      <h3 style="margin:24px 0 12px;">分类提示词（classify_complex.md）</h3>
+      
+    <article class="panel prompt-block" id="prompt-classify-0">
+      <div class="panel-head">
+        <h3 class="panel-title">classify_role</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-classify-0-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-classify-0-pre">你是一个金融 AI 评测问句分类专家。请判断输入问句是否属于「复杂金融问句」，如果属于，归入下面 9 个类别之一。
+
+只允许使用以下 9 个类别，不要新增类别。</pre>
+      </div>
+    </article>
+
+    <article class="panel prompt-block" id="prompt-classify-1">
+      <div class="panel-head">
+        <h3 class="panel-title">9 类复杂金融问句</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-classify-1-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-classify-1-pre">### 01 复杂取数计算类
+特征：需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述，或多步骤数据处理。核心是「算」——不是简单查一个数，而是通过计算框架得出结果。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。
+
+所有例子：
+1. 回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满90日，买入规则为向上突破5周均线次日开盘价买入，卖出规则为向下突破或跌幅≥15%止损，交易成本含佣金0.03%+印花税0.05%+滑点0.1%，基准为沪深300全收益指数。
+2. 我目前状态为空仓，可用资金114.3万，交易风格偏向短线高弹性博弈。在今天市场4400家普跌环境下已全仓清仓，核心目标是通过一到两笔交易获取约5%的确定性利润。请帮我筛选明天值得关注的股票池，条件：仅限创业板或科创板（20%弹性），流通市值30亿到150亿，今日跌幅&lt;2%或收红或有长下影线，股价站稳5日和10日均线，近3日上涨放量且今日缩量。输出前5只并附核心热门概念和今日换手率。
+3. 请帮我筛选全市场A股ETF，排除货币ETF、债券ETF、黄金/贵金属/商品ETF、QDII/跨境ETF、杠杆/反向ETF。输出字段：代码、名称、近5日/20日/60日涨跌幅、今日涨跌幅。同时输出沪深300对应数据。按近5日涨跌幅从高到低排序，取前50名。
+4. 港口航运，物流，运输板块内，目前票价&gt;4月21日票价且期间某一日涨幅≥5%，5月8日票价&gt;4月21日票价，5月10日-5月13日之间其中某一日票价处于4月22日到5月8日票价之间，满足条件的60及00开头非st股票，按4月21日到5月13日区间涨幅排序，展示完整名单。
+5. 帮我统计，沪深主板所有股票第一天涨停，第二天收小阳十字星，并且成交量比第一天成交量要放大不低于二倍，第三天涨跌情况。
+6. 股票每次发出减持公告后，第二天股价的表现。从历史统计看下。
+7. 周K线图中：经长时间粘合后，5均线、20均线、60均线呈多头排列且向上发散的股票有哪些。
+8. 2026年6月1日行业指数涨停家数前三的板块中，非ST且非300和301开头，主力资金净流入大于0，换手率大于1.2%，量比大于1.2%，5日资金净流入大于0的股票。
+9. 选出在AI行业未来10年关键卡脖子和关键环节有高毛利的龙头企业且目前市值200亿以内的股票且在产业链顶端，独占行业50%以上核心利润的企业。
+
+### 02 预测类
+特征：以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果。关键信号词：「预测」「目标价」「能涨到多少」「什么时候」「概率」「极端场景」「剧本」。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。
+
+所有例子：
+1. 中际旭创未来1年股价能涨到多少？
+2. 159851走势分析，未来走势预测，什么时候突破前高。
+3. 洛阳钼业现在处于磨底期，大概多久，磨底期结束以后，进入上升区间离主升浪需要多久。
+4. 针对日本两家六氟化钨企业断供原因，全球市场需求缺口，分析中船特气估值大概未来几年到什么估值。
+5. 根据胜宏科技、长电科技的基本面，技术面以及大盘情况，外围情况等全方位信息，预测这两个票一个月内走势。
+6. 华电能源最近的处境和5.14以来的连日阴跌有什么异同，它会复刻后面连板的行情吗，几率多大，有什么条件。
+7. 把山东墨龙接下来1-3天的&quot;强弱分界线（关键价位）+三种明日剧本（强/弱/震荡）&quot;也列出来。
+8. 结合白云山的历史价格走势，预测一下未来白云山的价格走势。需要考虑所属板块影响、机构资金的情绪、公司基本经营情况、公司产品。
+9. 根据江顺科技今天股价波动，资金流入流出，近期新闻等情况，分析并推演明天的股价波动趋势，并判断概率分布。
+10. 综合筹码峰、量价关系、K线形态、技术面，通过日线周线月线分析，拓斯达、三峡新材、雷曼光电，短期和中期内上涨概率百分比。
+11. 现在我们来极端预测条件，如果由于技术发展，锂电池被其他如钠电、锂电池回收等技术取代，锂矿需求直接没有了，对盐湖股份的影响有多大？
+12. 帮我分析下这只海格通信股票可能出现的5种暴跌场景，每种都要说清楚触发条件、历史类似案例、发生概率多大。
+13. 光线传媒自从年初大涨后，已经连续跌，目前应该很低了吧，帮我结合股票分析以及接下来他暑期宣发的影片，做一个后期走势分析。
+14. 投资周期半年，国际复材、国瓷材料、中国巨石，哪个实现收益率百分之五十的概率更大。
+15. 合锻智能股价今天创了新高，未来股价最可能涨到什么位置？请结合类似行情股票合理推测，并给出所有可能性和概率，触发条件。
+
+### 03 分析研究类
+特征：以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判。关键信号词：「分析」「研究」「为什么」「影响」「框架」「产业」「政策」。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。
+
+所有例子：
+1. 美伊何时能达成停火协议，结合历史战争事件分析市场走势。
+2. 我是一名专门研究龙头的操盘手，依照游资&quot;92科比&quot;的情绪周期所有理论细节，精准分析出现在市场赚钱效应方向，当前市场最适合（龙头、补涨、切换、空仓）中哪个方向。需选出总龙头（启动价&lt;10元、股性极佳、资金合力强、换手5%-15%、人气排名前10）、补涨龙（关联度最高、价格&lt;10元、市值&lt;200亿、底部涨幅&lt;50%等7大标准）、切换方向（旧题材退潮+新超级题材出现）、中军标的（市值&gt;500亿、日成交&gt;50亿、机构持仓&gt;30%）。
+3. 当前影响市场的主要潜在风险有哪些？请从宏观、政策、行业等角度，分析这些风险对共封装光学(CPO)短期和中期可能造成的冲击。
+4. 那现在电子布、树脂、覆铜板涨价，PCB中游什么时候能开始股价上涨？需要在这些上游元件之后吗？具体几月份什么日期，届时他们股价会大涨吗？比如沪电、胜宏等，专业分析并解释。最后生益科技除了覆铜板它还能做PCB电路板吗？能两个方向盘通吃吗？
+5. 你现在是金融领域的顶级专家，请总结分析截至此刻24小时内A股市场、海外市场发生了什么大事，列明100条影响股市最核心的最新消息，覆盖A股＋海外宏观＋行业新闻＋龙虎榜/资金面。从当前主线行业筛选符合&quot;底部放量（近60日低点附近，量比＞1.5，当日成交额&gt;20日均成交额）+龙头股&quot;特征的10支股票进行量化评分，给出短线/中线/长线精准推荐，浓缩成一页极简交易决策清单。每结论标注依据，存疑时声明&quot;无法可靠结论&quot;。
+6. 请联网筛选未来30-90天最可能被A股提前交易的&quot;预期差+景气突变+右侧早期启动/拐点确认&quot;机会。需先建立候选池全集再逐层剔除，覆盖近3日强势板块/涨停扩散/真实催化/涨价/供需缺口/政策/订单方向，按市场环境评分、预期差类型、产业链受益层级、赔率、反方证伪等框架输出正式确认池/启动候选池/预启动观察池/事件驱动池/强趋势观察/风向标的分层结果，需标注首次启动时间、量价阶段、关键价位、催化日历和反方3问。
+7. 第一步：逆向拆解瓶颈——以产业专家视角拆解航空航天（大飞机/商业航天/低空装备）BOM物料清单，锁定扩产周期长、技术壁垒高的物理级产业链瓶颈环节。第二步：锁定非对称标的——筛选市值5亿~50亿机构覆盖少的中小盘隐形冠军。第三步：穿透财务拐点——核查近两季度毛利率拐点和CapEx扩产匹配。第四步：AI红队证伪——从技术替代、下游自研、供应链断裂三个维度穷尽暴雷风险。第五步：制定止损熔断机制——制作6个月关键里程碑清单。
+8. 机器人赛道的上中下游+产业延伸链，制成A股市场股票投资计划详细深度分析研报。需评估并标记出S级/首选级/次选级，制作三个级别股票总清单（含序列号、名称、代码、主营产品和技术优势、核心逻辑），S级需单独深度研究，各细分产业链关键环节不许遗漏任何达到评估标准的上市公司。
+
+### 04 机会挖掘类
+特征：以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：「找出」「挖掘」「龙头」「翻倍」「涨停」「机会」「热点」「哪只」。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。
+
+所有例子：
+1. 从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。
+2. 昨天为什么光伏电池企业尾盘突然出现涨停潮，谁先启动的？谁先涨停的？哪个票会有持续性？
+3. 帮我推导一下目前科技板块的炒作路径会是怎样的，推导出明天和下周最有交易价值的产业链个股。
+4. 高志凯预言说26年底到27年初会有一波金融危机，如果从这个视角去布局板块和个股。
+5. 从今年到现在，有哪些产品一直在涨价，涨价的底层原因是什么？根据产品上涨幅度和后续上涨空间列出关联概念股，并列出核心涨价龙头股。
+6. 2026年是厄尔尼诺大年，这个夏天次生灾害应该会非常多，这个对后续股票市场有什么影响，哪些相关联的股票会有上涨预期，底层逻辑是什么？
+7. 结合今日市场盘面情况，整理出5条从盘后开始到现在最重要的国内外资讯，定义出他们对明日A股市场重要度及原因，列出每条消息紧密相关的核心标的。
+8. 今天首板的主板个股，不是受二连板以上个股带动，依靠独立逻辑涨停的有哪几个？涨停逻辑是什么。
+9. 板块方向上这两天AI产业链的上游细分材料比较强，铜粉，靶材等，以及涨价方向的六氟化钨，大硅片，MLCC等。
+10. 结合近期热炒的AI产业链的上游细分材料，以及涨价方向的六氟化钨、大硅片、MLCC，找出未来中报预增披露期间最受益的核心个股，并给出解释。
+11. 检索人形机器人领域的所有研报分析以及市场评价和筹码形态，给出合适标的的投资建议。
+12. 分析一下近5年妖股的特征，选取当前符合条件的股票。
+13. 多晶硅去年7月到12月涨价时哪些个股跟的最多，最近多晶硅一看多商品期权合约大涨74%，资金会继续跟着炒作哪些股票？
+
+### 05 资产配置类
+特征：以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：「配置」「组合」「仓位」「分配」「多少比例」「分散」「资产」「规划」。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。
+
+所有例子：
+1. 我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。
+2. 100万资金跨市场配置，A股、港股、大宗商品相关ETF如何均衡布局？
+3. 有资金35万，二季度配置点啥ETF和股票标的组合年化收益8%。
+4. 目前25岁单身，收入稳定无家庭负担，有闲置资金20万，想高效做财富快速积累，应该怎么制定投资策略。
+5. 你好，我想做一个资产配置，但我对风险很敏感，属于保守型投资者。我特别说明：坚决不投股票和股票型基金，只接受债券、货币基金这类低风险产品。
+6. 我有50万闲置资金想配置，但我风险承受能力比较低，不想碰高风险产品。另外我之前买过货币基金，收益太低不想考虑这类产品。我每月还有5千房贷要还，流动性需要考虑。你能帮我规划吗？
+7. 我目前资产一千五，风险偏好保守偏稳健，投资期限一周，希望兼顾增长与安全，请帮我拆解预期收益5%-6%的目标，并给出A股资产配置的类别比例（如股票、债券、现金的具体占比）。
+8. 我目前资产100w，风险偏好保守偏稳健，投资期限3年，希望兼顾增长与安全，请帮我拆解预期年化收益5%-6%的目标，并给出在湖南板块资产配置的类别比例（如股票、现金的具体占比），其中需要包括金杯电工、科力远、方盛制药的资产配置策略。
+9. 我每月固定能结余3000元左右，想同时实现强制储蓄+稳健定投理财，兼顾安全性和小幅增值，适合配置哪些低中风险理财品种、怎么分配比例最合适？
+10. 我这种45岁左右的中年二孩家庭，闲置资金600万左右，有房贷教育双重支出压力，需要资产保值+抗通胀，平衡攻守属性，如何做资产配置？
+11. 我计划3-5年中长期财富积累，结合分批投入模式，请帮我制定大类资产投资方案。
+12. 假设接下来国内财政刺激加码、基建和地产政策边际放松，我该优先看上游资源、工程机械、建材，还是先看券商和银行？请结合过去几轮稳增长周期中各板块启动顺序、弹性、持续性和回撤特征来判断。
+
+### 06 账户诊断优化类
+特征：以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化。关键信号词：「持有」「持仓」「账户」「补仓」「减仓」「止损」「优化」「怎么处理」「帮我看看」。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。
+
+所有例子：
+1. 搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。
+2. 今天是2026年5月3日周日，我是一个资深的量化基金管理人，也是股票分析师。我想重新配置我的股票账户的仓位，截止到2026年5月3日，我的账户总资产3万元，其中：ST双成持仓400股市值3432元，中国黄金持仓100股市值894元，黄金ETF持仓100股市值967元，航天ETF持仓9500股市值10460元，芯片ETF持仓10000股市值9830元，我想在2026年5月6日至2026年5月30日内目标有15%以上的盈利。请给我建仓步骤的建议，包括买入或卖出的价位和量。
+3. 我的持仓全是科技类ETF，仓位偏高波动大，如何降低回撤、优化资产结构？
+4. 手里持有3只个股宁德时代、中际旭创和紫金矿业；2只行业ETF煤炭etf和通信etf，总仓位8成，要不要降仓加配债券基金和现金？
+5. 上周1398元买的1手（100股）贵州茅台，占近16%仓位，现在五粮液的原因白酒板块节后开盘会大回调，我应该如何操作。
+6. 截止至2026年4月30日收盘价，近期资金面，消息面等各方面综合比较东信和平、新国都、千红制药、创源股份、姚记科技、视觉中国，哪些票适合补仓，补仓价是多少。
+7. 华工科技、光迅科技、生益科技、东山精密，长线持有，如何组合建仓。给出建议。
+8. 手中的胜宏科技、江波龙、天新怎么处理比较合理。
+9. 我持有中国卫星和四维图新，一涨一跌，目前满仓，如何调整个股仓位。
+10. 江苏银行、宁波银行、杭州银行、青岛银行为主仓位，以唐山港、佐力药业、159201为辅仓位。这个组合行吗？
+11. 我持有中天科技、拓维信息、长电科技、鸣志电器、航发动力、小商品城、宁波高发、深科技、昆仑万维、中科创达、云天化、农发种业、天齐锂业、金辰股份这些股票，帮我看是否合理，给仓位和风控建议，以及如何组合优化。
+12. 50万资金，目前持有有色7.5万，沪深300ETF2万，药明康德4万，剩余资金如何配置，如何建仓。
+13. 给ETHUSDT推荐入场价、分批买入计划和仓位大小。
+
+### 07 策略触发/设置类
+特征：以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行。关键信号词：「如果……就」「当……时」「触发」「提醒」「alert」「条件」「规则」「异动」「监控」。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。
+
+所有例子：
+1. 这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。
+2. 帮我选几只最具有潜力能股价翻倍的票，我放入自选股，等股价下跌时候进入，我设置一个下跌到价位提醒。
+3. 好的到时候美的集团快分红提醒我。
+4. 那等中兴通讯适合加仓的时候你能主动提醒我吗。
+5. 山子高科出现第三次大宗交易提醒我。
+6. 工业富联，话说你能不能给我实时观察这个票，出现异动时提醒我。
+7. 双欣材料退市前一天停牌，可以提醒我吗。
+8. 在自选股今天盘中出现分时走势二次冲高回落后确认的买入点提醒我。
+9. 中国电建收盘站上5.50元且近3日主力资金连续净流入且MACD翻红时提醒我。
+10. MACD在0轴上方金叉，收盘价站上20日均线，成交量大于20日均量1.5倍，RSI(14)&lt;70。以这个条件为规则，每天帮我筛选可以操作的股票出来。每天下午四点提醒我复盘。
+
+### 08 目标跟踪执行类
+特征：以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认。关键信号词：「长期」「年化」「跟踪」「持续」「动态」「季度」「定期」「目标收益」。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。
+
+典型例子：
+- 我的目标是年化20%，基于每天市场数据帮我动态调整持仓，调整前发WhatsApp消息让我确认。
+- 我想长期持有，目标5-10倍收益，可以每季度再平衡。
+- 帮我跟踪我的持仓组合，每周生成一份表现报告，如果某只股票跌破止损线自动提醒。
+- 给这个投资计划设定3/6/12个月的里程碑检查点，每次检查后给出调仓建议并发邮件确认。
+
+### 09 动作类
+特征：以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等。关键信号词：「PPT」「Excel」「邮件」「dashboard」「报告」「导出」「生成」「建一个」「发」「写一个」。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。
+
+典型例子：
+- 给我建一个价格alert。
+- 把分析结果转成PPT并发邮件。
+- 写一个Excel或dashboard展示这些标的表现。
+- 生成一份PDF研究报告，包含图表和核心结论，发到我的邮箱。
+- 把这些选股结果导出成表格文件。</pre>
+      </div>
+    </article>
+
+    <article class="panel prompt-block" id="prompt-classify-2">
+      <div class="panel-head">
+        <h3 class="panel-title">复杂问句判断标准</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-classify-2-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-classify-2-pre">一个问句如果满足以下任意条件，通常可判为复杂问句：
+- 包含明确的金融资产、行业、主题、市场或账户对象；
+- 包含时间范围、指标阈值、比较对象、策略条件、收益目标、仓位要求、风险控制等；
+- 需要多步骤分析、计算、筛选、回测、组合构建、交易计划或框架化判断；
+- 不是单纯查事实，而是要求解释、预测、比较、决策或执行。
+- 简单诊股查数和取数计算的问句不应该判为复杂问句。所谓&quot;简单诊股查数和取数计算&quot;，指的是仅通过联网查数就能回答的问句，此类不判为复杂。
+- 字数小于25个字符（不包含符号）的不应该判为复杂问句
+
+以下情况应判为&quot;不复杂&quot;：
+- 只是简单问&quot;能不能买&quot;&quot;会涨吗&quot;&quot;目标价多少&quot;，但没有额外条件或分析要求；
+- 只是上下文残片、纠错、补充说明，不能作为独立问句；
+- 非金融投资问题；
+- 只是普通行情查询、日历查询、代码/名称纠错；
+- 表达不完整，缺少明确任务目标；
+- 模糊、无实质内容的闲聊；
+- 如果输入问句一看就是AI生成的，即使很长但内容有意义的信息不多，也不应该判断为复杂问句
+- 优惠券、八卦、非金融产品询问等无关内容。</pre>
+      </div>
+    </article>
+
+    <article class="panel prompt-block" id="prompt-classify-3">
+      <div class="panel-head">
+        <h3 class="panel-title">分类规则</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-classify-3-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-classify-3-pre">1. 每个问句只选择一个&quot;主类别&quot;。
+2. 如果一个问句同时符合多个类别，按主要任务意图归类：
+   - 有回测、筛选、技术指标条件，优先归 01。
+   - 有目标价、涨跌、业绩、事件后表现预测，优先归 02。
+   - 主要是解释原因、政策、产业、基本面、风险，归 03。
+   - 主要是找机会、找受益标的、找龙头、找翻倍股，归 04。
+   - 主要是资金如何分配、组合如何构建，归 05。
+   - 已有账户/持仓/仓位，需要优化或交易计划，归 06。
+   - 有&quot;如果/当……就……&quot;的触发执行条件，归 07。
+   - 有长期目标、持续跟踪、动态调整、通知确认，归 08。
+   - 有 PPT、邮件、Excel、alert、dashboard 等交付动作，归 09。
+3. 如果不属于九类且不是复杂问句，category_id 填 null。
+4. 如果属于九类但不够复杂，也要标注 is_complex=false。</pre>
+      </div>
+    </article>
+
+    <article class="panel prompt-block" id="prompt-classify-4">
+      <div class="panel-head">
+        <h3 class="panel-title">输出格式</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-classify-4-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-classify-4-pre">对每条问题，严格输出一个 JSON 对象，不要输出其他内容：
+
+{&quot;is_complex&quot;: true/false, &quot;category_id&quot;: &quot;01&quot;|&quot;02&quot;|...|&quot;09&quot;|null, &quot;category_name&quot;: &quot;复杂取数计算类&quot;|...|null, &quot;reason&quot;: &quot;一句话中文理由&quot;}
+
+- is_complex: 是否属于复杂金融问句
+- category_id: 类别编号（01-09），不复杂时填 null
+- category_name: 类别中文名，不复杂时填 null
+- reason: 判定理由，简短可复核
+
+不要用 markdown 代码块包裹，直接输出裸 JSON。</pre>
+      </div>
+    </article>
+      <h3 style="margin:24px 0 12px;">难度标注提示词（label_difficulty.md）</h3>
+      
+    <article class="panel prompt-block" id="prompt-difficulty-full">
+      <div class="panel-head">
+        <h3 class="panel-title">难度标注完整提示词</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-difficulty-full-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-difficulty-full-pre">你是一名专业的用户 Query 难度标注专家。
+
+任务：结合给定记录中的 question、category_name、judge_reason 等信息，为每条用户问句输出严格 JSON，用于清洗标注。
+
+必须只输出 JSON 对象，不要输出 Markdown、解释或额外文本。JSON 必须包含且只能包含以下字段：
+{
+  &quot;是否多轮&quot;: false,
+  &quot;难度评分&quot;: 2.4,
+  &quot;难度评分的理由&quot;: &quot;一句中文理由&quot;
+}
+
+判定规则：
+1. 当前数据没有独立的上下文历史字段，默认上下文为空。
+2. “是否多轮”判断的是当前问句是否明显依赖缺失的历史上下文才能稳定理解。若问句包含“以上、上述、该观察股票、该股、前一日、继续、这个、那、刚才、上一轮、这个框架、该方案”等明显承接表达，且离开历史会对象不明或任务不完整，则输出 true；否则输出 false。
+3. 难度评分是 0.0 到 5.0 的连续分，保留 1 位小数。
+4. 低难度 0.0-1.9：直接查询、简单解释、规则明确的筛选/排序/动作设置，通常无需复杂推理。
+5. 中等难度 2.0-3.4：需要一定信息整合、比较、归因、普通研究或在规则执行外给出解释判断。
+6. 高难度 3.5-5.0：需要多维综合分析、趋势预测、交易点位规划、资产配置、风险权衡、情景推演、长周期财务/行业研究或高不确定性决策。
+7. 不要仅因条件数量多、字段多、指标多、专业术语多就给高分；只有当任务需要综合分析、预测、规划、权衡或判断时才提高分数。
+8. 旧字段 is_complex、category_id、category_name、judge_reason 只作为辅助上下文，不能机械映射为新难度评分。
+9. “难度评分的理由”用一句中文，说明主要难点，不要超过 60 个汉字。
+</pre>
+      </div>
+    </article>
+    </section>
+
+    <section id="schema" class="section">
+      <h2 class="section-title">输出字段说明</h2>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>question</td><td>string</td><td>清洗后的问句</td></tr>
+          <tr><td>complexity_score</td><td>int</td><td>规则层 0-6</td></tr>
+          <tr><td>complexity_reasons</td><td>string[]</td><td>规则命中标签</td></tr>
+          <tr><td>is_complex</td><td>bool</td><td>LLM 复杂度判定</td></tr>
+          <tr><td>category_id / category_name</td><td>string</td><td>九类编号与名称</td></tr>
+          <tr><td>judge_reason</td><td>string</td><td>分类理由（中文）</td></tr>
+          <tr><td>is_multi_turn</td><td>bool</td><td>是否依赖缺失上下文</td></tr>
+          <tr><td>difficulty_score</td><td>float</td><td>0.0-5.0，一位小数</td></tr>
+          <tr><td>difficulty_reason</td><td>string</td><td>难度理由（中文）</td></tr>
+          <tr><td>reject_reason</td><td>string</td><td>拒绝原因（rejected 文件）</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="config" class="section">
+      <h2 class="section-title">配置参考</h2>
+      
+    <article class="panel prompt-block" id="prompt-config">
+      <div class="panel-head">
+        <h3 class="panel-title">pipeline.yaml 配置示例</h3>
+        <button class="copy-btn" type="button" data-copy-target="prompt-config-pre" title="复制">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <div class="panel-body">
+        <pre id="prompt-config-pre">name: question_pipeline
+pipeline_version: v1
+
+input:
+  path: data/sample_questions.jsonl
+  text_field: question
+
+output:
+  dir: outputs
+  labeled: labeled.jsonl
+  rejected: rejected.jsonl
+  skipped: skipped_low_score.jsonl
+  summary: run_summary.json
+
+work_dir: work
+
+rules:
+  min_length: 6
+  finance_semantic: true
+  cleaning_version: finance_query_rules_v1
+
+dedup:
+  exact: true
+  minhash:
+    enabled: true
+    method: minhash_char_3gram
+    num_perm: 128
+    threshold: 0.85
+    normalization: null
+
+llm:
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-pro
+  api_key_env: DEEPSEEK_API_KEY
+  concurrency: 64
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+  cache: work/llm_cache.jsonl
+  classify:
+    enabled: true
+    prompt: configs/prompts/classify_complex.md
+    min_complexity_score: 3
+    min_question_length: 18
+  difficulty:
+    enabled: true
+    prompt: configs/prompts/label_difficulty.md
+
+steps:
+  - clean
+  - dedup_exact
+  - dedup_minhash
+  - llm_classify
+  - llm_difficulty
+</pre>
+      </div>
+    </article>
+    </section>
+
+    <section id="run" class="section">
+      <h2 class="section-title">依赖与运行</h2>
+      <div class="panel"><div class="panel-body"><pre>cd query_pipeline
+uv sync
+export DEEPSEEK_API_KEY=your_key
+uv run python run.py -c configs/pipeline.yaml
+uv run python run.py -c configs/pipeline.yaml --dry-run</pre></div></div>
+      <p style="color:var(--muted);font-size:14px;margin-top:12px;">核心依赖：pydantic, pyyaml, openai, datasketch, rich, jinja2</p>
+    </section>
+  </div>
+  <script>
+    document.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".copy-btn");
+      if (!btn) return;
+      const targetId = btn.getAttribute("data-copy-target");
+      const pre = document.getElementById(targetId);
+      if (!pre) return;
+      try {
+        await navigator.clipboard.writeText(pre.textContent);
+        btn.classList.add("copied");
+        const orig = btn.innerHTML;
+        btn.innerHTML = "已复制";
+        setTimeout(() => { btn.classList.remove("copied"); btn.innerHTML = orig; }, 1500);
+      } catch (e) { alert("复制失败"); }
+    });
+  </script>
+</body>
+</html>
