@@ -7,4 +7,4 @@ outputs/
 *.egg-info/
 .DS_Store
 .python-version
-old/
+data/
