@@ -69,7 +69,7 @@ class LLMStageConfig(ConfigModel):
     timeout_seconds: float = 90.0
     response_format: str = "json_object"
     cache: Path = Path("work/llm_cache.jsonl")
-    prompt_id: str = "unified_label_v1"
+    prompt_id: str = "unified_label"
 
     @field_validator("prompt_id")
     @classmethod

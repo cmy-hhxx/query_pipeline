@@ -8,3 +8,5 @@ outputs/
 .DS_Store
 .python-version
 data/
+old/
+.claude

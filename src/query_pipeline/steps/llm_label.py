@@ -9,7 +9,7 @@ from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
 from query_pipeline.models.records import parse_unified_label_response
 from query_pipeline.pipeline.context import PipelineContext
-from query_pipeline.pipeline.records import normalized_text, output_value, pipeline_output, set_pipeline_output
+from query_pipeline.pipeline.records import normalized_text, set_pipeline_output
 from query_pipeline.prompts import resolve_prompt
 
 
@@ -60,13 +60,12 @@ async def _label_records(ctx: PipelineContext, records: list[dict[str, Any]]) ->
 
 
 def _build_user_payload(record: dict[str, Any]) -> str:
-    output = pipeline_output(record)
     payload = {
-        "source_text_path": output.get("source_text_path"),
-        "source_line_number": output.get("source_line_number"),
         "normalized_text": normalized_text(record),
-        "rule_signals": output_value(record, "rule_signals", {}),
     }
+    nlu_reference = record.get("nlu_reference", record.get("nlu", record.get("NLU")))
+    if nlu_reference is not None:
+        payload["nlu_reference"] = nlu_reference
     return "请标注以下 JSON 记录，只输出严格 JSON：\n" + json.dumps(
         payload,
         ensure_ascii=False,

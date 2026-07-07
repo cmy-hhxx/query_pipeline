@@ -24,8 +24,17 @@ class PipelineContractTest(unittest.TestCase):
 
         self.assertEqual(cfg.name, "question_pipeline")
         self.assertEqual(cfg.input.text_path, "question")
-        self.assertEqual(cfg.llm_stage.prompt_id, "unified_label_v1")
-        self.assertIn("复杂金融问句", resolve_prompt(cfg.llm_stage.prompt_id))
+        self.assertEqual(cfg.llm_stage.prompt_id, "unified_label")
+        prompt = resolve_prompt(cfg.llm_stage.prompt_id)
+        self.assertIn("复杂金融问句", prompt)
+        self.assertIn("五维独立", prompt)
+        self.assertIn("intent_labels", prompt)
+        self.assertIn("nlu_reference：可选字段", prompt)
+        self.assertNotIn("rule_signals", prompt)
+        self.assertNotIn("旧提示词", prompt)
+        self.assertNotIn("旧五维", prompt)
+        self.assertNotIn("source_text_path", prompt)
+        self.assertNotIn("source_line_number", prompt)
 
     def test_rules_stage_preserves_input_shape_and_writes_nested_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,6 +105,10 @@ class PipelineContractTest(unittest.TestCase):
             self.assertEqual(output["status"], "accepted")
             self.assertEqual(output["llm_label"]["category_id"], "03")
             self.assertEqual(output["llm_label"]["difficulty_score"], 2.8)
+            self.assertEqual(output["llm_label"]["intent_labels"], ["标的四维深度分析"])
+            self.assertEqual(output["llm_label"]["domain_label"], "A股股票")
+            self.assertEqual(output["llm_label"]["query_quality"], "高")
+            self.assertEqual(output["llm_label"]["query_difficulty"], "中")
             self.assertNotIn("category_id", accepted[0])
 
             cache_path = tmp_path / "work" / "llm_cache.jsonl"
@@ -112,6 +125,11 @@ class PipelineContractTest(unittest.TestCase):
                     "difficulty_score": 3.0,
                     "difficulty_reason": "需要专业判断",
                     "reason": "符合该类别定义",
+                    "intent_labels": ["标的四维深度分析"],
+                    "demand_labels": ["逻辑推理、预测能力"],
+                    "domain_label": "A股股票",
+                    "query_quality": "高",
+                    "query_difficulty": "中",
                 },
                 ensure_ascii=False,
             )
@@ -120,6 +138,8 @@ class PipelineContractTest(unittest.TestCase):
 
             self.assertEqual(parsed.category_id, category_id)
             self.assertEqual(parsed.category_name, category_name)
+            self.assertEqual(parsed.intent_labels, ["标的四维深度分析"])
+            self.assertEqual(parsed.domain_label, "A股股票")
 
 
 class FakeLLMClient:
@@ -129,6 +149,9 @@ class FakeLLMClient:
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         assert system_prompt
         assert "normalized_text" in user_prompt
+        assert "rule_signals" not in user_prompt
+        assert "source_text_path" not in user_prompt
+        assert "source_line_number" not in user_prompt
         return json.dumps(
             {
                 "is_complex": True,
@@ -138,6 +161,11 @@ class FakeLLMClient:
                 "difficulty_score": 2.8,
                 "difficulty_reason": "需要结合基本面和技术面判断",
                 "reason": "该问句要求综合分析金融标的",
+                "intent_labels": ["标的四维深度分析"],
+                "demand_labels": ["逻辑推理、预测能力"],
+                "domain_label": "A股股票",
+                "query_quality": "高",
+                "query_difficulty": "中",
             },
             ensure_ascii=False,
         )
@@ -186,7 +214,7 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
               timeout_seconds: 1
               response_format: json_object
               cache: work/llm_cache.jsonl
-              prompt_id: unified_label_v1
+              prompt_id: unified_label
             """
         ).strip()
         + "\n",

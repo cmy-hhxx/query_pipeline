@@ -39,4 +39,4 @@ llm_stage:
   timeout_seconds: 90
   response_format: json_object
   cache: work/llm_cache.jsonl
-  prompt_id: unified_label_v1
+  prompt_id: unified_label
