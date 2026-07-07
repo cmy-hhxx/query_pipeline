@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import os
 import random
-from pathlib import Path
+from typing import Any, cast
 
 from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
-from query_pipeline.config.models import LLMConfig
+from query_pipeline.config.models import LLMStageConfig
 
 
 class LLMClient:
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMStageConfig) -> None:
         api_key = os.environ.get(config.api_key_env)
         if not api_key:
             raise RuntimeError(f"{config.api_key_env} is not set")
@@ -27,7 +27,7 @@ class LLMClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    response_format={"type": self.config.response_format},
+                    response_format=cast(Any, {"type": self.config.response_format}),
                     temperature=0,
                     timeout=self.config.timeout_seconds,
                 )
@@ -47,7 +47,3 @@ class LLMClient:
 
     async def close(self) -> None:
         await self.client.close()
-
-
-def load_prompt(path: Path) -> str:
-    return path.read_text(encoding="utf-8").strip()

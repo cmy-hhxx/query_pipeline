@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from query_pipeline.config.models import PipelineConfig
+from query_pipeline.pipeline.records import pipeline_output
 
 
 @dataclass
@@ -25,8 +26,8 @@ class PipelineContext:
         return self.config.output.dir
 
     @property
-    def text_field(self) -> str:
-        return self.config.input.text_field
+    def text_path(self) -> str:
+        return self.config.input.text_path
 
     def path(self, name: str) -> Path:
         return self.work_dir / name
@@ -36,7 +37,6 @@ class PipelineContext:
 class RunSummary:
     success: bool
     name: str
-    pipeline_version: str
     stats: dict[str, Any]
     output_files: dict[str, str]
 
@@ -47,7 +47,6 @@ class RunSummary:
             {
                 "success": self.success,
                 "name": self.name,
-                "pipeline_version": self.pipeline_version,
                 "stats": self.stats,
                 "output_files": self.output_files,
             },
@@ -57,23 +56,29 @@ class RunSummary:
 
 
 def merge_stats(ctx: PipelineContext) -> dict[str, Any]:
-    reject_reasons = Counter(record.get("reject_reason", "unknown") for record in ctx.rejected)
+    rejected_outputs = [pipeline_output(record) for record in ctx.rejected]
+    accepted_outputs = [pipeline_output(record) for record in ctx.records]
+    skipped_outputs = [pipeline_output(record) for record in ctx.skipped]
+
+    reject_reasons = Counter(output.get("reject_reason", "unknown") for output in rejected_outputs)
+    skip_reasons = Counter(output.get("skip_reason", "unknown") for output in skipped_outputs)
     category_counts = Counter(
-        record.get("category_id")
-        for record in ctx.records
-        if record.get("category_id")
+        (output.get("llm_label") or {}).get("category_id")
+        for output in accepted_outputs
+        if (output.get("llm_label") or {}).get("category_id")
     )
-    difficulty_scores = [
-        record.get("difficulty_score")
-        for record in ctx.records
-        if record.get("difficulty_score") is not None
-    ]
+    difficulty_scores: list[float] = []
+    for output in accepted_outputs:
+        score = (output.get("llm_label") or {}).get("difficulty_score")
+        if isinstance(score, (int, float)):
+            difficulty_scores.append(float(score))
     return {
         **ctx.stats,
-        "final_rows": len(ctx.records),
+        "accepted_rows": len(ctx.records),
         "rejected_rows": len(ctx.rejected),
         "skipped_rows": len(ctx.skipped),
         "reject_reasons": dict(reject_reasons),
+        "skip_reasons": dict(skip_reasons),
         "category_counts": dict(category_counts),
         "difficulty_avg": round(sum(difficulty_scores) / len(difficulty_scores), 2) if difficulty_scores else None,
     }

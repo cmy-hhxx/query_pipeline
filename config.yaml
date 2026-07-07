@@ -1,0 +1,42 @@
+name: question_pipeline
+
+input:
+  path: data/sample_questions.jsonl
+  text_path: question
+
+output:
+  dir: outputs
+  accepted: accepted.jsonl
+  rejected: rejected.jsonl
+  skipped: skipped.jsonl
+  summary: summary.json
+
+work_dir: work
+
+rules_stage:
+  enabled: true
+  clean:
+    enabled: true
+    min_length: 6
+    finance_semantic: true
+  exact_dedup:
+    enabled: true
+  minhash:
+    enabled: true
+    threshold: 0.85
+  complexity_gate:
+    enabled: true
+    min_score: 3
+    min_text_length: 18
+
+llm_stage:
+  enabled: true
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-pro
+  api_key_env: DEEPSEEK_API_KEY
+  concurrency: 64
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+  cache: work/llm_cache.jsonl
+  prompt_id: unified_label_v1

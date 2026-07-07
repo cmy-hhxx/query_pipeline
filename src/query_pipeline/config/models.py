@@ -1,56 +1,66 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-class InputConfig(BaseModel):
+class ConfigModel(BaseModel):
+    model_config = {"extra": "forbid"}
+
+
+class InputConfig(ConfigModel):
     path: Path
-    text_field: str = "question"
+    text_path: str = "question"
+
+    @field_validator("text_path")
+    @classmethod
+    def validate_text_path(cls, value: str) -> str:
+        parts = value.split(".")
+        if not value or any(part == "" for part in parts):
+            raise ValueError("text_path must be a non-empty dot path")
+        return value
 
 
-class OutputConfig(BaseModel):
+class OutputConfig(ConfigModel):
     dir: Path = Path("outputs")
-    labeled: str = "labeled.jsonl"
+    accepted: str = "accepted.jsonl"
     rejected: str = "rejected.jsonl"
-    skipped: str = "skipped_low_score.jsonl"
-    summary: str = "run_summary.json"
+    skipped: str = "skipped.jsonl"
+    summary: str = "summary.json"
 
 
-class RulesConfig(BaseModel):
+class CleanRulesConfig(ConfigModel):
+    enabled: bool = True
     min_length: int = 6
     finance_semantic: bool = True
-    cleaning_version: str = "finance_query_rules_v1"
 
 
-class MinHashConfig(BaseModel):
+class ExactDedupConfig(ConfigModel):
     enabled: bool = True
-    method: str = "minhash_char_3gram"
-    num_perm: int = 128
+
+
+class MinHashConfig(ConfigModel):
+    enabled: bool = True
     threshold: float = 0.85
-    normalization: Literal["none", "theme"] | None = None
 
 
-class DedupConfig(BaseModel):
-    exact: bool = True
+class ComplexityGateConfig(ConfigModel):
+    enabled: bool = True
+    min_score: int = 3
+    min_text_length: int = 18
+
+
+class RulesStageConfig(ConfigModel):
+    enabled: bool = True
+    clean: CleanRulesConfig = Field(default_factory=CleanRulesConfig)
+    exact_dedup: ExactDedupConfig = Field(default_factory=ExactDedupConfig)
     minhash: MinHashConfig = Field(default_factory=MinHashConfig)
+    complexity_gate: ComplexityGateConfig = Field(default_factory=ComplexityGateConfig)
 
 
-class ClassifyLLMConfig(BaseModel):
+class LLMStageConfig(ConfigModel):
     enabled: bool = True
-    prompt: Path = Path("configs/prompts/classify_complex.md")
-    min_complexity_score: int = 3
-    min_question_length: int = 18
-
-
-class DifficultyLLMConfig(BaseModel):
-    enabled: bool = True
-    prompt: Path = Path("configs/prompts/label_difficulty.md")
-
-
-class LLMConfig(BaseModel):
     base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-v4-pro"
     api_key_env: str = "DEEPSEEK_API_KEY"
@@ -59,25 +69,24 @@ class LLMConfig(BaseModel):
     timeout_seconds: float = 90.0
     response_format: str = "json_object"
     cache: Path = Path("work/llm_cache.jsonl")
-    classify: ClassifyLLMConfig = Field(default_factory=ClassifyLLMConfig)
-    difficulty: DifficultyLLMConfig = Field(default_factory=DifficultyLLMConfig)
+    prompt_id: str = "unified_label_v1"
+
+    @field_validator("prompt_id")
+    @classmethod
+    def validate_prompt_id(cls, value: str) -> str:
+        prompt_id = value.strip()
+        if not prompt_id:
+            raise ValueError("prompt_id must be non-empty")
+        from query_pipeline.prompts import resolve_prompt
+
+        resolve_prompt(prompt_id)
+        return prompt_id
 
 
-class PipelineConfig(BaseModel):
+class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
-    pipeline_version: str = "v1"
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path = Path("work")
-    rules: RulesConfig = Field(default_factory=RulesConfig)
-    dedup: DedupConfig = Field(default_factory=DedupConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
-    steps: list[str] = Field(
-        default_factory=lambda: [
-            "clean",
-            "dedup_exact",
-            "dedup_minhash",
-            "llm_classify",
-            "llm_difficulty",
-        ]
-    )
+    rules_stage: RulesStageConfig = Field(default_factory=RulesStageConfig)
+    llm_stage: LLMStageConfig

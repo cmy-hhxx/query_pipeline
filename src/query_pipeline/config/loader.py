@@ -7,12 +7,11 @@ import yaml
 from query_pipeline.config.models import PipelineConfig
 
 
-def load_pipeline_config(path: str | Path) -> PipelineConfig:
+def load_pipeline_config(path: str | Path = "config.yaml") -> PipelineConfig:
     config_path = Path(path).resolve()
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     cfg = PipelineConfig.model_validate(data)
-    base = config_path.parent.parent if config_path.parent.name == "configs" else config_path.parent
-    return _resolve_paths(cfg, base)
+    return _resolve_paths(cfg, config_path.parent)
 
 
 def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
@@ -22,10 +21,6 @@ def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
         cfg.work_dir = (base / cfg.work_dir).resolve()
     if not cfg.output.dir.is_absolute():
         cfg.output.dir = (base / cfg.output.dir).resolve()
-    if not cfg.llm.cache.is_absolute():
-        cfg.llm.cache = (base / cfg.llm.cache).resolve()
-    if not cfg.llm.classify.prompt.is_absolute():
-        cfg.llm.classify.prompt = (base / cfg.llm.classify.prompt).resolve()
-    if not cfg.llm.difficulty.prompt.is_absolute():
-        cfg.llm.difficulty.prompt = (base / cfg.llm.difficulty.prompt).resolve()
+    if not cfg.llm_stage.cache.is_absolute():
+        cfg.llm_stage.cache = (base / cfg.llm_stage.cache).resolve()
     return cfg

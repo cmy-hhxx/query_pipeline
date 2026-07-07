@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 CATEGORIES: dict[str, str] = {
@@ -20,10 +20,13 @@ CATEGORIES: dict[str, str] = {
 }
 
 
-class ClassifyResult(BaseModel):
+class UnifiedLabelResult(BaseModel):
     is_complex: bool
     category_id: str | None = None
     category_name: str | None = None
+    is_multi_turn: bool
+    difficulty_score: float
+    difficulty_reason: str
     reason: str
 
     @field_validator("category_id")
@@ -35,22 +38,6 @@ class ClassifyResult(BaseModel):
             raise ValueError(f"invalid category_id: {value}")
         return value
 
-    def to_record_fields(self) -> dict[str, Any]:
-        return {
-            "is_complex": self.is_complex,
-            "category_id": self.category_id,
-            "category_name": self.category_name,
-            "judge_reason": self.reason,
-        }
-
-
-class DifficultyResult(BaseModel):
-    is_multi_turn: bool = Field(alias="是否多轮")
-    difficulty_score: float = Field(alias="难度评分")
-    difficulty_reason: str = Field(alias="难度评分的理由")
-
-    model_config = {"populate_by_name": True}
-
     @field_validator("difficulty_score")
     @classmethod
     def validate_score(cls, value: float) -> float:
@@ -59,40 +46,44 @@ class DifficultyResult(BaseModel):
             raise ValueError("difficulty_score must be in [0, 5]")
         return score
 
-    @field_validator("difficulty_reason")
+    @field_validator("difficulty_reason", "reason")
     @classmethod
-    def validate_reason(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("difficulty_reason must be non-empty")
-        return value.strip()
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("reason fields must be non-empty")
+        return text
 
-    def to_record_fields(self) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def validate_category_name(self) -> UnifiedLabelResult:
+        if self.category_id is None:
+            self.category_name = None
+            return self
+        expected = CATEGORIES[self.category_id]
+        if self.category_name not in (None, expected):
+            raise ValueError(f"category_name must match category_id {self.category_id}")
+        self.category_name = expected
+        return self
+
+    def to_output(self) -> dict[str, Any]:
         return {
+            "is_complex": self.is_complex,
+            "category_id": self.category_id,
+            "category_name": self.category_name,
             "is_multi_turn": self.is_multi_turn,
             "difficulty_score": self.difficulty_score,
             "difficulty_reason": self.difficulty_reason,
+            "reason": self.reason,
         }
 
 
-def parse_classify_response(raw: str) -> ClassifyResult:
+def parse_unified_label_response(raw: str) -> UnifiedLabelResult:
     text = raw.strip()
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if not match:
-            raise ValueError(f"cannot parse classify response: {text[:200]}")
+            raise ValueError(f"cannot parse unified label response: {text[:200]}")
         data = json.loads(match.group(1))
-    return ClassifyResult.model_validate(
-        {
-            "is_complex": data.get("is_complex"),
-            "category_id": data.get("category_id"),
-            "category_name": data.get("category_name"),
-            "reason": data.get("reason", ""),
-        }
-    )
-
-
-def parse_difficulty_response(raw: str) -> DifficultyResult:
-    data = json.loads(raw)
-    return DifficultyResult.model_validate(data)
+    return UnifiedLabelResult.model_validate(data)
