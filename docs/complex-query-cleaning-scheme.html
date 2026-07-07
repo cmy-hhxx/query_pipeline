@@ -136,59 +136,79 @@
         overflow: hidden;
       }
 
-      .pipeline-head {
-        display: grid;
-        grid-template-columns: 48px minmax(210px, 0.95fr) minmax(430px, 1.9fr) minmax(150px, 0.55fr);
-        gap: 0;
-        background: var(--surface-soft);
-        border-bottom: 1px solid var(--line);
-        color: var(--ink-soft);
-        font-size: 12px;
-        font-weight: 800;
-      }
-
-      .pipeline-head span,
-      .step > div {
-        padding: 13px 16px;
-      }
-
-      .pipeline-head span {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-      }
-
       .step {
-        display: grid;
-        grid-template-columns: 48px minmax(210px, 0.95fr) minmax(430px, 1.9fr) minmax(150px, 0.55fr);
-        align-items: center;
+        position: relative;
         border-bottom: 1px solid var(--line);
       }
 
-      .step:last-child {
+      .step:last-of-type {
         border-bottom: 0;
       }
 
-      .step-title {
+      .step-summary {
         display: grid;
-        justify-items: center;
-        text-align: center;
+        grid-template-columns: 56px 220px minmax(360px, 1fr) 280px;
+        align-items: center;
+        gap: 18px;
+        min-height: 74px;
+        padding: 12px 52px 12px 18px;
+        cursor: pointer;
+        list-style: none;
+        position: relative;
       }
 
-      .step-rules,
-      .step-outcome {
-        text-align: center;
+      .step-summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .step-summary:hover {
+        background: oklch(98.2% 0.004 250);
+      }
+
+      .step-summary::after {
+        content: "+";
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        display: flex;
+        width: 22px;
+        height: 22px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 800;
+        transform: translateY(-50%);
+      }
+
+      .step[open] > .step-summary {
+        background: var(--surface-soft);
+      }
+
+      .step[open] > .step-summary::after {
+        content: "-";
+        border-color: var(--red-line);
+        background: var(--red-soft);
+        color: var(--red);
       }
 
       .step-number {
         display: flex;
         align-items: center;
         justify-content: center;
+        justify-self: center;
         color: var(--ink-soft);
         font-size: 13px;
         font-weight: 800;
         font-variant-numeric: tabular-nums;
+      }
+
+      .step-title {
+        display: grid;
+        justify-items: start;
+        text-align: left;
       }
 
       .step-title strong {
@@ -204,23 +224,16 @@
         white-space: nowrap;
       }
 
-      .plain-list {
-        display: grid;
-        justify-items: center;
-        gap: 3px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
+      .step-rules {
         color: var(--ink-soft);
+        font-weight: 650;
+        text-align: left;
       }
 
-      .plain-list li {
-        max-width: 64ch;
+      .step-outcome {
+        display: flex;
+        justify-content: center;
         text-align: center;
-      }
-
-      .plain-list li::before {
-        content: none;
       }
 
       .outcome {
@@ -230,6 +243,50 @@
         gap: 7px;
         flex-wrap: wrap;
         min-height: 100%;
+      }
+
+      .step-detail {
+        border-top: 1px solid var(--line);
+        background: oklch(98.2% 0.004 250);
+        padding: 16px 52px 18px 18px;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 56px 220px minmax(360px, 1fr) 280px;
+        gap: 18px;
+        align-items: start;
+      }
+
+      .detail-item:nth-child(1) {
+        grid-column: 2;
+      }
+
+      .detail-item:nth-child(2) {
+        grid-column: 3;
+      }
+
+      .detail-item:nth-child(3) {
+        grid-column: 4;
+      }
+
+      .detail-item {
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        text-align: left;
+      }
+
+      .detail-item strong {
+        color: var(--ink);
+        font-size: 12px;
+      }
+
+      .detail-item p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 13px;
+        line-height: 1.6;
       }
 
       .threshold {
@@ -255,7 +312,7 @@
         display: block;
       }
 
-      summary {
+      .prompt-panel summary {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -266,7 +323,7 @@
         list-style: none;
       }
 
-      summary::-webkit-details-marker {
+      .prompt-panel summary::-webkit-details-marker {
         display: none;
       }
 
@@ -320,7 +377,7 @@
 
       @media (max-width: 820px) {
         .topline,
-        summary {
+        .prompt-panel summary {
           display: grid;
           justify-content: stretch;
         }
@@ -329,46 +386,26 @@
           justify-content: flex-start;
         }
 
-        .pipeline-head {
-          display: none;
-        }
-
-        .step {
+        .step-summary {
           display: grid;
-          grid-template-columns: 34px 1fr;
+          grid-template-columns: 32px 1fr;
           align-items: start;
-          padding: 13px 0;
-        }
-
-        .step > div {
-          padding: 6px 14px;
-        }
-
-        .step > div::before {
-          display: block;
-          margin-bottom: 4px;
-          color: var(--muted);
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .step-title::before {
-          content: "步骤";
+          gap: 5px 12px;
+          min-height: 0;
+          padding: 14px 44px 14px 14px;
         }
 
         .step-number {
           align-self: start;
-          grid-row: 1;
+          grid-row: 1 / 4;
           justify-content: center;
           padding-right: 0;
         }
 
         .step-title {
           grid-column: 2;
-        }
-
-        .step-rules::before {
-          content: "判断";
+          justify-items: start;
+          text-align: left;
         }
 
         .step-rules,
@@ -376,8 +413,35 @@
           grid-column: 2;
         }
 
-        .step-outcome::before {
-          content: "去向";
+        .step-rules {
+          justify-self: start;
+          text-align: left;
+        }
+
+        .step-outcome {
+          justify-self: start;
+          margin-top: 4px;
+        }
+
+        .step-summary::after {
+          top: 18px;
+          right: 12px;
+          transform: none;
+        }
+
+        .step-detail {
+          padding: 14px 14px 16px 58px;
+        }
+
+        .detail-grid {
+          grid-template-columns: 1fr;
+          gap: 12px;
+          max-width: none;
+          margin: 0;
+        }
+
+        .detail-item {
+          text-align: left;
         }
 
         .prompt-actions {
@@ -400,126 +464,197 @@
       </div>
 
       <section class="pipeline" aria-label="复杂问句清洗流程">
-        <div class="pipeline-head" aria-hidden="true">
-          <span></span>
-          <span>步骤</span>
-          <span>判断标准</span>
-          <span>不满足时</span>
-        </div>
-
-        <article class="step">
-          <div class="step-number">1</div>
-          <div class="step-title">
-            <strong>拿到问句</strong>
-            <span>读取配置字段</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>字段缺失，或字段不是文本值。</li>
-              <li>整理空白和全半角后仍为空。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge reject">rejected</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">1</span>
+            <span class="step-title">
+              <strong>拿到问句</strong>
+              <span>读取配置字段</span>
+            </span>
+            <span class="step-rules">读取问题文本，生成标准化问句</span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge reject">rejected</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>从每条记录取出问题文本，先统一空白和全半角。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>缺字段、不是文本、清洗后为空，都直接拒绝。</p>
+              </div>
+              <div class="detail-item">
+                <strong>记录什么</strong>
+                <p>原始记录不拆散，只追加清洗结果和来源信息。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
 
-        <article class="step">
-          <div class="step-number">2</div>
-          <div class="step-title">
-            <strong>基础清洗</strong>
-            <span>排除明显噪声</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>文本长度小于 <span class="threshold">6</span> 个有效字符。</li>
-              <li>数字、代码、口令或页面片段。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge reject">rejected</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">2</span>
+            <span class="step-title">
+              <strong>基础清洗</strong>
+              <span>排除明显噪声</span>
+            </span>
+            <span class="step-rules">长度门槛 6，口令/残片/页面片段拒绝</span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge reject">rejected</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>明显不是有效问题的文本：页面片段、提交模板、口令、上下文残片、纯数字或代码。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>命中噪声规则就拒绝；没有命中才继续判断金融语义。</p>
+              </div>
+              <div class="detail-item">
+                <strong>记录什么</strong>
+                <p>保留拒绝原因，便于后续抽样复核。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
 
-        <article class="step">
-          <div class="step-number">3</div>
-          <div class="step-title">
-            <strong>金融语义</strong>
-            <span>短问句看金融信号</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>短于 <span class="threshold">20</span> 且没有金融信号。</li>
-              <li>长问句进入后续复杂度门控。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge reject">rejected</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">3</span>
+            <span class="step-title">
+              <strong>金融语义</strong>
+              <span>短问句看金融信号</span>
+            </span>
+            <span class="step-rules">短于 <span class="threshold">20</span> 且无金融信号时拒绝</span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge reject">rejected</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>短问句必须出现明确金融对象或动作，例如股票、基金、ETF、指数、债、期货、财报、估值、仓位、回测。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>短于 <span class="threshold">20</span> 且没有金融信号，直接拒绝。</p>
+              </div>
+              <div class="detail-item">
+                <strong>记录什么</strong>
+                <p>同步记录复杂度和上下文风险，供后续门控复核。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
 
-        <article class="step">
-          <div class="step-number">4</div>
-          <div class="step-title">
-            <strong>去重</strong>
-            <span>保留代表样本</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>完全重复：忽略标点和空白。</li>
-              <li>近似重复：相似度达到 <span class="threshold">0.85</span>。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge reject">rejected</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">4</span>
+            <span class="step-title">
+              <strong>去重</strong>
+              <span>保留代表样本</span>
+            </span>
+            <span class="step-rules">完全重复与近似重复，阈值 <span class="threshold">0.85</span></span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge reject">rejected</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>同一批问题里完全相同或高度相似的问句，只保留一个代表样本。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>完全重复忽略标点和空白；近似重复相似度达到 <span class="threshold">0.85</span> 时拒绝重复项。</p>
+              </div>
+              <div class="detail-item">
+                <strong>记录什么</strong>
+                <p>保留代表样本；重复项记录归属关系和去重方式。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
 
-        <article class="step">
-          <div class="step-number">5</div>
-          <div class="step-title">
-            <strong>复杂度门控</strong>
-            <span>简单查询不进模型</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>复杂度信号至少 <span class="threshold">3</span> 个。</li>
-              <li>有效文本长度至少 <span class="threshold">18</span>。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge skip">skipped</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">5</span>
+            <span class="step-title">
+              <strong>复杂度门控</strong>
+              <span>简单查询不进模型</span>
+            </span>
+            <span class="step-rules">复杂度达标且有效长度达标才进入模型</span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge skip">skipped</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>复杂度信号包括长度、分析判断、金融维度、多条件或周期、决策动作等。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>复杂度小于 <span class="threshold">3</span>，或有效长度小于 <span class="threshold">18</span>，跳过模型。</p>
+              </div>
+              <div class="detail-item">
+                <strong>记录什么</strong>
+                <p>跳过表示文本有效但复杂度不足，不作为无效数据拒绝。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
 
-        <article class="step">
-          <div class="step-number">6</div>
-          <div class="step-title">
-            <strong>统一标注</strong>
-            <span>通过门槛后调用 LLM</span>
-          </div>
-          <div class="step-rules">
-            <ul class="plain-list">
-              <li>标注复杂性、类别和难度。</li>
-              <li>仅输出结构化 JSON 对象。</li>
-            </ul>
-          </div>
-          <div class="step-outcome">
-            <div class="outcome">
-              <span class="badge accept">accepted</span>
+        <details class="step">
+          <summary class="step-summary">
+            <span class="step-number">6</span>
+            <span class="step-title">
+              <strong>统一标注</strong>
+              <span>通过门槛后调用模型</span>
+            </span>
+            <span class="step-rules">统一提示词输出复杂性、类别、难度和原因</span>
+            <span class="step-outcome">
+              <span class="outcome">
+                <span class="badge accept">accepted</span>
+              </span>
+            </span>
+          </summary>
+          <div class="step-detail">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <strong>看什么</strong>
+                <p>只有通过所有规则门槛的问句才调用统一提示词，做复杂性、主类别、多轮依赖和难度标注。</p>
+              </div>
+              <div class="detail-item">
+                <strong>怎么分流</strong>
+                <p>模型返回结构化结果后，样本进入完成标注状态。</p>
+              </div>
+              <div class="detail-item">
+                <strong>模型输入</strong>
+                <p>模型只看到标准化问句和可选的领域参考。</p>
+              </div>
             </div>
           </div>
-        </article>
+        </details>
       </section>
 
       <section class="prompt-panel" aria-label="完整提示词">
