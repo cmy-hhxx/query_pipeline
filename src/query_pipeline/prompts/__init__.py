@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from query_pipeline.prompts.unified_label import UNIFIED_LABEL
+from query_pipeline.prompts.core_label import CORE_LABEL
 
 PROMPTS: dict[str, str] = {
-    "unified_label": UNIFIED_LABEL,
+    "core_label": CORE_LABEL,
 }
 
 

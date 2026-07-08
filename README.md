@@ -22,9 +22,9 @@ uv run python run.py -c config.yaml --dry-run
 The pipeline always runs in two stages:
 
 1. `rules_stage`: read `input.text_path`, normalize text, reject invalid rows, apply cleaning rules, deduplicate, then gate low-complexity rows.
-2. `llm_stage`: label only rows that passed the rules stage with one unified prompt.
+2. `llm_stage`: label only rows that passed the rules stage with one core prompt.
 
-`config.yaml` keeps prompt selection lightweight with `llm_stage.prompt_id`. Prompt text lives in `src/query_pipeline/prompts/`. The default `unified_label` prompt emits the unified classification fields plus five-dimensional query labels.
+`config.yaml` keeps prompt selection lightweight with `llm_stage.prompt_id`. Prompt text lives in `src/query_pipeline/prompts/`. The default `core_label` prompt emits only the core classification, multi-turn, difficulty, and reason fields.
 
 ## Output Contract
 
@@ -48,12 +48,7 @@ Input JSONL records keep their original top-level structure. The pipeline only a
       "is_multi_turn": false,
       "difficulty_score": 2.8,
       "difficulty_reason": "需要结合多个分析维度",
-      "reason": "该问句要求综合分析金融标的",
-      "intent_labels": ["标的四维深度分析"],
-      "demand_labels": ["逻辑推理、预测能力"],
-      "domain_label": "A股股票",
-      "query_quality": "高",
-      "query_difficulty": "中"
+      "category_reason": "该问句要求综合分析金融标的"
     }
   }
 }
