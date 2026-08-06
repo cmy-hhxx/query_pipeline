@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import Counter
 from typing import Any
 
 from rich.progress import Progress
 
 from query_pipeline.config.models import PipelineConfig
-from query_pipeline.io.jsonl import read_jsonl, write_jsonl
+from query_pipeline.io.jsonl import read_jsonl_skipping, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.models.session import Segment
@@ -20,21 +21,24 @@ from query_pipeline.session.segment import segment_session
 
 def run_session_stage(ctx: PipelineContext) -> PipelineContext:
     cfg = ctx.config
-    sessions = list(read_jsonl(cfg.input.path))
+    sessions, skipped = read_jsonl_skipping(cfg.input.path)
+    if skipped:
+        logging.getLogger(__name__).warning("input: skipped %d unparseable line(s) in %s", skipped, cfg.input.path)
     ctx.stats["total_sessions"] = len(sessions)
+    ctx.stats["input_bad_lines"] = skipped
 
     if not cfg.session_stage.enabled:
         ctx.rows = []
         _zero_stats(ctx.stats)
         return ctx
 
-    ctx.rows, ctx.stats, debug = asyncio.run(_run_all(ctx, sessions))
+    ctx.rows, ctx.stats, debug = asyncio.run(_run_all(ctx, sessions, skipped))
     _write_debug_files(ctx, debug)
     return ctx
 
 
 async def _run_all(
-    ctx: PipelineContext, sessions: list[dict[str, Any]]
+    ctx: PipelineContext, sessions: list[dict[str, Any]], input_bad_lines: int
 ) -> tuple[list[dict[str, Any]], dict[str, Any], tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]]:
     cfg = ctx.config
     client: LLMClient | None = None
@@ -75,6 +79,7 @@ async def _run_all(
 
     stats: dict[str, Any] = {
         "total_sessions": len(sessions),
+        "input_bad_lines": input_bad_lines,
         "segments": counters.get("segments", 0),
         "candidates": counters.get("candidates", 0),
         "complex_rows": len(rows),

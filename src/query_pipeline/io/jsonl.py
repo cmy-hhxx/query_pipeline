@@ -17,6 +17,30 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
             yield record
 
 
+def read_jsonl_skipping(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read input records, skipping lines that fail to parse.
+
+    The upstream exporter may write truncated/garbage lines (a strict
+    read would crash the whole run); callers get (records, skipped_count)
+    and should surface the skipped count in stats/logs.
+    """
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            record.setdefault("_line_number", line_number)
+            records.append(record)
+    return records, skipped
+
+
 def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:

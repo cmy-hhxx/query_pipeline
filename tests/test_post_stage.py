@@ -273,8 +273,8 @@ class PostStagePipelineTest(unittest.TestCase):
 
             deduped = list(read_jsonl(tmp_path / "work" / "deduped.jsonl"))
             self.assertEqual(len(deduped), 1)
-            self.assertEqual(deduped[0]["trace_id"], "s2r1")
-            self.assertEqual(deduped[0]["dedup_of_trace_id"], "s1r1")
+            self.assertEqual(deduped[0]["trace_id"], "s2trace1")
+            self.assertEqual(deduped[0]["dedup_of_trace_id"], "s1trace1")
             self.assertEqual(deduped[0]["similarity"], 1.0)
 
     def test_post_stage_disabled_no_side_effects(self) -> None:
@@ -293,7 +293,9 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertNotIn("dedup_removed", summary.stats)
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
-            self.assertEqual(rows[0]["meta"], {"reason": "需要预测"})  # untouched by post stage
+            self.assertEqual(
+                rows[0]["meta"], {"reason": "需要预测", "question_at": "2026-08-05 04:01:00"}
+            )  # untouched by post stage
 
 
 def _turns(prefix: str) -> list[dict[str, Any]]:
@@ -326,6 +328,7 @@ def _make_turn(
         "answer": f"answer{idx}",
         "run_id": f"{prefix}r{idx}",
         "trace_id": f"{prefix}trace{idx}",
+        "question_at": f"2026-08-05 04:{idx:02d}:00",
         "user_id": f"{prefix}u{idx}",
         "status": "completed",
         "outcome": "success",

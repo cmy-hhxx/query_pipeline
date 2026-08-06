@@ -19,8 +19,9 @@ def assemble_row(
 
     context[] holds prior same-segment turns trimmed to {question, answer}; a
     segment-leading turn falls back to every earlier session turn, so only the
-    session's very first turn yields an empty context. trace_id is the selected
-    turn's run_id. The judge's reason is carried in meta for debugging.
+    session's very first turn yields an empty context. trace_id carries the
+    original input turn's trace_id, and meta carries the judge's reason plus
+    the original question timestamp (question_at).
     """
     turn = turns[idx]
     prior = [
@@ -33,7 +34,7 @@ def assemble_row(
         "user_cohort": "regular",
         "source_case_id": session.get("thread_id", ""),
         "answer_key": "",
-        "trace_id": turn.get("run_id", ""),
+        "trace_id": turn.get("trace_id", ""),
         "category": category,
         "input": {"text": turn.get("question", ""), "image": "", "file": ""},
         "session_round": idx - segment.start + 1,
@@ -54,5 +55,5 @@ def assemble_row(
         "input_tokens": turn.get("input_tokens"),
         "output_tokens": turn.get("output_tokens"),
         "request_time_ms": None,
-        "meta": {"reason": reason},
+        "meta": {"reason": reason, "question_at": turn.get("question_at", "")},
     }

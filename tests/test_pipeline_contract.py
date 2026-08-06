@@ -40,6 +40,7 @@ def _make_turn(
         "answer": answer if answer is not None else f"answer{idx}",
         "run_id": f"r{idx}",
         "trace_id": f"trace{idx}",
+        "question_at": f"2026-08-05 04:{idx:02d}:00",
         "user_id": f"u{idx}",
         "status": status,
         "outcome": outcome,
@@ -119,6 +120,9 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertIn("回测一个基于5周均线的短线择时策略", judge_prompt)
         self.assertIn("审计一个多因子策略", judge_prompt)
         self.assertIn("07/08/09 边界", judge_prompt)
+        # screening caliber: pure filters are non-complex; validation+trend-point tasks stay 01
+        self.assertIn("仅按显式条件过滤", judge_prompt)
+        self.assertIn("validate the BAR columns", judge_prompt)
 
     def test_cache_key_versioned_by_prompt(self) -> None:
         q = "question"
@@ -268,7 +272,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["capture_mode"], "full_link")
         self.assertEqual(row["user_cohort"], "regular")
         self.assertEqual(row["source_case_id"], "t1")
-        self.assertEqual(row["trace_id"], "r2")  # selected turn's run_id
+        self.assertEqual(row["trace_id"], "trace2")  # original input turn's trace_id
         self.assertEqual(row["category"], "03-analysis-research")
         self.assertEqual(row["input"]["text"], "Q3 复杂预测")
         self.assertEqual(row["session_round"], 3)  # 1-based within segment
@@ -278,7 +282,9 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["text_answer"], "answer2")
         self.assertEqual(row["user_id"], "u2")
         self.assertEqual(row["difficulty_level"], "hard")
-        self.assertEqual(row["meta"], {"reason": "需要多步分析"})
+        self.assertEqual(
+            row["meta"], {"reason": "需要多步分析", "question_at": "2026-08-05 04:02:00"}
+        )
         self.assertEqual(row["first_token_time_ms"], 200)
         self.assertEqual(row["finish_answer_time_ms"], 400)
         self.assertFalse(any(k in row["context"][0] for k in ("chain", "tools", "run_id")))
@@ -311,13 +317,13 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             row = rows[0]
             self.assertEqual(row["source_case_id"], "t1")
-            self.assertEqual(row["trace_id"], "r1")
+            self.assertEqual(row["trace_id"], "trace1")
             self.assertEqual(row["category"], "01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
             self.assertEqual(row["session_round"], 2)
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数"})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "question_at": "2026-08-05 04:01:00"})
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -342,7 +348,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["trace_id"], "r2")
+            self.assertEqual(rows[0]["trace_id"], "trace2")
             self.assertEqual(rows[0]["category"], "02-forecasting-and-projection")
             self.assertEqual(rows[0]["session_round"], 3)
             self.assertEqual(len(rows[0]["context"]), 2)
@@ -374,10 +380,10 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["complex_rows"], 1)
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
-            self.assertEqual([r["trace_id"] for r in rows], ["r1"])
+            self.assertEqual([r["trace_id"] for r in rows], ["trace1"])
 
             verified = _read_jsonl(tmp_path / "work/verified.jsonl")
-            self.assertEqual([v["trace_id"] for v in verified], ["r1", "r2"])
+            self.assertEqual([v["trace_id"] for v in verified], ["trace1", "trace2"])
             self.assertEqual(verified[1]["is_complex"], False)
 
     def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
@@ -410,7 +416,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["trace_id"], "r1")
+            self.assertEqual(rows[0]["trace_id"], "trace1")
             self.assertEqual(rows[0]["meta"]["translation"], "翻译：complex calc A")
 
     def test_llm_disabled_no_rows(self) -> None:

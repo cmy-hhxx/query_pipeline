@@ -15,8 +15,8 @@ VERIFY_COMPLEX = """
 
 正例（判定时参照，与上面对照）：
 - “market flat at open, check the tape, charts, volume, earnings reports and headlines to find what's going on” → true（多源调查，明确列出数据源与目标）
-- “SNDK already reported, and you know that - take this into consideration and give us a simple trading plan for tomorrow” → true（明确标的 + 明确任务，附带少量上下文指代不影响）
-- “Confirmed reversal under $10 over 1 million volume with catalyst” → true（带明确筛选条件的选股任务，自身完整）
+- “SNDK already reported, and you know that - take this into consideration and give us a simple trading plan for tomorrow” → false（“give us a simple trading plan”是短决策指令，任务量不足，且 “you know that” 依赖会话前文才完整）
+- “Confirmed reversal under $10 over 1 million volume with catalyst” → false（纯条件筛选短句：只有筛选条件列表，无分析/解释/取舍/事件推演要求，按收紧后的口径不判复杂）
 - “Should I reduce DTCR in A or B due to interest rate concerns?” → true（明确持仓 + 明确取舍维度）
 - “Is Nvda forming a breakout setup? Identify the trigger price, confirmation signal, upside target, and failed-breakout risk.” → true（明确标的 + 多项分析要求）
 

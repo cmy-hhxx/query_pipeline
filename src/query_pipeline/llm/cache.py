@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,17 +10,26 @@ def load_cache(cache_path: Path) -> dict[str, dict[str, Any]]:
     if not cache_path.exists():
         return {}
     cache: dict[str, dict[str, Any]] = {}
+    skipped = 0
     with cache_path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:
                 continue
-            row = json.loads(line)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                # Torn trailing line from a hard-killed run: drop it and let
+                # the next run re-do that one LLM call instead of crashing.
+                skipped += 1
+                continue
             key = row.get("cache_key")
             label = row.get("label")
             if not isinstance(key, str) or not isinstance(label, dict):
                 raise ValueError(f"invalid cache row {cache_path}:{line_number}")
             cache[key] = label
+    if skipped:
+        logging.getLogger(__name__).warning("llm cache: dropped %d unparseable line(s) in %s", skipped, cache_path)
     return cache
 
 
