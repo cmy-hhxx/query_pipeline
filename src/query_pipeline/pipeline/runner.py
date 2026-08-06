@@ -5,7 +5,9 @@ import json
 from query_pipeline.config.models import PipelineConfig
 from query_pipeline.io.jsonl import write_jsonl
 from query_pipeline.pipeline.context import PipelineContext, RunSummary, merge_stats
+from query_pipeline.steps.post_stage import run_post_stage
 from query_pipeline.steps.session_stage import run_session_stage
+from query_pipeline.steps.verify_stage import run_verify_stage
 
 
 def run_pipeline(config: PipelineConfig) -> RunSummary:
@@ -14,6 +16,8 @@ def run_pipeline(config: PipelineConfig) -> RunSummary:
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
     ctx = run_session_stage(ctx)
+    ctx = run_verify_stage(ctx)
+    ctx = run_post_stage(ctx)
 
     complex_path = ctx.output_dir / config.output.complex_queries
     summary_path = ctx.output_dir / config.output.summary

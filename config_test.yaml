@@ -1,7 +1,7 @@
 name: session_pipeline
 
 input:
-  path: data/aime/input.jsonl
+  path: data/aime/input_test.jsonl
 
 output:
   dir: outputs

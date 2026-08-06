@@ -103,6 +103,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         for category_id, name in {
             "01": "数据与指标计算",
             "05": "资产配置",
+            "07": "策略触发与设置",
             "09": "动作输出",
         }.items():
             self.assertIn(f"{category_id} {name}", judge_prompt)
@@ -112,6 +113,12 @@ class SessionPipelineContractTest(unittest.TestCase):
         # category definitions + priority rules embedded (guards 08/09 boundary collapse)
         self.assertIn("长期帮我盯着并迭代", judge_prompt)
         self.assertIn("→ 优先 09", judge_prompt)
+        # few_shot.md examples fused in (07 remapped to trigger/setup semantics;
+        # backtest-audit questions fall under 03 now)
+        self.assertIn("每类典型示例", judge_prompt)
+        self.assertIn("回测一个基于5周均线的短线择时策略", judge_prompt)
+        self.assertIn("审计一个多因子策略", judge_prompt)
+        self.assertIn("07/08/09 边界", judge_prompt)
 
     def test_cache_key_versioned_by_prompt(self) -> None:
         q = "question"
@@ -283,7 +290,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient):
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient), patch(
+                "query_pipeline.steps.verify_stage.LLMClient", FakeSessionLLMClient
+            ):
                 summary = run_pipeline(cfg)
 
             self.assertTrue(summary.success)
@@ -293,6 +302,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["non_complex"], 1)
             self.assertEqual(summary.stats["llm_failed"], 0)
+            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_rejected"], 0)
+            self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(summary.stats["category_counts"], {"01": 1})
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
@@ -314,7 +326,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeFailingSessionLLMClient):
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeFailingSessionLLMClient), patch(
+                "query_pipeline.steps.verify_stage.LLMClient", FakeFailingSessionLLMClient
+            ):
                 summary = run_pipeline(cfg)
 
             self.assertTrue(summary.success)
@@ -322,6 +336,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["llm_failed"], 1)
+            # verify failure is fail-open: the row survives and is counted.
+            self.assertEqual(summary.stats["verify_failed"], 1)
+            self.assertEqual(summary.stats["verify_kept"], 0)
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
@@ -329,6 +346,72 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(rows[0]["category"], "02-forecasting-and-projection")
             self.assertEqual(rows[0]["session_round"], 3)
             self.assertEqual(len(rows[0]["context"]), 2)
+
+    def test_end_to_end_verify_filters_context_only_rows(self) -> None:
+        # Pass 1 (with context) judges Q3 complex; pass 2 (standalone) does
+        # not, so the row must be dropped with verify_rejected=1.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            names = ("web_search", "finquery", "compute")
+            turns = [
+                _make_turn(0, "Q1 简单查询", tool_names="web_search", tool_count=1, chain=_chain_with_tool_calls(1)),
+                _make_turn(1, "Q2 复杂取数", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+                _make_turn(2, "Q3 再看下", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+            ]
+            session = {"thread_id": "t1", "context": turns}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeJudgeThenVerifyClient), patch(
+                "query_pipeline.steps.verify_stage.LLMClient", FakeJudgeThenVerifyClient
+            ):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["candidates"], 2)
+            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_rejected"], 1)
+            self.assertEqual(summary.stats["verify_failed"], 0)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual([r["trace_id"] for r in rows], ["r1"])
+
+            verified = _read_jsonl(tmp_path / "work/verified.jsonl")
+            self.assertEqual([v["trace_id"] for v in verified], ["r1", "r2"])
+            self.assertEqual(verified[1]["is_complex"], False)
+
+    def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
+        # Two candidate turns with identical English text: verify keeps both,
+        # dedup drops the second, translate fills meta.translation on the
+        # survivor, and the client closes inside the same event loop.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            names = ("web_search", "finquery", "compute")
+            turns = [
+                _make_turn(0, "simple lookup", tool_names="web_search", tool_count=1, chain=_chain_with_tool_calls(1)),
+                _make_turn(1, "complex calc A", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+                _make_turn(2, "complex calc A", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+            ]
+            session = {"thread_id": "t1", "context": turns}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, post_enabled=True))
+
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakePostStageLLMClient), patch(
+                "query_pipeline.steps.verify_stage.LLMClient", FakePostStageLLMClient
+            ), patch("query_pipeline.steps.post_stage.LLMClient", FakePostStageLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["verify_kept"], 2)
+            self.assertEqual(summary.stats["dedup_removed"], 1)
+            self.assertEqual(summary.stats["translated"], 1)
+            self.assertEqual(summary.stats["translate_skipped"], 0)
+            self.assertEqual(summary.stats["translate_failed"], 0)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["trace_id"], "r1")
+            self.assertEqual(rows[0]["meta"]["translation"], "翻译：complex calc A")
 
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,10 +448,75 @@ class FakeSessionLLMClient:
                 },
                 ensure_ascii=False,
             )
-        current = payload["current_question"]
-        if current == "Q2 复杂取数":
-            return json.dumps({"is_complex": True, "category_id": "01", "reason": "多步工具调用取数"}, ensure_ascii=False)
-        return json.dumps({"is_complex": False, "category_id": None, "reason": "简单查询"}, ensure_ascii=False)
+        if "current_question" in payload:
+            current = payload["current_question"]
+            if current == "Q2 复杂取数":
+                return json.dumps({"is_complex": True, "category_id": "01", "reason": "多步工具调用取数"}, ensure_ascii=False)
+            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单查询"}, ensure_ascii=False)
+        # second-pass verify (standalone question): keep Q2 only
+        if payload["question"] == "Q2 复杂取数":
+            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+        return json.dumps({"is_complex": False, "reason": "单独看不复杂"}, ensure_ascii=False)
+
+    async def close(self) -> None:
+        return None
+
+
+class FakePostStageLLMClient:
+    """Handles segment/judge/verify/translate payloads.
+
+    close() asserts it runs in the same event loop that served complete() —
+    a regression guard for the double-asyncio.run client-close bug that
+    raised "Event loop is closed" once post_stage was enabled.
+    """
+
+    def __init__(self, config: object) -> None:
+        self.config = config
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        import asyncio
+
+        self.used_loop = asyncio.get_running_loop()
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "questions" in payload:
+            n = len(payload["questions"])
+            return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
+        if "current_question" in payload:
+            q = payload["current_question"]
+            if q.startswith("complex calc"):
+                return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
+            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单"}, ensure_ascii=False)
+        if "question" in payload:  # verify: standalone question
+            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+        if "text" in payload:  # translate
+            return json.dumps({"translation": "翻译：" + payload["text"]}, ensure_ascii=False)
+        raise AssertionError(f"unexpected payload keys: {sorted(payload)}")
+
+    async def close(self) -> None:
+        import asyncio
+
+        assert asyncio.get_running_loop() is self.used_loop, "client closed in a different event loop"
+
+
+class FakeJudgeThenVerifyClient:
+    """Judge marks Q2/Q3 complex with context; verify keeps only Q2 standalone."""
+
+    def __init__(self, config: object) -> None:
+        self.config = config
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "questions" in payload:
+            n = len(payload["questions"])
+            return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
+        if "current_question" in payload:
+            q = payload["current_question"]
+            if q.startswith("Q2") or q.startswith("Q3"):
+                return json.dumps({"is_complex": True, "category_id": "03", "reason": "上下文看着复杂"}, ensure_ascii=False)
+            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单"}, ensure_ascii=False)
+        if payload["question"] == "Q2 复杂取数":
+            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+        return json.dumps({"is_complex": False, "reason": "单独看是承接句"}, ensure_ascii=False)
 
     async def close(self) -> None:
         return None
@@ -382,16 +530,30 @@ class FakeFailingSessionLLMClient:
         payload = json.loads(user_prompt.split("\n", 1)[1])
         if "questions" in payload:
             raise RuntimeError("simulated segmentation failure")
-        if payload["current_question"] == "Q2 复杂取数":
-            raise RuntimeError("simulated judge failure")
-        return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
+        if "current_question" in payload:
+            if payload["current_question"] == "Q2 复杂取数":
+                raise RuntimeError("simulated judge failure")
+            return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
+        raise RuntimeError("simulated verify failure")
 
     async def close(self) -> None:
         return None
 
 
-def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
+def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = False) -> Path:
     config_path = tmp_path / "config.yaml"
+    post_block = ""
+    if post_enabled:
+        post_block = """
+            post_stage:
+              enabled: true
+              dedup:
+                enabled: true
+                threshold: 0.85
+              translate:
+                enabled: true
+                target: zh
+"""
     config_path.write_text(
         textwrap.dedent(
             f"""
@@ -416,6 +578,7 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
               step2:
                 enabled: true
                 prompt_id: complex_judge
+            {post_block}
             llm_stage:
               enabled: {str(llm_enabled).lower()}
               base_url_env: OPENAI_BASE_URL

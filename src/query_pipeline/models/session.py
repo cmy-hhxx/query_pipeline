@@ -94,6 +94,38 @@ def parse_step2_payload(data: dict[str, Any]) -> Step2Result:
     return Step2Result.model_validate(data)
 
 
+class VerifyResult(BaseModel):
+    """Standalone second-pass verdict: is the question complex on its own.
+
+    Deliberately category-free — pass 1 already assigned the category; this
+    stage only re-confirms complexity without session context.
+    """
+
+    is_complex: bool
+    reason: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("reason must be non-empty when present")
+        return text
+
+    def to_cache_label(self) -> dict[str, Any]:
+        return {"is_complex": self.is_complex, "reason": self.reason}
+
+
+def parse_verify_response(raw: str) -> VerifyResult:
+    return VerifyResult.model_validate(_parse_json_object(raw))
+
+
+def parse_verify_payload(data: dict[str, Any]) -> VerifyResult:
+    return VerifyResult.model_validate(data)
+
+
 def parse_segment_response(raw: str, *, num_turns: int) -> list[Segment]:
     """Parse the segmentation LLM output and merge recurring topics.
 

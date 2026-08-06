@@ -66,10 +66,53 @@ class LLMStageConfig(ConfigModel):
     cache: Path = Path("work/llm_cache.jsonl")
 
 
+class VerifyStageConfig(ConfigModel):
+    enabled: bool = True
+    prompt_id: str = "verify_complex"
+
+    @field_validator("prompt_id")
+    @classmethod
+    def validate_prompt_id(cls, value: str) -> str:
+        prompt_id = value.strip()
+        if not prompt_id:
+            raise ValueError("prompt_id must be non-empty")
+        from query_pipeline.prompts import resolve_prompt
+
+        resolve_prompt(prompt_id)
+        return prompt_id
+
+
+class DedupConfig(ConfigModel):
+    enabled: bool = True
+    threshold: float = 0.85
+    n_gram: int = 3
+    num_perm: int = 128
+
+    @field_validator("threshold")
+    @classmethod
+    def validate_threshold(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("threshold must be in [0, 1]")
+        return value
+
+
+class TranslateConfig(ConfigModel):
+    enabled: bool = True
+    target: str = "zh"
+
+
+class PostStageConfig(ConfigModel):
+    enabled: bool = False
+    dedup: DedupConfig = Field(default_factory=DedupConfig)
+    translate: TranslateConfig = Field(default_factory=TranslateConfig)
+
+
 class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path = Path("work")
     session_stage: SessionStageConfig = Field(default_factory=SessionStageConfig)
+    verify_stage: VerifyStageConfig = Field(default_factory=VerifyStageConfig)
     llm_stage: LLMStageConfig
+    post_stage: PostStageConfig = Field(default_factory=PostStageConfig)
