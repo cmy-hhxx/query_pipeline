@@ -25,6 +25,7 @@ class PipelineContractTest(unittest.TestCase):
         self.assertEqual(cfg.name, "question_pipeline")
         self.assertEqual(cfg.input.text_path, "question")
         self.assertEqual(cfg.llm_stage.prompt_id, "core_label")
+        self.assertEqual(cfg.output.non_complex, "non_complex.jsonl")
         prompt = resolve_prompt(cfg.llm_stage.prompt_id)
         self.assertIn("复杂金融问句", prompt)
         self.assertIn("核心结构化标注", prompt)
@@ -61,12 +62,15 @@ class PipelineContractTest(unittest.TestCase):
             summary = run_pipeline(cfg)
 
             accepted = _read_jsonl(Path(summary.output_files["accepted"]))
+            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
             rejected = _read_jsonl(Path(summary.output_files["rejected"]))
             skipped = _read_jsonl(Path(summary.output_files["skipped"]))
 
             self.assertEqual(len(accepted), 1)
+            self.assertEqual(len(non_complex), 0)
             self.assertEqual(len(skipped), 1)
             self.assertEqual(len(rejected), 4)
+            self.assertEqual(summary.stats["non_complex_rows"], 0)
 
             accepted_row = accepted[0]
             self.assertEqual(accepted_row["question"], "original top-level question")
@@ -106,7 +110,11 @@ class PipelineContractTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
 
             accepted = _read_jsonl(Path(summary.output_files["accepted"]))
+            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
             self.assertEqual(len(accepted), 1)
+            self.assertEqual(len(non_complex), 0)
+            self.assertEqual(summary.stats["non_complex_rows"], 0)
+            self.assertEqual(summary.stats["llm_complex_rows"], 1)
             output = accepted[0]["query_pipeline_output"]
             self.assertEqual(output["status"], "accepted")
             label = output["llm_label"]
@@ -140,6 +148,54 @@ class PipelineContractTest(unittest.TestCase):
             self.assertNotIn("category_name", cache_label)
             self.assertNotIn("query_quality", cache_label)
             self.assertEqual(cache_label["category_reason"], "该问句要求综合分析金融标的")
+
+    def test_llm_non_complex_goes_to_separate_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write_jsonl(
+                tmp_path / "input.jsonl",
+                [{"id": "q1", "payload": {"query": "请分析贵州茅台基本面和技术面风险机会"}}],
+            )
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.steps.llm_label.LLMClient", FakeNonComplexLLMClient):
+                summary = run_pipeline(cfg)
+
+            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
+            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
+            self.assertEqual(len(accepted), 0)
+            self.assertEqual(len(non_complex), 1)
+            self.assertEqual(summary.stats["non_complex_rows"], 1)
+            self.assertEqual(summary.stats["llm_non_complex_rows"], 1)
+            output = non_complex[0]["query_pipeline_output"]
+            self.assertEqual(output["status"], "non_complex")
+            self.assertFalse(output["llm_label"]["is_complex"])
+            self.assertIsNone(output["llm_label"]["category_id"])
+
+    def test_llm_failure_goes_to_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write_jsonl(
+                tmp_path / "input.jsonl",
+                [
+                    {"id": "ok", "payload": {"query": "请分析贵州茅台基本面和技术面风险机会"}},
+                    {"id": "bad", "payload": {"query": "请结合基本面、技术面、资金面分析贵州茅台未来一个月的风险和机会"}},
+                ],
+            )
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.steps.llm_label.LLMClient", FakeFailingLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
+            skipped = _read_jsonl(Path(summary.output_files["skipped"]))
+            self.assertEqual(len(accepted), 1)
+            self.assertEqual(summary.stats["llm_failed_rows"], 1)
+            failed = [row for row in skipped if row["query_pipeline_output"].get("skip_reason") == "llm_failed"]
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(failed[0]["id"], "bad")
+            self.assertIn("llm_error", failed[0]["query_pipeline_output"])
 
     def test_core_label_parser_accepts_all_category_ids(self) -> None:
         for category_id, category_name in CATEGORIES.items():
@@ -215,6 +271,50 @@ class FakeLLMClient:
         return None
 
 
+class FakeNonComplexLLMClient:
+    def __init__(self, config: object) -> None:
+        self.config = config
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        return json.dumps(
+            {
+                "is_complex": False,
+                "category_id": None,
+                "is_multi_turn": False,
+                "difficulty_score": None,
+                "difficulty_reason": None,
+                "category_reason": "只是简单查行情，不属于复杂金融问句",
+            },
+            ensure_ascii=False,
+        )
+
+    async def close(self) -> None:
+        return None
+
+
+class FakeFailingLLMClient:
+    def __init__(self, config: object) -> None:
+        self.config = config
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        if "未来一个月" in user_prompt:
+            raise RuntimeError("simulated llm failure")
+        return json.dumps(
+            {
+                "is_complex": True,
+                "category_id": "03",
+                "is_multi_turn": False,
+                "difficulty_score": 2.8,
+                "difficulty_reason": "需要结合基本面和技术面判断",
+                "category_reason": "该问句要求综合分析金融标的",
+            },
+            ensure_ascii=False,
+        )
+
+    async def close(self) -> None:
+        return None
+
+
 def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -227,6 +327,7 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
             output:
               dir: out
               accepted: accepted.jsonl
+              non_complex: non_complex.jsonl
               rejected: rejected.jsonl
               skipped: skipped.jsonl
               summary: summary.json

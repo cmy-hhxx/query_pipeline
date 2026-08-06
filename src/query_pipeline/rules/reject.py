@@ -53,7 +53,7 @@ def generic_reject_reason(question: str, *, min_length: int = 6) -> str:
     if re.fullmatch(r"[A-Za-z0-9_.\-]{1,15}", text) and zh_count(text) == 0:
         return "ascii_token_only"
     if len(text) < min_length:
-        return "too_short_lt6"
+        return "too_short"
     if zh_count(text) <= 2 and len(text) <= 12:
         return "mostly_symbol_short"
     return ""

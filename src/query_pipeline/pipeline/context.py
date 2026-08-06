@@ -13,6 +13,7 @@ from query_pipeline.pipeline.records import pipeline_output
 class PipelineContext:
     config: PipelineConfig
     records: list[dict[str, Any]] = field(default_factory=list)
+    non_complex: list[dict[str, Any]] = field(default_factory=list)
     rejected: list[dict[str, Any]] = field(default_factory=list)
     skipped: list[dict[str, Any]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
@@ -75,6 +76,7 @@ def merge_stats(ctx: PipelineContext) -> dict[str, Any]:
     return {
         **ctx.stats,
         "accepted_rows": len(ctx.records),
+        "non_complex_rows": len(ctx.non_complex),
         "rejected_rows": len(ctx.rejected),
         "skipped_rows": len(ctx.skipped),
         "reject_reasons": dict(reject_reasons),

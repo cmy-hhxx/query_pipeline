@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from typing import Any
 
@@ -10,7 +11,6 @@ from query_pipeline.constants import MINHASH_METHOD, MINHASH_NUM_PERM
 from query_pipeline.dedup.exact import dedup_key, sha1_12
 from query_pipeline.dedup.minhash import build_minhash
 from query_pipeline.io.jsonl import read_jsonl, write_jsonl
-from query_pipeline.llm.runner import question_length_without_punctuation
 from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.pipeline.records import (
     OUTPUT_FIELD,
@@ -24,8 +24,10 @@ from query_pipeline.pipeline.records import (
 )
 from query_pipeline.rules.complexity import complexity_score
 from query_pipeline.rules.finance import finance_reject_reason
-from query_pipeline.rules.normalize import normalize_question
+from query_pipeline.rules.normalize import normalize_question, question_length_without_punctuation
 from query_pipeline.rules.reject import CONTEXT_MARKER_RE, generic_reject_reason
+
+logger = logging.getLogger(__name__)
 
 
 def run_rules_stage(ctx: PipelineContext) -> PipelineContext:
@@ -38,6 +40,11 @@ def run_rules_stage(ctx: PipelineContext) -> PipelineContext:
         candidates = _apply_exact_dedup(ctx, candidates)
         candidates = _apply_minhash_dedup(ctx, candidates)
         candidates = _apply_complexity_gate(ctx, candidates)
+    else:
+        logger.warning(
+            "rules_stage.enabled=false: skipping clean, dedup, and complexity gate; "
+            "only input load/normalize/basic reject will run"
+        )
 
     ctx.records = candidates
     ctx.stats["rules_candidate_rows"] = len(ctx.records)
@@ -205,26 +212,31 @@ def _apply_minhash_dedup(ctx: PipelineContext, records: list[dict[str, Any]]) ->
     lsh = MinHashLSH(threshold=cfg.threshold, num_perm=MINHASH_NUM_PERM)
     kept: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
+    lsh_id_to_business_id: dict[str, str] = {}
 
     for index, record in enumerate(records):
         text = normalized_text(record)
-        fallback_id = output_value(record, "rule_signals", {}).get("canonical_id", f"row_{index}")
-        record_id = str(record.get("id") or fallback_id)
+        business_id = str(
+            record.get("id") or output_value(record, "rule_signals", {}).get("canonical_id") or f"row_{index}"
+        )
+        lsh_key = f"row_{index}"
         minhash = build_minhash(text, num_perm=MINHASH_NUM_PERM)
         candidates = lsh.query(minhash)
         if candidates:
+            duplicate_of = lsh_id_to_business_id[str(candidates[0])]
             removed.append(
                 set_pipeline_output(
                     record,
                     status="rejected",
                     reject_reason="duplicate_minhash",
-                    duplicate_of=str(candidates[0]),
+                    duplicate_of=duplicate_of,
                     dedup_method="minhash",
                 )
             )
             continue
-        lsh.insert(record_id, minhash)
-        kept.append(update_rule_signals(record, minhash_id=record_id))
+        lsh.insert(lsh_key, minhash)
+        lsh_id_to_business_id[lsh_key] = business_id
+        kept.append(update_rule_signals(record, minhash_id=business_id))
 
     report = {
         "method": MINHASH_METHOD,
@@ -234,7 +246,6 @@ def _apply_minhash_dedup(ctx: PipelineContext, records: list[dict[str, Any]]) ->
         "dedup_rows": len(kept),
         "removed_rows": len(removed),
     }
-    ctx.records = kept
     ctx.rejected.extend(removed)
     ctx.stats["minhash_report"] = report
     write_jsonl(ctx.path("dedup_minhash.jsonl"), kept)

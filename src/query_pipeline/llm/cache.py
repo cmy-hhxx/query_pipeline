@@ -30,8 +30,8 @@ def append_cache(cache_path: Path, cache_key: str, label: dict[str, Any], *, met
         handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
-def make_cache_key(question: str, *, step: str) -> str:
+def make_cache_key(question: str, *, step: str, model: str) -> str:
     import hashlib
 
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
-    return f"{step}:{digest}"
+    return f"{step}:{model}:{digest}"

@@ -18,11 +18,13 @@ def run_pipeline(config: PipelineConfig) -> RunSummary:
     ctx = run_llm_label_stage(ctx)
 
     accepted_path = ctx.output_dir / config.output.accepted
+    non_complex_path = ctx.output_dir / config.output.non_complex
     rejected_path = ctx.output_dir / config.output.rejected
     skipped_path = ctx.output_dir / config.output.skipped
     summary_path = ctx.output_dir / config.output.summary
 
     write_jsonl(accepted_path, ctx.records)
+    write_jsonl(non_complex_path, ctx.non_complex)
     write_jsonl(rejected_path, ctx.rejected)
     write_jsonl(skipped_path, ctx.skipped)
 
@@ -35,6 +37,7 @@ def run_pipeline(config: PipelineConfig) -> RunSummary:
         stats=stats,
         output_files={
             "accepted": str(accepted_path),
+            "non_complex": str(non_complex_path),
             "rejected": str(rejected_path),
             "skipped": str(skipped_path),
             "summary": str(summary_path),

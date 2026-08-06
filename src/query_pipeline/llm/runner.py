@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import unicodedata
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -30,13 +29,3 @@ async def run_concurrent(
 
         await asyncio.gather(*(tracked(i, item) for i, item in enumerate(items)))
     return results
-
-
-def question_length_without_punctuation(question: str) -> int:
-    count = 0
-    for ch in question:
-        cat = unicodedata.category(ch)
-        if cat.startswith(("P", "S", "Z")):
-            continue
-        count += 1
-    return count

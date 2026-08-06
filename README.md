@@ -56,9 +56,12 @@ Input JSONL records keep their original top-level structure. The pipeline only a
 
 Default public outputs are:
 
-- `outputs/accepted.jsonl`
-- `outputs/rejected.jsonl`
-- `outputs/skipped.jsonl`
+- `outputs/accepted.jsonl` — complex sample pool (`is_complex=true`)
+- `outputs/non_complex.jsonl` — labeled but not complex (`is_complex=false`)
+- `outputs/rejected.jsonl` — invalid / noise / duplicates
+- `outputs/skipped.jsonl` — low complexity gate, or LLM call/parse failure (`skip_reason=llm_failed`)
 - `outputs/summary.json`
+
+When `llm_stage.enabled=false`, rules-passed candidates stay in `accepted.jsonl` without `llm_label`, and `non_complex.jsonl` is empty.
 
 Intermediate files are written under `work/` for debugging.

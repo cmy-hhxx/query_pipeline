@@ -128,6 +128,12 @@
         color: var(--green);
       }
 
+      .badge.non-complex {
+        border-color: var(--line-strong);
+        background: var(--surface-soft);
+        color: var(--ink-soft);
+      }
+
       .pipeline {
         margin-top: 22px;
         border: 1px solid var(--line);
@@ -148,7 +154,7 @@
       .step-summary {
         display: grid;
         grid-template-columns: 56px 220px minmax(360px, 1fr) 280px;
-        align-items: center;
+        align-items: start;
         gap: 18px;
         min-height: 74px;
         padding: 12px 52px 12px 18px;
@@ -207,21 +213,56 @@
 
       .step-title {
         display: grid;
+        gap: 3px;
         justify-items: start;
         text-align: left;
       }
 
-      .step-title strong {
-        display: block;
-        margin-bottom: 2px;
-        font-size: 16px;
+      .step-heading {
+        display: grid;
+        grid-template-columns: 92px max-content;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
       }
 
-      .step-title span {
+      .step-heading strong {
+        display: block;
+        margin-bottom: 0;
+        font-size: 16px;
+        white-space: nowrap;
+      }
+
+      .step-subtitle {
         display: block;
         color: var(--muted);
         font-size: 13px;
         white-space: nowrap;
+      }
+
+      .step-title .stage-tag {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        min-height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .stage-tag.code {
+        border-color: var(--line-strong);
+        background: var(--surface-soft);
+        color: var(--ink-soft);
+      }
+
+      .stage-tag.llm {
+        border-color: oklch(80% 0.05 155);
+        background: var(--green-soft);
+        color: var(--green);
       }
 
       .step-rules {
@@ -458,8 +499,9 @@
         </div>
         <div class="legend" aria-label="输出去向">
           <span class="badge reject">rejected 不进入样本池</span>
-          <span class="badge skip">skipped 不调用模型</span>
-          <span class="badge accept">accepted 完成标注</span>
+          <span class="badge skip">skipped 低复杂度或标注失败</span>
+          <span class="badge non-complex">non_complex 已标注非复杂</span>
+          <span class="badge accept">accepted 复杂样本</span>
         </div>
       </div>
 
@@ -468,8 +510,11 @@
           <summary class="step-summary">
             <span class="step-number">1</span>
             <span class="step-title">
-              <strong>拿到问句</strong>
-              <span>读取配置字段</span>
+              <span class="step-heading">
+                <strong>拿到问句</strong>
+                <span class="stage-tag code">规则 · code</span>
+              </span>
+              <span class="step-subtitle">读取配置字段</span>
             </span>
             <span class="step-rules">读取问题文本，生成标准化问句</span>
             <span class="step-outcome">
@@ -500,10 +545,13 @@
           <summary class="step-summary">
             <span class="step-number">2</span>
             <span class="step-title">
-              <strong>基础清洗</strong>
-              <span>排除明显噪声</span>
+              <span class="step-heading">
+                <strong>基础清洗</strong>
+                <span class="stage-tag code">规则 · code</span>
+              </span>
+              <span class="step-subtitle">排除明显噪声</span>
             </span>
-            <span class="step-rules">长度门槛 6，口令/残片/页面片段拒绝</span>
+            <span class="step-rules">长度门槛 <span class="threshold">6 字符</span>，口令/残片/页面片段拒绝</span>
             <span class="step-outcome">
               <span class="outcome">
                 <span class="badge reject">rejected</span>
@@ -518,7 +566,7 @@
               </div>
               <div class="detail-item">
                 <strong>怎么分流</strong>
-                <p>命中噪声规则就拒绝；没有命中才继续判断金融语义。</p>
+                <p>命中噪声规则就拒绝；没有命中才继续判断金融信号。</p>
               </div>
               <div class="detail-item">
                 <strong>记录什么</strong>
@@ -532,10 +580,13 @@
           <summary class="step-summary">
             <span class="step-number">3</span>
             <span class="step-title">
-              <strong>金融语义</strong>
-              <span>短问句看金融信号</span>
+              <span class="step-heading">
+                <strong>金融信号</strong>
+                <span class="stage-tag code">规则 · code</span>
+              </span>
+              <span class="step-subtitle">短问句走规则判断</span>
             </span>
-            <span class="step-rules">短于 <span class="threshold">20</span> 且无金融信号时拒绝</span>
+            <span class="step-rules">短于 <span class="threshold">20 字符</span> 且无金融信号时拒绝</span>
             <span class="step-outcome">
               <span class="outcome">
                 <span class="badge reject">rejected</span>
@@ -550,11 +601,11 @@
               </div>
               <div class="detail-item">
                 <strong>怎么分流</strong>
-                <p>短于 <span class="threshold">20</span> 且没有金融信号，直接拒绝。</p>
+                <p>短于 <span class="threshold">20 字符</span> 且没有金融信号，直接拒绝。</p>
               </div>
               <div class="detail-item">
                 <strong>记录什么</strong>
-                <p>同步记录复杂度和上下文风险，供后续门控复核。</p>
+                <p>同步记录复杂度和上下文风险，供抽样复核。</p>
               </div>
             </div>
           </div>
@@ -564,8 +615,11 @@
           <summary class="step-summary">
             <span class="step-number">4</span>
             <span class="step-title">
-              <strong>去重</strong>
-              <span>保留代表样本</span>
+              <span class="step-heading">
+                <strong>去重</strong>
+                <span class="stage-tag code">规则 · code</span>
+              </span>
+              <span class="step-subtitle">保留代表样本</span>
             </span>
             <span class="step-rules">完全重复与近似重复，阈值 <span class="threshold">0.85</span></span>
             <span class="step-outcome">
@@ -596,8 +650,11 @@
           <summary class="step-summary">
             <span class="step-number">5</span>
             <span class="step-title">
-              <strong>复杂度门控</strong>
-              <span>简单查询不进模型</span>
+              <span class="step-heading">
+                <strong>复杂度门控</strong>
+                <span class="stage-tag code">规则 · code</span>
+              </span>
+              <span class="step-subtitle">简单查询不进模型</span>
             </span>
             <span class="step-rules">复杂度达标且有效长度达标才进入模型</span>
             <span class="step-outcome">
@@ -614,7 +671,7 @@
               </div>
               <div class="detail-item">
                 <strong>怎么分流</strong>
-                <p>复杂度小于 <span class="threshold">3</span>，或有效长度小于 <span class="threshold">18</span>，跳过模型。</p>
+                <p>复杂度小于 <span class="threshold">3</span>，或有效长度小于 <span class="threshold">18 字符</span>，跳过模型。</p>
               </div>
               <div class="detail-item">
                 <strong>记录什么</strong>
@@ -628,13 +685,18 @@
           <summary class="step-summary">
             <span class="step-number">6</span>
             <span class="step-title">
-              <strong>核心标注</strong>
-              <span>通过门槛后调用模型</span>
+              <span class="step-heading">
+                <strong>语义标注</strong>
+                <span class="stage-tag llm">语义 · LLM</span>
+              </span>
+              <span class="step-subtitle">通过门槛后调用 LLM</span>
             </span>
-            <span class="step-rules">核心提示词输出复杂性、类别、难度和原因</span>
+            <span class="step-rules">提示词输出复杂性、类别、难度和原因</span>
             <span class="step-outcome">
               <span class="outcome">
                 <span class="badge accept">accepted</span>
+                <span class="badge non-complex">non_complex</span>
+                <span class="badge skip">skipped</span>
               </span>
             </span>
           </summary>
@@ -642,15 +704,15 @@
             <div class="detail-grid">
               <div class="detail-item">
                 <strong>看什么</strong>
-                <p>只有通过所有规则门槛的问句才调用核心提示词，做复杂性、主类别、多轮依赖和难度标注。</p>
+                <p>只有通过前五步规则门槛的问句才调用提示词，做复杂性、主类别、多轮依赖和难度标注。</p>
               </div>
               <div class="detail-item">
                 <strong>怎么分流</strong>
-                <p>模型返回结构化结果后，样本进入完成标注状态。</p>
+                <p>is_complex=true 进入复杂样本池；is_complex=false 写入非复杂文件；调用或解析失败则跳过并记录原因，其余样本继续。</p>
               </div>
               <div class="detail-item">
                 <strong>模型输入</strong>
-                <p>模型只看到标准化问句和可选的领域参考。</p>
+                <p>LLM 只看到标准化问句，不接收规则信号或来源字段。</p>
               </div>
             </div>
           </div>

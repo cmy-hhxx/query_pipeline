@@ -25,6 +25,7 @@ class InputConfig(ConfigModel):
 class OutputConfig(ConfigModel):
     dir: Path = Path("outputs")
     accepted: str = "accepted.jsonl"
+    non_complex: str = "non_complex.jsonl"
     rejected: str = "rejected.jsonl"
     skipped: str = "skipped.jsonl"
     summary: str = "summary.json"

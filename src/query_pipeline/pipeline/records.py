@@ -31,6 +31,11 @@ def pipeline_output(record: dict[str, Any]) -> dict[str, Any]:
     return output if isinstance(output, dict) else {}
 
 
+def output_status(record: dict[str, Any]) -> str | None:
+    value = pipeline_output(record).get("status")
+    return value if isinstance(value, str) else None
+
+
 def set_pipeline_output(record: dict[str, Any], **fields: Any) -> dict[str, Any]:
     updated = dict(record)
     output = dict(pipeline_output(record))
