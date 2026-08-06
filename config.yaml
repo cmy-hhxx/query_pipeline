@@ -1,43 +1,36 @@
-name: question_pipeline
+name: session_pipeline
 
 input:
-  path: data/sample_questions.jsonl
-  text_path: question
+  path: data/aime/input.jsonl
 
 output:
   dir: outputs
-  accepted: accepted.jsonl
-  non_complex: non_complex.jsonl
-  rejected: rejected.jsonl
-  skipped: skipped.jsonl
+  complex_queries: complex_queries.jsonl
   summary: summary.json
 
 work_dir: work
 
-rules_stage:
+session_stage:
   enabled: true
-  clean:
+  segmentation:
     enabled: true
-    min_length: 6
-    finance_semantic: true
-  exact_dedup:
+  step1:
     enabled: true
-  minhash:
+    reject_rules: true
+    min_chain_tool_calls: 7
+    min_chain_steps: 1
+    min_unique_tools: 2
+  step2:
     enabled: true
-    threshold: 0.85
-  complexity_gate:
-    enabled: true
-    min_score: 3
-    min_text_length: 18
+    prompt_id: complex_judge
 
 llm_stage:
   enabled: true
-  base_url: https://api.deepseek.com
-  model: deepseek-v4-pro
-  api_key_env: DEEPSEEK_API_KEY
+  base_url_env: OPENAI_BASE_URL
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
   concurrency: 64
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
   cache: work/llm_cache.jsonl
-  prompt_id: core_label

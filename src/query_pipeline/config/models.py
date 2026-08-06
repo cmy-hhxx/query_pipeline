@@ -11,66 +11,29 @@ class ConfigModel(BaseModel):
 
 class InputConfig(ConfigModel):
     path: Path
-    text_path: str = "question"
-
-    @field_validator("text_path")
-    @classmethod
-    def validate_text_path(cls, value: str) -> str:
-        parts = value.split(".")
-        if not value or any(part == "" for part in parts):
-            raise ValueError("text_path must be a non-empty dot path")
-        return value
 
 
 class OutputConfig(ConfigModel):
     dir: Path = Path("outputs")
-    accepted: str = "accepted.jsonl"
-    non_complex: str = "non_complex.jsonl"
-    rejected: str = "rejected.jsonl"
-    skipped: str = "skipped.jsonl"
+    complex_queries: str = "complex_queries.jsonl"
     summary: str = "summary.json"
 
 
-class CleanRulesConfig(ConfigModel):
-    enabled: bool = True
-    min_length: int = 6
-    finance_semantic: bool = True
-
-
-class ExactDedupConfig(ConfigModel):
+class SegmentationConfig(ConfigModel):
     enabled: bool = True
 
 
-class MinHashConfig(ConfigModel):
+class Step1Config(ConfigModel):
     enabled: bool = True
-    threshold: float = 0.85
+    reject_rules: bool = True
+    min_chain_tool_calls: int = 7
+    min_chain_steps: int = 1
+    min_unique_tools: int = 2
 
 
-class ComplexityGateConfig(ConfigModel):
+class Step2Config(ConfigModel):
     enabled: bool = True
-    min_score: int = 3
-    min_text_length: int = 18
-
-
-class RulesStageConfig(ConfigModel):
-    enabled: bool = True
-    clean: CleanRulesConfig = Field(default_factory=CleanRulesConfig)
-    exact_dedup: ExactDedupConfig = Field(default_factory=ExactDedupConfig)
-    minhash: MinHashConfig = Field(default_factory=MinHashConfig)
-    complexity_gate: ComplexityGateConfig = Field(default_factory=ComplexityGateConfig)
-
-
-class LLMStageConfig(ConfigModel):
-    enabled: bool = True
-    base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-v4-pro"
-    api_key_env: str = "DEEPSEEK_API_KEY"
-    concurrency: int = 64
-    max_retries: int = 5
-    timeout_seconds: float = 90.0
-    response_format: str = "json_object"
-    cache: Path = Path("work/llm_cache.jsonl")
-    prompt_id: str = "core_label"
+    prompt_id: str = "complex_judge"
 
     @field_validator("prompt_id")
     @classmethod
@@ -84,10 +47,29 @@ class LLMStageConfig(ConfigModel):
         return prompt_id
 
 
+class SessionStageConfig(ConfigModel):
+    enabled: bool = True
+    segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
+    step1: Step1Config = Field(default_factory=Step1Config)
+    step2: Step2Config = Field(default_factory=Step2Config)
+
+
+class LLMStageConfig(ConfigModel):
+    enabled: bool = True
+    base_url_env: str = "OPENAI_BASE_URL"
+    model: str = "gpt-5.4-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    concurrency: int = 64
+    max_retries: int = 5
+    timeout_seconds: float = 90.0
+    response_format: str = "json_object"
+    cache: Path = Path("work/llm_cache.jsonl")
+
+
 class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path = Path("work")
-    rules_stage: RulesStageConfig = Field(default_factory=RulesStageConfig)
+    session_stage: SessionStageConfig = Field(default_factory=SessionStageConfig)
     llm_stage: LLMStageConfig

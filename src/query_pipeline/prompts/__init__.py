@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from query_pipeline.prompts.core_label import CORE_LABEL
+from query_pipeline.prompts.complex_judge import COMPLEX_JUDGE
+from query_pipeline.prompts.segment import SEGMENT
 
 PROMPTS: dict[str, str] = {
-    "core_label": CORE_LABEL,
+    "segment": SEGMENT,
+    "complex_judge": COMPLEX_JUDGE,
 }
 
 

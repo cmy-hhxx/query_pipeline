@@ -1,6 +1,6 @@
 # query_pipeline
 
-Config-driven query cleaning and labeling pipeline.
+Config-driven pipeline that extracts complex financial queries from multi-turn agent sessions.
 
 ## Run
 
@@ -17,51 +17,61 @@ Use `-c` only for temporary experiments:
 uv run python run.py -c config.yaml --dry-run
 ```
 
+`.env` supplies `OPENAI_BASE_URL` and `OPENAI_API_KEY`; the loader reads it automatically.
+
 ## Flow
 
-The pipeline always runs in two stages:
+Input is JSONL where each line is one session: `{"thread_id": "...", "context": [ {question, answer, run_id, trace_id, tool_names, tool_count, chain, ...}, ... ]}`.
 
-1. `rules_stage`: read `input.text_path`, normalize text, reject invalid rows, apply cleaning rules, deduplicate, then gate low-complexity rows.
-2. `llm_stage`: label only rows that passed the rules stage with one core prompt.
+The pipeline processes sessions one at a time (progress bar counts sessions):
 
-`config.yaml` keeps prompt selection lightweight with `llm_stage.prompt_id`. Prompt text lives in `src/query_pipeline/prompts/`. The default `core_label` prompt emits only the core classification, multi-turn, difficulty, and reason fields.
+1. `segment`: one LLM call splits a session's questions into topic-contiguous segments. A topic may not recur — if it does (A, B, A), the whole span is merged into one segment. On LLM failure the whole session is treated as one segment.
+2. `step1` (rules): within each segment, pick candidate turns that look complex: reject low-value / blank / too-short text first, then keep a turn only if it clears all of `min_chain_tool_calls` AND `min_chain_steps` AND `min_unique_tools` (default 7 tool calls / 1 chain step / 2 distinct tools).
+3. `step2` (LLM `complex_judge`): for each candidate, send the same-segment prior questions plus the current question; the LLM returns `{is_complex, category_id, reason}`.
+4. `step3` (assemble): for each turn judged complex, emit one row in the `filter_out.jsonc` schema (`context[]` holds prior turns trimmed to `{question, answer}` — same-segment prior, falling back to every earlier session turn for a segment-leading turn, so only a session's very first turn has empty context; `trace_id` = the turn's `run_id`; `category` = `id-slug`, e.g. `01-data-metrics-calculation`).
 
 ## Output Contract
 
-Input JSONL records keep their original top-level structure. The pipeline only adds one top-level field:
+One output row per complex query:
 
 ```json
 {
-  "question": "请结合基本面、技术面和资金面分析某只股票未来一个月的风险和机会",
-  "query_pipeline_output": {
-    "status": "accepted",
-    "source_text_path": "question",
-    "normalized_text": "请结合基本面、技术面和资金面分析某只股票未来一个月的风险和机会",
-    "rule_signals": {
-      "complexity_score": 4,
-      "complexity_reasons": ["len_ge_30", "analysis_or_judgement", "finance_dimensions", "multi_constraint_or_horizon"]
-    },
-    "llm_label": {
-      "is_complex": true,
-      "category_id": "03",
-      "category_name": "分析研究类",
-      "is_multi_turn": false,
-      "difficulty_score": 2.8,
-      "difficulty_reason": "需要结合多个分析维度",
-      "category_reason": "该问句要求综合分析金融标的"
-    }
-  }
+  "capture_mode": "full_link",
+  "user_cohort": "regular",
+  "source_case_id": "<thread_id>",
+  "answer_key": "",
+  "trace_id": "<turn run_id>",
+  "category": "01-data-metrics-calculation",
+  "input": {"text": "<question>", "image": "", "file": ""},
+  "session_round": 3,
+  "context": [{"question": "...", "answer": "..."}],
+  "chain": [],
+  "tools": ["web_search", "finquery"],
+  "raw_answer": "...",
+  "text_answer": "...",
+  "multimodal": [],
+  "model_version": "",
+  "release_id": "",
+  "agent_mode": "",
+  "translation": "",
+  "user_id": "1885129394",
+  "difficulty_level": "hard",
+  "first_token_time_ms": 31407,
+  "finish_answer_time_ms": 52383,
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "request_time_ms": null,
+  "meta": {"reason": "需要多步工具调用与综合判断"}
 }
 ```
 
-Default public outputs are:
+Public outputs:
 
-- `outputs/accepted.jsonl` — complex sample pool (`is_complex=true`)
-- `outputs/non_complex.jsonl` — labeled but not complex (`is_complex=false`)
-- `outputs/rejected.jsonl` — invalid / noise / duplicates
-- `outputs/skipped.jsonl` — low complexity gate, or LLM call/parse failure (`skip_reason=llm_failed`)
-- `outputs/summary.json`
+- `outputs/complex_queries.jsonl` — one row per complex query
+- `outputs/summary.json` — per-run counters (sessions, segments, candidates, complex/non-complex/llm-failed rows, category counts)
 
-When `llm_stage.enabled=false`, rules-passed candidates stay in `accepted.jsonl` without `llm_label`, and `non_complex.jsonl` is empty.
+When `llm_stage.enabled=false`, rules-based candidate selection still runs but no rows are classified, so `complex_queries.jsonl` stays empty.
 
-Intermediate files are written under `work/` for debugging.
+Intermediate debug files are written under `work/` (`segments.jsonl`, `candidates.jsonl`, `judged.jsonl`) and LLM responses are cached in `work/llm_cache.jsonl`.
+
+`difficulty_level` is fixed to `"hard"` (rows are already judged complex). Each output row's `meta.reason` carries the judge's rationale; the full per-candidate decision (including non-complex and LLM-failure cases) with `is_complex`/`category_id`/`reason`/`error` is in `work/judged.jsonl` for debugging.

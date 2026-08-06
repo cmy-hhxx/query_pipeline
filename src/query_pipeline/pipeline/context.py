@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from query_pipeline.config.models import PipelineConfig
-from query_pipeline.pipeline.records import pipeline_output
 
 
 @dataclass
 class PipelineContext:
     config: PipelineConfig
-    records: list[dict[str, Any]] = field(default_factory=list)
-    non_complex: list[dict[str, Any]] = field(default_factory=list)
-    rejected: list[dict[str, Any]] = field(default_factory=list)
-    skipped: list[dict[str, Any]] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -25,10 +20,6 @@ class PipelineContext:
     @property
     def output_dir(self) -> Path:
         return self.config.output.dir
-
-    @property
-    def text_path(self) -> str:
-        return self.config.input.text_path
 
     def path(self, name: str) -> Path:
         return self.work_dir / name
@@ -57,30 +48,4 @@ class RunSummary:
 
 
 def merge_stats(ctx: PipelineContext) -> dict[str, Any]:
-    rejected_outputs = [pipeline_output(record) for record in ctx.rejected]
-    accepted_outputs = [pipeline_output(record) for record in ctx.records]
-    skipped_outputs = [pipeline_output(record) for record in ctx.skipped]
-
-    reject_reasons = Counter(output.get("reject_reason", "unknown") for output in rejected_outputs)
-    skip_reasons = Counter(output.get("skip_reason", "unknown") for output in skipped_outputs)
-    category_counts = Counter(
-        (output.get("llm_label") or {}).get("category_id")
-        for output in accepted_outputs
-        if (output.get("llm_label") or {}).get("category_id")
-    )
-    difficulty_scores: list[float] = []
-    for output in accepted_outputs:
-        score = (output.get("llm_label") or {}).get("difficulty_score")
-        if isinstance(score, (int, float)):
-            difficulty_scores.append(float(score))
-    return {
-        **ctx.stats,
-        "accepted_rows": len(ctx.records),
-        "non_complex_rows": len(ctx.non_complex),
-        "rejected_rows": len(ctx.rejected),
-        "skipped_rows": len(ctx.skipped),
-        "reject_reasons": dict(reject_reasons),
-        "skip_reasons": dict(skip_reasons),
-        "category_counts": dict(category_counts),
-        "difficulty_avg": round(sum(difficulty_scores) / len(difficulty_scores), 2) if difficulty_scores else None,
-    }
+    return {**ctx.stats, "complex_rows": len(ctx.rows)}

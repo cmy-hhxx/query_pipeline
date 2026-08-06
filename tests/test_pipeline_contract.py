@@ -13,303 +13,342 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.models.records import CATEGORIES, parse_core_label_response
+from query_pipeline.config.models import Step1Config
+from query_pipeline.models.records import ENGLISH_CATEGORIES
+from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
+from query_pipeline.session.assemble import assemble_row
+from query_pipeline.session.candidates import select_candidates
+from query_pipeline.session.judge import build_judge_payload
 
 
-class PipelineContractTest(unittest.TestCase):
+def _make_turn(
+    idx: int,
+    question: str,
+    *,
+    answer: str | None = None,
+    tool_names: str = "",
+    tool_count: int = 0,
+    chain: list[dict[str, Any]] | None = None,
+    status: str | None = "completed",
+    outcome: str | None = "success",
+) -> dict[str, Any]:
+    return {
+        "question": question,
+        "answer": answer if answer is not None else f"answer{idx}",
+        "run_id": f"r{idx}",
+        "trace_id": f"trace{idx}",
+        "user_id": f"u{idx}",
+        "status": status,
+        "outcome": outcome,
+        "tool_names": tool_names,
+        "tool_count": tool_count,
+        "first_token_ms": idx * 100,
+        "total_duration_ms": idx * 100 + 200,
+        "chain": chain if chain is not None else [],
+    }
+
+
+def _chain_with_tool_calls(n: int, name: str = "t") -> list[dict[str, Any]]:
+    return [{"plan": "", "tools": [{"name": name, "input": {}, "output": "x"} for _ in range(n)]}]
+
+
+def _chain_with_steps(n: int, names: tuple[str, ...] = ("t",)) -> list[dict[str, Any]]:
+    return [
+        {"plan": "", "tools": [{"name": names[i % len(names)], "input": {}, "output": "x"}]} for i in range(n)
+    ]
+
+
+def _chain(*steps: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Chain with explicit tool-name list per step."""
+    return [{"plan": "", "tools": [{"name": name, "input": {}, "output": "x"} for name in names]} for names in steps]
+
+
+def _sample_turns() -> list[dict[str, Any]]:
+    names = ("web_search", "finquery", "compute")
+    return [
+        _make_turn(0, "Q1 简单查询", tool_names="web_search", tool_count=1, chain=_chain_with_tool_calls(1)),
+        _make_turn(1, "Q2 复杂取数", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+        _make_turn(2, "Q3 复杂预测", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+        _make_turn(3, "好的", tool_names="", tool_count=0),
+    ]
+
+
+class SessionPipelineContractTest(unittest.TestCase):
     def test_default_config_loads(self) -> None:
         cfg = load_pipeline_config(ROOT / "config.yaml")
 
-        self.assertEqual(cfg.name, "question_pipeline")
-        self.assertEqual(cfg.input.text_path, "question")
-        self.assertEqual(cfg.llm_stage.prompt_id, "core_label")
-        self.assertEqual(cfg.output.non_complex, "non_complex.jsonl")
-        prompt = resolve_prompt(cfg.llm_stage.prompt_id)
-        self.assertIn("复杂金融问句", prompt)
-        self.assertIn("核心结构化标注", prompt)
-        self.assertIn("category_reason", prompt)
-        self.assertNotIn("五维独立", prompt)
-        self.assertNotIn("intent_labels", prompt)
-        self.assertNotIn("demand_labels", prompt)
-        self.assertNotIn("domain_label", prompt)
-        self.assertNotIn("query_quality", prompt)
-        self.assertNotIn("query_difficulty", prompt)
-        self.assertNotIn("nlu_reference", prompt)
-        self.assertNotIn("rule_signals", prompt)
-        self.assertNotIn("旧提示词", prompt)
-        self.assertNotIn("旧五维", prompt)
-        self.assertNotIn("source_text_path", prompt)
-        self.assertNotIn("source_line_number", prompt)
+        self.assertEqual(cfg.name, "session_pipeline")
+        self.assertEqual(cfg.input.path, (ROOT / "data/aime/input.jsonl").resolve())
+        self.assertEqual(cfg.output.complex_queries, "complex_queries.jsonl")
+        self.assertEqual(cfg.llm_stage.base_url_env, "OPENAI_BASE_URL")
+        self.assertEqual(cfg.llm_stage.api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(cfg.session_stage.step1.min_chain_tool_calls, 7)
+        self.assertEqual(cfg.session_stage.step1.min_chain_steps, 1)
+        self.assertEqual(cfg.session_stage.step1.min_unique_tools, 2)
+        self.assertEqual(cfg.session_stage.step2.prompt_id, "complex_judge")
 
-    def test_rules_stage_preserves_input_shape_and_writes_nested_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            input_path = tmp_path / "input.jsonl"
-            source_text = "请结合基本面、技术面、资金面分析贵州茅台未来一个月的风险和机会"
-            rows = [
-                {"id": "keep", "payload": {"query": source_text}, "question": "original top-level question"},
-                {"id": "dup", "payload": {"query": source_text}},
-                {"id": "missing", "payload": {}},
-                {"id": "empty", "payload": {"query": "   "}},
-                {"id": "invalid", "payload": {"query": {"text": "bad"}}},
-                {"id": "skip", "payload": {"query": "贵州茅台走势"}},
-            ]
-            _write_jsonl(input_path, rows)
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=False))
+    def test_prompt_contracts(self) -> None:
+        segment_prompt = resolve_prompt("segment")
+        self.assertIn("segments", segment_prompt)
+        self.assertIn("start", segment_prompt)
+        self.assertIn("end", segment_prompt)
+        self.assertIn("topic", segment_prompt)
+        self.assertIn("同一个主题不能再次出现", segment_prompt)
+        self.assertIn("宏观", segment_prompt)
 
-            summary = run_pipeline(cfg)
+        judge_prompt = resolve_prompt("complex_judge")
+        for category_id, name in {
+            "01": "数据与指标计算",
+            "05": "资产配置",
+            "09": "动作输出",
+        }.items():
+            self.assertIn(f"{category_id} {name}", judge_prompt)
+        self.assertIn("is_complex", judge_prompt)
+        self.assertIn("category_id", judge_prompt)
+        self.assertIn("reason", judge_prompt)
 
-            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
-            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
-            rejected = _read_jsonl(Path(summary.output_files["rejected"]))
-            skipped = _read_jsonl(Path(summary.output_files["skipped"]))
-
-            self.assertEqual(len(accepted), 1)
-            self.assertEqual(len(non_complex), 0)
-            self.assertEqual(len(skipped), 1)
-            self.assertEqual(len(rejected), 4)
-            self.assertEqual(summary.stats["non_complex_rows"], 0)
-
-            accepted_row = accepted[0]
-            self.assertEqual(accepted_row["question"], "original top-level question")
-            self.assertEqual(accepted_row["payload"]["query"], source_text)
-            self.assertIn("query_pipeline_output", accepted_row)
-            self.assertNotIn("normalized_text", accepted_row)
-            self.assertNotIn("complexity_score", accepted_row)
-            self.assertNotIn("reject_reason", accepted_row)
-
-            output = accepted_row["query_pipeline_output"]
-            self.assertEqual(output["status"], "accepted")
-            self.assertEqual(output["source_text_path"], "payload.query")
-            self.assertEqual(output["normalized_text"], source_text)
-            self.assertFalse(any(key.endswith("ver" + "sion") for key in output))
-            self.assertGreaterEqual(output["rule_signals"]["complexity_score"], 2)
-            self.assertFalse(any(key.endswith("ver" + "sion") for key in output["rule_signals"]))
-
-            reject_reasons = {row["query_pipeline_output"]["reject_reason"] for row in rejected}
-            self.assertEqual(
-                reject_reasons,
-                {"duplicate_exact", "missing_text_path", "blank", "invalid_text_value"},
-            )
-            self.assertEqual(skipped[0]["query_pipeline_output"]["status"], "skipped")
-            self.assertEqual(skipped[0]["query_pipeline_output"]["skip_reason"], "low_complexity_score_or_short")
-
-    def test_core_llm_label_stage_uses_nested_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            input_path = tmp_path / "input.jsonl"
-            _write_jsonl(
-                input_path,
-                [{"id": "q1", "payload": {"query": "请分析贵州茅台基本面和技术面风险机会"}}],
-            )
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
-
-            with patch("query_pipeline.steps.llm_label.LLMClient", FakeLLMClient):
-                summary = run_pipeline(cfg)
-
-            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
-            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
-            self.assertEqual(len(accepted), 1)
-            self.assertEqual(len(non_complex), 0)
-            self.assertEqual(summary.stats["non_complex_rows"], 0)
-            self.assertEqual(summary.stats["llm_complex_rows"], 1)
-            output = accepted[0]["query_pipeline_output"]
-            self.assertEqual(output["status"], "accepted")
-            label = output["llm_label"]
-            self.assertEqual(label["category_id"], "03")
-            self.assertEqual(label["category_name"], "分析研究类")
-            self.assertEqual(label["difficulty_score"], 2.8)
-            self.assertEqual(label["difficulty_reason"], "需要结合基本面和技术面判断")
-            self.assertEqual(label["category_reason"], "该问句要求综合分析金融标的")
-            self.assertEqual(
-                set(label),
-                {
-                    "is_complex",
-                    "category_id",
-                    "category_name",
-                    "is_multi_turn",
-                    "difficulty_score",
-                    "difficulty_reason",
-                    "category_reason",
-                },
-            )
-            self.assertNotIn("category_id", accepted[0])
-            self.assertEqual(summary.stats["llm_extra_field_rows"], 1)
-            self.assertEqual(
-                summary.stats["llm_extra_fields"],
-                {"category_name": 1, "query_difficulty": 1, "query_quality": 1, "reason": 1},
-            )
-
-            cache_path = tmp_path / "work" / "llm_cache.jsonl"
-            self.assertTrue(cache_path.exists())
-            cache_label = _read_jsonl(cache_path)[0]["label"]
-            self.assertNotIn("category_name", cache_label)
-            self.assertNotIn("query_quality", cache_label)
-            self.assertEqual(cache_label["category_reason"], "该问句要求综合分析金融标的")
-
-    def test_llm_non_complex_goes_to_separate_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            _write_jsonl(
-                tmp_path / "input.jsonl",
-                [{"id": "q1", "payload": {"query": "请分析贵州茅台基本面和技术面风险机会"}}],
-            )
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
-
-            with patch("query_pipeline.steps.llm_label.LLMClient", FakeNonComplexLLMClient):
-                summary = run_pipeline(cfg)
-
-            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
-            non_complex = _read_jsonl(Path(summary.output_files["non_complex"]))
-            self.assertEqual(len(accepted), 0)
-            self.assertEqual(len(non_complex), 1)
-            self.assertEqual(summary.stats["non_complex_rows"], 1)
-            self.assertEqual(summary.stats["llm_non_complex_rows"], 1)
-            output = non_complex[0]["query_pipeline_output"]
-            self.assertEqual(output["status"], "non_complex")
-            self.assertFalse(output["llm_label"]["is_complex"])
-            self.assertIsNone(output["llm_label"]["category_id"])
-
-    def test_llm_failure_goes_to_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            _write_jsonl(
-                tmp_path / "input.jsonl",
-                [
-                    {"id": "ok", "payload": {"query": "请分析贵州茅台基本面和技术面风险机会"}},
-                    {"id": "bad", "payload": {"query": "请结合基本面、技术面、资金面分析贵州茅台未来一个月的风险和机会"}},
-                ],
-            )
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
-
-            with patch("query_pipeline.steps.llm_label.LLMClient", FakeFailingLLMClient):
-                summary = run_pipeline(cfg)
-
-            self.assertTrue(summary.success)
-            accepted = _read_jsonl(Path(summary.output_files["accepted"]))
-            skipped = _read_jsonl(Path(summary.output_files["skipped"]))
-            self.assertEqual(len(accepted), 1)
-            self.assertEqual(summary.stats["llm_failed_rows"], 1)
-            failed = [row for row in skipped if row["query_pipeline_output"].get("skip_reason") == "llm_failed"]
-            self.assertEqual(len(failed), 1)
-            self.assertEqual(failed[0]["id"], "bad")
-            self.assertIn("llm_error", failed[0]["query_pipeline_output"])
-
-    def test_core_label_parser_accepts_all_category_ids(self) -> None:
-        for category_id, category_name in CATEGORIES.items():
-            raw = json.dumps(
-                {
-                    "is_complex": True,
-                    "category_id": category_id,
-                    "category_name": category_name,
-                    "is_multi_turn": False,
-                    "difficulty_score": 3.0,
-                    "difficulty_reason": "需要专业判断",
-                    "category_reason": "符合该类别定义",
-                },
-                ensure_ascii=False,
-            )
-
-            parsed = parse_core_label_response(raw)
-
-            self.assertEqual(parsed.category_id, category_id)
-            self.assertEqual(parsed.category_name, category_name)
-            self.assertEqual(parsed.extra_fields, ("category_name",))
-
-    def test_core_label_parser_nulls_difficulty_for_non_complex_rows(self) -> None:
+    def test_segment_parser_merges_recurring_topics(self) -> None:
         raw = json.dumps(
             {
-                "is_complex": False,
-                "category_id": "03",
-                "is_multi_turn": False,
-                "difficulty_score": 3.0,
-                "difficulty_reason": "需要专业判断",
-                "category_reason": "只是简单查行情，不属于复杂金融问句",
+                "segments": [
+                    {"start": 0, "end": 1, "topic": "A"},
+                    {"start": 2, "end": 3, "topic": "B"},
+                    {"start": 4, "end": 4, "topic": "A"},
+                ]
             },
             ensure_ascii=False,
         )
 
-        parsed = parse_core_label_response(raw)
-        output = parsed.to_output()
+        segments = parse_segment_response(raw, num_turns=5)
 
-        self.assertIsNone(output["category_id"])
-        self.assertIsNone(output["category_name"])
-        self.assertIsNone(output["difficulty_score"])
-        self.assertIsNone(output["difficulty_reason"])
-        self.assertEqual(output["category_reason"], "只是简单查行情，不属于复杂金融问句")
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].start, 0)
+        self.assertEqual(segments[0].end, 4)
+        self.assertEqual(segments[0].topic, "A")
+
+    def test_segment_parser_keeps_distinct_topics(self) -> None:
+        raw = json.dumps(
+            {"segments": [{"start": 0, "end": 2, "topic": "A"}, {"start": 3, "end": 4, "topic": "B"}]},
+            ensure_ascii=False,
+        )
+
+        segments = parse_segment_response(raw, num_turns=5)
+
+        self.assertEqual([(s.start, s.end, s.topic) for s in segments], [(0, 2, "A"), (3, 4, "B")])
+
+    def test_segment_parser_rejects_malformed(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_segment_response(json.dumps({"segments": []}), num_turns=5)
+        with self.assertRaises(ValueError):
+            parse_segment_response(json.dumps({"segments": [{"start": 2, "end": 3, "topic": "A"}]}), num_turns=5)
+        with self.assertRaises(ValueError):
+            parse_segment_response(
+                json.dumps({"segments": [{"start": 0, "end": 1, "topic": "A"}, {"start": 1, "end": 2, "topic": "B"}]}),
+                num_turns=5,
+            )
+
+    def test_step2_parser(self) -> None:
+        complex_result = parse_step2_response(
+            json.dumps({"is_complex": True, "category_id": "03", "reason": "需要多步分析"}, ensure_ascii=False)
+        )
+        self.assertTrue(complex_result.is_complex)
+        self.assertEqual(complex_result.category_id, "03")
+
+        non_complex = parse_step2_response(
+            json.dumps({"is_complex": False, "category_id": "03", "reason": "简单查询"}, ensure_ascii=False)
+        )
+        self.assertFalse(non_complex.is_complex)
+        self.assertIsNone(non_complex.category_id)
+
+        with self.assertRaises(ValueError):
+            parse_step2_response(json.dumps({"is_complex": True, "category_id": "99", "reason": "x"}))
+
+    def test_step1_select_candidates(self) -> None:
+        cfg = Step1Config()
+        candidates = select_candidates(_sample_turns(), cfg)
+
+        # turn1 and turn2 clear all three AND thresholds (8 tool calls / 8 chain
+        # steps / 3 unique tools); turn0 and turn3 do not.
+        self.assertEqual(candidates, [1, 2])
+
+    def test_step1_funnel_requires_all_signals(self) -> None:
+        cfg = Step1Config()  # AND: tool_calls>=7 AND steps>=1 AND unique>=2
+        turns = [
+            _make_turn(0, "八次调用四种工具", chain=_chain(("a", "b"), ("a", "b"), ("c", "d"), ("e", "f"))),
+            _make_turn(1, "四次调用两种工具", chain=_chain(("a", "b"), ("a", "b"))),
+            _make_turn(2, "八次调用一种工具", chain=_chain(("a", "a", "a", "a"), ("a", "a", "a", "a"))),
+            _make_turn(3, "没有推理链", chain=[]),
+        ]
+        # turn1: tool_calls fail; turn2: unique fail; turn3: no chain.
+        self.assertEqual(select_candidates(turns, cfg), [0])
+
+    def test_assemble_row_context_fallback(self) -> None:
+        turns = _sample_turns()
+        # Segment-leading turn (idx == segment.start), not session-first:
+        # context falls back to every earlier session turn.
+        segment = Segment(start=2, end=3, topic="topic")
+        row = assemble_row({"thread_id": "t1"}, turns, segment, idx=2, category_id="03")
+        self.assertEqual(
+            row["context"],
+            [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}],
+        )
+        # Session-first turn: context stays empty (nothing precedes it).
+        first = assemble_row({"thread_id": "t1"}, turns, Segment(start=0, end=3, topic="topic"), idx=0, category_id="03")
+        self.assertEqual(first["context"], [])
+
+    def test_judge_payload_context_fallback(self) -> None:
+        turns = _sample_turns()
+        payload = build_judge_payload(turns, Segment(start=2, end=3, topic="t"), 2)
+        self.assertEqual(payload["prior_questions"], ["Q1 简单查询", "Q2 复杂取数"])
+        first = build_judge_payload(turns, Segment(start=0, end=3, topic="t"), 0)
+        self.assertEqual(first["prior_questions"], [])
+        # non-boundary turn keeps same-segment prior only
+        same = build_judge_payload(turns, Segment(start=0, end=3, topic="t"), 1)
+        self.assertEqual(same["prior_questions"], ["Q1 简单查询"])
+
+    def test_step1_skips_ineligible_turns(self) -> None:
+        names = ("web_search", "finquery", "compute")
+        turns = [
+            _make_turn(0, "没有回答的复杂问题", tool_names="web_search,finquery,compute", tool_count=8, answer="", chain=_chain_with_steps(8, names)),
+            _make_turn(1, "失败状态", tool_names="web_search,finquery,compute", tool_count=8, status="failed", chain=_chain_with_steps(8, names)),
+            _make_turn(2, "正常复杂问题", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+        ]
+        self.assertEqual(select_candidates(turns, Step1Config()), [2])
+
+    def test_assemble_row_field_mapping(self) -> None:
+        turns = _sample_turns()
+        segment = Segment(start=0, end=3, topic="topic")
+        row = assemble_row({"thread_id": "t1"}, turns, segment, idx=2, category_id="03", reason="需要多步分析")
+
+        self.assertEqual(row["capture_mode"], "full_link")
+        self.assertEqual(row["user_cohort"], "regular")
+        self.assertEqual(row["source_case_id"], "t1")
+        self.assertEqual(row["trace_id"], "r2")  # selected turn's run_id
+        self.assertEqual(row["category"], "03-analysis-research")
+        self.assertEqual(row["input"]["text"], "Q3 复杂预测")
+        self.assertEqual(row["session_round"], 3)  # 1-based within segment
+        self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}])
+        self.assertEqual(row["tools"], ["web_search", "finquery", "compute"])
+        self.assertEqual(row["raw_answer"], "answer2")
+        self.assertEqual(row["text_answer"], "answer2")
+        self.assertEqual(row["user_id"], "u2")
+        self.assertEqual(row["difficulty_level"], "hard")
+        self.assertEqual(row["meta"], {"reason": "需要多步分析"})
+        self.assertEqual(row["first_token_time_ms"], 200)
+        self.assertEqual(row["finish_answer_time_ms"], 400)
+        self.assertFalse(any(k in row["context"][0] for k in ("chain", "tools", "run_id")))
+
+    def test_end_to_end_produces_complex_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["total_sessions"], 1)
+            self.assertEqual(summary.stats["segments"], 2)
+            self.assertEqual(summary.stats["candidates"], 2)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["non_complex"], 1)
+            self.assertEqual(summary.stats["llm_failed"], 0)
+            self.assertEqual(summary.stats["category_counts"], {"01": 1})
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["source_case_id"], "t1")
+            self.assertEqual(row["trace_id"], "r1")
+            self.assertEqual(row["category"], "01-data-metrics-calculation")
+            self.assertEqual(row["input"]["text"], "Q2 复杂取数")
+            self.assertEqual(row["session_round"], 2)
+            self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
+            self.assertEqual(row["difficulty_level"], "hard")
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数"})
+
+    def test_end_to_end_llm_failure_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeFailingSessionLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            # segmentation failure -> whole session is one segment; judge failure on turn1 dropped.
+            self.assertEqual(summary.stats["segments"], 1)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["llm_failed"], 1)
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["trace_id"], "r2")
+            self.assertEqual(rows[0]["category"], "02-forecasting-and-projection")
+            self.assertEqual(rows[0]["session_round"], 3)
+            self.assertEqual(len(rows[0]["context"]), 2)
+
+    def test_llm_disabled_no_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=False))
+
+            summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["candidates"], 2)
+            self.assertEqual(summary.stats["complex_rows"], 0)
+            self.assertEqual(len(_read_jsonl(Path(summary.output_files["complex_queries"]))), 0)
 
 
-class FakeLLMClient:
+class FakeSessionLLMClient:
     def __init__(self, config: object) -> None:
         self.config = config
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         assert system_prompt
-        assert "normalized_text" in user_prompt
-        assert "rule_signals" not in user_prompt
-        assert "source_text_path" not in user_prompt
-        assert "source_line_number" not in user_prompt
-        return json.dumps(
-            {
-                "is_complex": True,
-                "category_id": "03",
-                "category_name": "分析研究类",
-                "is_multi_turn": False,
-                "difficulty_score": 2.8,
-                "difficulty_reason": "需要结合基本面和技术面判断",
-                "category_reason": "该问句要求综合分析金融标的",
-                "reason": "旧字段应被丢弃",
-                "query_quality": "高",
-                "query_difficulty": "中",
-            },
-            ensure_ascii=False,
-        )
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "questions" in payload:
+            n = len(payload["questions"])
+            if n <= 2:
+                return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "topic"}]}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "segments": [
+                        {"start": 0, "end": 1, "topic": "topic_a"},
+                        {"start": 2, "end": n - 1, "topic": "topic_b"},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        current = payload["current_question"]
+        if current == "Q2 复杂取数":
+            return json.dumps({"is_complex": True, "category_id": "01", "reason": "多步工具调用取数"}, ensure_ascii=False)
+        return json.dumps({"is_complex": False, "category_id": None, "reason": "简单查询"}, ensure_ascii=False)
 
     async def close(self) -> None:
         return None
 
 
-class FakeNonComplexLLMClient:
+class FakeFailingSessionLLMClient:
     def __init__(self, config: object) -> None:
         self.config = config
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
-        return json.dumps(
-            {
-                "is_complex": False,
-                "category_id": None,
-                "is_multi_turn": False,
-                "difficulty_score": None,
-                "difficulty_reason": None,
-                "category_reason": "只是简单查行情，不属于复杂金融问句",
-            },
-            ensure_ascii=False,
-        )
-
-    async def close(self) -> None:
-        return None
-
-
-class FakeFailingLLMClient:
-    def __init__(self, config: object) -> None:
-        self.config = config
-
-    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
-        if "未来一个月" in user_prompt:
-            raise RuntimeError("simulated llm failure")
-        return json.dumps(
-            {
-                "is_complex": True,
-                "category_id": "03",
-                "is_multi_turn": False,
-                "difficulty_score": 2.8,
-                "difficulty_reason": "需要结合基本面和技术面判断",
-                "category_reason": "该问句要求综合分析金融标的",
-            },
-            ensure_ascii=False,
-        )
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "questions" in payload:
+            raise RuntimeError("simulated segmentation failure")
+        if payload["current_question"] == "Q2 复杂取数":
+            raise RuntimeError("simulated judge failure")
+        return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
 
     async def close(self) -> None:
         return None
@@ -323,32 +362,27 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
             name: test_pipeline
             input:
               path: input.jsonl
-              text_path: payload.query
             output:
               dir: out
-              accepted: accepted.jsonl
-              non_complex: non_complex.jsonl
-              rejected: rejected.jsonl
-              skipped: skipped.jsonl
+              complex_queries: complex_queries.jsonl
               summary: summary.json
             work_dir: work
-            rules_stage:
+            session_stage:
               enabled: true
-              clean:
+              segmentation:
                 enabled: true
-                min_length: 1
-                finance_semantic: false
-              exact_dedup:
+              step1:
                 enabled: true
-              minhash:
-                enabled: false
-              complexity_gate:
+                reject_rules: true
+                min_chain_tool_calls: 7
+                min_chain_steps: 1
+                min_unique_tools: 2
+              step2:
                 enabled: true
-                min_score: 2
-                min_text_length: 1
+                prompt_id: complex_judge
             llm_stage:
               enabled: {str(llm_enabled).lower()}
-              base_url: https://example.invalid
+              base_url_env: OPENAI_BASE_URL
               model: fake-model
               api_key_env: FAKE_API_KEY
               concurrency: 2
@@ -356,7 +390,6 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool) -> Path:
               timeout_seconds: 1
               response_format: json_object
               cache: work/llm_cache.jsonl
-              prompt_id: core_label
             """
         ).strip()
         + "\n",

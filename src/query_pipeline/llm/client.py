@@ -14,8 +14,11 @@ class LLMClient:
         api_key = os.environ.get(config.api_key_env)
         if not api_key:
             raise RuntimeError(f"{config.api_key_env} is not set")
+        base_url = os.environ.get(config.base_url_env)
+        if not base_url:
+            raise RuntimeError(f"{config.base_url_env} is not set")
         self.config = config
-        self.client = AsyncOpenAI(api_key=api_key, base_url=config.base_url)
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         last_error: Exception | None = None
