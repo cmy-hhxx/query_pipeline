@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.config.models import Step1Config
+from query_pipeline.llm.cache import make_cache_key
 from query_pipeline.models.records import ENGLISH_CATEGORIES
 from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
 from query_pipeline.pipeline.runner import run_pipeline
@@ -108,6 +109,20 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertIn("is_complex", judge_prompt)
         self.assertIn("category_id", judge_prompt)
         self.assertIn("reason", judge_prompt)
+        # category definitions + priority rules embedded (guards 08/09 boundary collapse)
+        self.assertIn("长期帮我盯着并迭代", judge_prompt)
+        self.assertIn("→ 优先 09", judge_prompt)
+
+    def test_cache_key_versioned_by_prompt(self) -> None:
+        q = "question"
+        base = make_cache_key(q, step="s", model="m")
+        self.assertEqual(base, make_cache_key(q, step="s", model="m"))
+        # a prompt change must invalidate the cached label, or prompt edits never take effect
+        self.assertNotEqual(base, make_cache_key(q, step="s", model="m", prompt="v1"))
+        self.assertNotEqual(
+            make_cache_key(q, step="s", model="m", prompt="v1"),
+            make_cache_key(q, step="s", model="m", prompt="v2"),
+        )
 
     def test_segment_parser_merges_recurring_topics(self) -> None:
         raw = json.dumps(
@@ -137,6 +152,27 @@ class SessionPipelineContractTest(unittest.TestCase):
         segments = parse_segment_response(raw, num_turns=5)
 
         self.assertEqual([(s.start, s.end, s.topic) for s in segments], [(0, 2, "A"), (3, 4, "B")])
+
+    def test_segment_parser_repairs_small_boundary_slips(self) -> None:
+        # LLM dropped index 35 (gap) and ended at 54 instead of 55: both are
+        # off-by-one slips that must be snapped into a valid covering, not
+        # thrown away (this was silently degrading 56-turn sessions to 1).
+        raw = json.dumps(
+            {
+                "segments": [
+                    {"start": 0, "end": 3, "topic": "A"},
+                    {"start": 4, "end": 18, "topic": "B"},
+                    {"start": 19, "end": 34, "topic": "C"},
+                    {"start": 36, "end": 46, "topic": "D"},
+                    {"start": 47, "end": 54, "topic": "E"},
+                ]
+            }
+        )
+        segments = parse_segment_response(raw, num_turns=56)
+        self.assertEqual(
+            [(s.start, s.end, s.topic) for s in segments],
+            [(0, 3, "A"), (4, 18, "B"), (19, 34, "C"), (35, 46, "D"), (47, 55, "E")],
+        )
 
     def test_segment_parser_rejects_malformed(self) -> None:
         with self.assertRaises(ValueError):

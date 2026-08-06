@@ -101,6 +101,10 @@ def parse_segment_response(raw: str, *, num_turns: int) -> list[Segment]:
     A topic that recurs non-adjacently (A, B, A) is merged into a single
     segment spanning from its first occurrence to its last (the rule chosen in
     the design interview): the whole span becomes one topic A.
+
+    Small LLM boundary slips (off-by-one gaps/overlaps and coverage misses)
+    are repaired into a valid covering instead of rejected; grossly malformed
+    output still raises so the caller can fall back to whole-session.
     """
     data = _parse_json_object(raw)
     raw_segments = data.get("segments")
@@ -120,17 +124,34 @@ def parse_segment_response(raw: str, *, num_turns: int) -> list[Segment]:
             raise ValueError(f"segment {i} must have int start/end and str topic")
         if not (0 <= start <= end < num_turns):
             raise ValueError(f"segment {i} out of range: start={start} end={end} n={num_turns}")
-        if i > 0 and start != segments[-1].end + 1:
-            raise ValueError(f"segments not contiguous at index {i}")
         topic = topic.strip()
         if not topic:
             raise ValueError(f"segment {i} has empty topic")
         segments.append(Segment(start=start, end=end, topic=topic))
 
-    if segments[0].start != 0 or segments[-1].end != num_turns - 1:
-        raise ValueError("segments must cover all turns from 0 to n-1")
-
+    segments = _repair_contiguous(segments, num_turns)
     return _merge_recurring_topics(segments)
+
+
+def _repair_contiguous(segments: list[Segment], num_turns: int) -> list[Segment]:
+    """Snap small LLM boundary slips into a valid contiguous [0, n-1] covering.
+
+    Total index deviation (left gap + right gap + per-boundary gaps) must be
+    <= 2; anything grosser raises so the caller can fall back to whole-session.
+    """
+    ordered = sorted(segments, key=lambda s: (s.start, s.end))
+    deviation = ordered[0].start + (num_turns - 1 - ordered[-1].end)
+    for a, b in zip(ordered, ordered[1:]):
+        deviation += abs(b.start - (a.end + 1))
+    if deviation > 2:
+        raise ValueError("segments too far from a valid contiguous covering")
+
+    repaired: list[Segment] = []
+    for i, seg in enumerate(ordered):
+        start = 0 if i == 0 else repaired[-1].end + 1
+        end = num_turns - 1 if i == len(ordered) - 1 else seg.end
+        repaired.append(Segment(start=start, end=max(end, start), topic=seg.topic))
+    return repaired
 
 
 def _merge_recurring_topics(segments: list[Segment]) -> list[Segment]:

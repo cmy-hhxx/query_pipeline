@@ -49,7 +49,9 @@ async def judge_candidates(
         user_prompt = "请标注以下会话问句，只输出严格 JSON：\n" + json.dumps(
             payload, ensure_ascii=False, separators=(",", ":")
         )
-        cache_key = make_cache_key(user_prompt, step=f"complex_judge:{step2_cfg.prompt_id}", model=llm_cfg.model)
+        cache_key = make_cache_key(
+            user_prompt, step=f"complex_judge:{step2_cfg.prompt_id}", model=llm_cfg.model, prompt=system_prompt
+        )
         try:
             if cache_key in cache:
                 parsed = parse_step2_payload(cache[cache_key])
