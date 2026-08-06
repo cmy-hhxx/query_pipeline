@@ -8,6 +8,7 @@ from typing import Any
 from rich.progress import Progress
 
 from query_pipeline.config.models import PipelineConfig
+from query_pipeline.io.checkpoint import stage_checkpoint
 from query_pipeline.io.jsonl import read_jsonl_skipping, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
@@ -48,6 +49,28 @@ async def _run_all(
     debug_segments: list[dict[str, Any]] = []
     debug_candidates: list[dict[str, Any]] = []
     debug_judged: list[dict[str, Any]] = []
+    checkpoint = stage_checkpoint(cfg, "session")
+
+    def absorb(
+        sess_rows: list[dict[str, Any]],
+        sess_stats: dict[str, Any],
+        seg: list[dict[str, Any]],
+        cand: list[dict[str, Any]],
+        judged: list[dict[str, Any]],
+    ) -> None:
+        rows.extend(sess_rows)
+        counters.update({k: v for k, v in sess_stats.items() if k not in ("categories", "error")})
+        if "error" in sess_stats:
+            counters["session_errors"] += 1
+        category_counts.update(sess_stats.get("categories") or {})
+        debug_segments.extend(seg)
+        debug_candidates.extend(cand)
+        debug_judged.extend(judged)
+
+    def is_clean(stats: dict[str, Any]) -> bool:
+        """Only sessions with all their LLM work done are checkpointed; a
+        session with failed calls re-runs on resume so the calls retry."""
+        return stats.get("llm_failed", 0) == 0 and "error" not in stats
 
     try:
         if cfg.llm_stage.enabled:
@@ -58,20 +81,24 @@ async def _run_all(
 
         with Progress() as progress:
             task_id = progress.add_task("Sessions", total=len(sessions))
-            for session in sessions:
+            for index, session in enumerate(sessions):
+                record = checkpoint.get(str(index))
+                if record is not None and {"rows", "stats", "segments", "candidates", "judged"} <= set(record):
+                    absorb(record["rows"], record["stats"], record["segments"], record["candidates"], record["judged"])
+                    progress.advance(task_id)
+                    continue
                 try:
-                    sess_rows, sess_stats, seg, cand, judged = await _process_session(cfg, client, cache, session)
+                    sess_rows, sess_stats, seg, cand, judged = await _process_session(
+                        cfg, client, cache, session, progress=progress
+                    )
                 except Exception as exc:  # noqa: BLE001 - one bad session must not kill the run
                     sess_rows, sess_stats = [], {"session_error": 1, "error": str(exc)[:200]}
                     seg, cand, judged = [], [], []
-                rows.extend(sess_rows)
-                counters.update({k: v for k, v in sess_stats.items() if k not in ("categories", "error")})
-                if "error" in sess_stats:
-                    counters["session_errors"] += 1
-                category_counts.update(sess_stats.get("categories") or {})
-                debug_segments.extend(seg)
-                debug_candidates.extend(cand)
-                debug_judged.extend(judged)
+                if is_clean(sess_stats):
+                    await checkpoint.mark(
+                        str(index), rows=sess_rows, stats=sess_stats, segments=seg, candidates=cand, judged=judged
+                    )
+                absorb(sess_rows, sess_stats, seg, cand, judged)
                 progress.advance(task_id)
     finally:
         if client is not None:
@@ -97,6 +124,7 @@ async def _process_session(
     client: LLMClient | None,
     cache: dict[str, dict[str, Any]],
     session: dict[str, Any],
+    progress: Progress | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     s = cfg.session_stage
     turns = session.get("context") or []
@@ -126,6 +154,7 @@ async def _process_session(
             step2_cfg=s.step2,
             cache=cache,
             cache_path=cfg.llm_stage.cache,
+            progress=progress,
         )
 
     rows: list[dict[str, Any]] = []

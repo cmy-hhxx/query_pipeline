@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import Any
 
+from query_pipeline.io.checkpoint import content_key, stage_checkpoint
 from query_pipeline.llm.cache import append_cache, load_cache, make_cache_key
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
@@ -44,12 +45,17 @@ async def _verify_all(
     system_prompt = resolve_prompt(cfg.verify_stage.prompt_id)
     client = LLMClient(cfg.llm_stage)
     cache = load_cache(cfg.llm_stage.cache)
+    checkpoint = stage_checkpoint(cfg, "verify")
     lock = asyncio.Lock()
     counts = {"kept": 0, "rejected": 0, "failed": 0}
     debug: list[dict[str, Any]] = []
 
     async def worker(row: dict[str, Any]) -> dict[str, Any]:
         question = row.get("input", {}).get("text", "") if isinstance(row.get("input"), dict) else ""
+        key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
+        record = checkpoint.get(key)
+        if record is not None:
+            return {"keep": record["keep"], "reason": record["reason"], "error": record.get("error")}
         user_prompt = "请判断以下单个问句是否属于复杂金融问句，只输出严格 JSON：\n" + json.dumps(
             {"question": question}, ensure_ascii=False, separators=(",", ":")
         )
@@ -76,11 +82,10 @@ async def _verify_all(
                             "question": question[:120],
                         },
                     )
-            return {
-                "keep": parsed.is_complex,
-                "reason": parsed.reason,
-                "error": None,
-            }
+            result = {"keep": parsed.is_complex, "reason": parsed.reason, "error": None}
+            # Only clean results are checkpointed; errored rows re-verify on resume.
+            await checkpoint.mark(key, keep=result["keep"], reason=result["reason"], error=None)
+            return result
         except (ValueError, RuntimeError) as exc:
             return {"keep": None, "reason": None, "error": str(exc)[:200]}
 
@@ -89,7 +94,7 @@ async def _verify_all(
         worker,
         concurrency=cfg.llm_stage.concurrency,
         description="LLM verify",
-        show_progress=False,
+        show_progress=True,
     )
     await client.close()
 

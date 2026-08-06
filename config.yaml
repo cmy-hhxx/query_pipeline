@@ -47,3 +47,7 @@ llm_stage:
   timeout_seconds: 90
   response_format: json_object
   cache: work/llm_cache.jsonl
+
+checkpoint:
+  enabled: true
+  dir: work/checkpoints

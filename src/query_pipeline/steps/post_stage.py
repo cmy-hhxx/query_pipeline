@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from query_pipeline.io.checkpoint import Checkpoint, stage_checkpoint
 from query_pipeline.io.jsonl import write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
@@ -30,7 +31,8 @@ def run_post_stage(ctx: PipelineContext) -> PipelineContext:
     if cfg.post_stage.translate.enabled and cfg.llm_stage.enabled and ctx.rows:
         client = LLMClient(cfg.llm_stage)
         cache = load_cache(cfg.llm_stage.cache)
-        counts = asyncio.run(_translate_then_close(client, ctx, cache))
+        checkpoint = stage_checkpoint(cfg, "translate")
+        counts = asyncio.run(_translate_then_close(client, ctx, cache, checkpoint))
     else:
         counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     ctx.stats.update(counts)
@@ -38,7 +40,7 @@ def run_post_stage(ctx: PipelineContext) -> PipelineContext:
 
 
 async def _translate_then_close(
-    client: LLMClient, ctx: PipelineContext, cache: dict[str, dict[str, Any]]
+    client: LLMClient, ctx: PipelineContext, cache: dict[str, dict[str, Any]], checkpoint: Checkpoint
 ) -> dict[str, int]:
     """Run translation and close the client in the SAME event loop.
 
@@ -54,6 +56,7 @@ async def _translate_then_close(
             translate_cfg=cfg.post_stage.translate,
             cache=cache,
             cache_path=cfg.llm_stage.cache,
+            checkpoint=checkpoint,
         )
     finally:
         await client.close()

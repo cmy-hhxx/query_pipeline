@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from query_pipeline.config.models import LLMStageConfig, TranslateConfig
+from query_pipeline.io.checkpoint import Checkpoint, content_key
 from query_pipeline.llm.cache import append_cache, make_cache_key
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
@@ -36,6 +37,7 @@ async def translate_rows(
     translate_cfg: TranslateConfig,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
+    checkpoint: Checkpoint | None = None,
 ) -> dict[str, int]:
     """Fill meta.translation for each row's input.text.
 
@@ -46,15 +48,23 @@ async def translate_rows(
     system_prompt = resolve_prompt("translate").format(target=_target_label(translate_cfg.target))
     lock = asyncio.Lock()
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
+    checkpoint = checkpoint or Checkpoint.disabled()
 
     def put(row: dict[str, Any], translation: str) -> None:
         row.setdefault("meta", {})["translation"] = translation
 
     async def worker(row: dict[str, Any]) -> None:
         text = row.get("input", {}).get("text", "") if isinstance(row.get("input"), dict) else ""
+        key = content_key(text)
+        record = checkpoint.get(key)
+        if record is not None:
+            put(row, record["translation"])
+            counts["translate_skipped" if record["skipped"] else "translated"] += 1
+            return
         if not needs_translation(text):
             put(row, text)
             counts["translate_skipped"] += 1
+            await checkpoint.mark(key, translation=text, skipped=True)
             return
         user_prompt = "请翻译以下用户问句，只输出严格 JSON：\n" + json.dumps(
             {"text": text}, ensure_ascii=False, separators=(",", ":")
@@ -83,12 +93,14 @@ async def translate_rows(
                     )
             put(row, translation)
             counts["translated"] += 1
+            # Only clean results are checkpointed; failed rows re-translate on resume.
+            await checkpoint.mark(key, translation=translation, skipped=False)
         except (ValueError, RuntimeError):
             put(row, text)
             counts["translate_failed"] += 1
 
     await run_concurrent(
-        rows, worker, concurrency=llm_cfg.concurrency, description="LLM translate", show_progress=False
+        rows, worker, concurrency=llm_cfg.concurrency, description="LLM translate", show_progress=True
     )
     return counts
 

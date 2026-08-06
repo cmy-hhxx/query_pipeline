@@ -25,4 +25,6 @@ def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
         cfg.output.dir = (base / cfg.output.dir).resolve()
     if not cfg.llm_stage.cache.is_absolute():
         cfg.llm_stage.cache = (base / cfg.llm_stage.cache).resolve()
+    if not cfg.checkpoint.dir.is_absolute():
+        cfg.checkpoint.dir = (base / cfg.checkpoint.dir).resolve()
     return cfg

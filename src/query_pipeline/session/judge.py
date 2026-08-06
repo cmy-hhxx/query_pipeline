@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rich.progress import Progress
+
 from query_pipeline.config.models import LLMStageConfig, Step2Config
 from query_pipeline.llm.cache import append_cache, make_cache_key
 from query_pipeline.llm.client import LLMClient
@@ -35,6 +37,7 @@ async def judge_candidates(
     step2_cfg: Step2Config,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
+    progress: Progress | None = None,
 ) -> list[dict[str, Any]]:
     """Judge each candidate turn via LLM. Returns one dict per candidate:
     {idx, is_complex, category_id, reason, error}. error is set on LLM/parse
@@ -88,6 +91,7 @@ async def judge_candidates(
         concurrency=llm_cfg.concurrency,
         description="LLM complex judge",
         show_progress=False,
+        progress=progress,
     )
 
 

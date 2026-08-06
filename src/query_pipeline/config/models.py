@@ -107,6 +107,11 @@ class PostStageConfig(ConfigModel):
     translate: TranslateConfig = Field(default_factory=TranslateConfig)
 
 
+class CheckpointConfig(ConfigModel):
+    enabled: bool = True
+    dir: Path = Path("work/checkpoints")
+
+
 class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
     input: InputConfig
@@ -116,3 +121,4 @@ class PipelineConfig(ConfigModel):
     verify_stage: VerifyStageConfig = Field(default_factory=VerifyStageConfig)
     llm_stage: LLMStageConfig
     post_stage: PostStageConfig = Field(default_factory=PostStageConfig)
+    checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
