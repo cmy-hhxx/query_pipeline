@@ -18,7 +18,6 @@ def load_pipeline_config(path: str | Path = "config.yaml") -> PipelineConfig:
 
 
 def _project_root(config_path: Path) -> Path:
-    """Nearest ancestor holding pyproject.toml/.git; fall back to the config's own dir."""
     for parent in (config_path.parent, *config_path.parent.parents):
         if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
             return parent
@@ -32,8 +31,8 @@ def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
         cfg.work_dir = (base / cfg.work_dir).resolve()
     if not cfg.output.dir.is_absolute():
         cfg.output.dir = (base / cfg.output.dir).resolve()
-    if not cfg.llm_stage.cache.is_absolute():
-        cfg.llm_stage.cache = (base / cfg.llm_stage.cache).resolve()
+    if not cfg.llm.cache.is_absolute():
+        cfg.llm.cache = (base / cfg.llm.cache).resolve()
     if not cfg.checkpoint.dir.is_absolute():
         cfg.checkpoint.dir = (base / cfg.checkpoint.dir).resolve()
     return cfg

@@ -20,41 +20,38 @@ def _hash_material(material: dict[str, Any]) -> str:
 
 
 def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
-    """Hash of only the knobs that can change this stage's outputs.
-
-    Unrelated stages (and pure orchestration knobs like concurrency) are
-    excluded so e.g. editing the translate prompt does not wipe the session
-    checkpoint.
-    """
+    """Hash of knobs that can change this stage's outputs."""
     llm = {
-        "model": cfg.llm_stage.model,
-        "enabled": cfg.llm_stage.enabled,
-        "response_format": cfg.llm_stage.response_format,
+        "model": cfg.llm.model,
+        "enabled": cfg.llm.enabled,
+        "response_format": cfg.llm.response_format,
     }
-    if stage == "session":
+    if stage == "discover":
         return _hash_material(
             {
                 "input_format": cfg.input.format,
-                "session_stage": cfg.session_stage.model_dump(mode="json"),
+                "segmentation": cfg.segmentation.model_dump(mode="json"),
+                "step1": cfg.step1.model_dump(mode="json"),
+                "step2": cfg.step2.model_dump(mode="json"),
                 "llm": llm,
                 "prompts": {
                     "segment": resolve_prompt("segment"),
-                    cfg.session_stage.step2.prompt_id: resolve_prompt(cfg.session_stage.step2.prompt_id),
+                    cfg.step2.prompt_id: resolve_prompt(cfg.step2.prompt_id),
                 },
             }
         )
     if stage == "verify":
         return _hash_material(
             {
-                "verify_stage": cfg.verify_stage.model_dump(mode="json"),
+                "verify": cfg.verify.model_dump(mode="json"),
                 "llm": llm,
-                "prompts": {cfg.verify_stage.prompt_id: resolve_prompt(cfg.verify_stage.prompt_id)},
+                "prompts": {cfg.verify.prompt_id: resolve_prompt(cfg.verify.prompt_id)},
             }
         )
     if stage == "translate":
         return _hash_material(
             {
-                "translate": cfg.post_stage.translate.model_dump(mode="json"),
+                "translate": cfg.post.translate.model_dump(mode="json"),
                 "llm": llm,
                 "prompts": {"translate": resolve_prompt("translate")},
             }
@@ -63,9 +60,8 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
 
 
 def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
-    """Meta that ties a stage's checkpoint to the run that produced it."""
     meta: dict[str, Any] = {"stage_hash": stage_fingerprint(cfg, stage)}
-    if stage == "session":
+    if stage == "discover":
         stat = cfg.input.path.stat()
         meta.update(
             {"input_path": str(cfg.input.path), "input_size": stat.st_size, "input_mtime_ns": stat.st_mtime_ns}
@@ -74,7 +70,6 @@ def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
 
 
 def stage_checkpoint(cfg: PipelineConfig, stage: str) -> "Checkpoint":
-    """Load (or seed) the checkpoint for a stage; no-op when disabled."""
     path = cfg.checkpoint.dir / f"{stage}.jsonl"
     if not cfg.checkpoint.enabled:
         return Checkpoint(path=path, enabled=False)
@@ -82,23 +77,13 @@ def stage_checkpoint(cfg: PipelineConfig, stage: str) -> "Checkpoint":
 
 
 def content_key(*parts: str) -> str:
-    """Content-addressed key for row-level checkpoints: two rows with the same
-    content share a result, and rows whose content changed self-heal instead
-    of reusing stale records."""
     digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
     return f"c:{digest}"
 
 
 @dataclass
 class Checkpoint:
-    """Append-only JSONL checkpoint of completed units.
-
-    One line per completed unit: {"key": ..., **record}. A leading "meta"
-    line ties the file to the input/config it was produced from; when it no
-    longer matches, the whole file is ignored and re-seeded. Torn trailing
-    lines from a hard-killed run are dropped on load (the unit re-runs; its
-    LLM calls are cache hits), matching llm/cache.py.
-    """
+    """Append-only JSONL checkpoint of completed units (content-addressed keys)."""
 
     path: Path
     records: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -108,7 +93,6 @@ class Checkpoint:
 
     @classmethod
     def disabled(cls) -> "Checkpoint":
-        """No-op checkpoint: nothing is ever read or written."""
         return cls(path=Path(), enabled=False)
 
     @classmethod
@@ -134,7 +118,7 @@ class Checkpoint:
     def _read(self) -> None:
         skipped = 0
         with self.path.open("r", encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
+            for line in handle:
                 line = line.strip()
                 if not line:
                     continue

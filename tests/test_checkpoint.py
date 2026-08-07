@@ -56,10 +56,18 @@ def _session(thread_id: str, tag: str) -> dict[str, Any]:
 
 class ScriptedClient:
     """Records every call; raises RuntimeError for prompts whose
-    current_question / standalone question / text is in fail_on."""
+    current_question / standalone question / text is in the matching fail set."""
 
-    def __init__(self, fail_on: set[str] | None = None) -> None:
-        self.fail_on = set(fail_on or ())
+    def __init__(
+        self,
+        *,
+        session_fail: set[str] | None = None,
+        verify_fail: set[str] | None = None,
+        translate_fail: set[str] | None = None,
+    ) -> None:
+        self.session_fail = set(session_fail or ())
+        self.verify_fail = set(verify_fail or ())
+        self.translate_fail = set(translate_fail or ())
         self.calls: list[dict[str, Any]] = []
         self.config: object | None = None
 
@@ -71,15 +79,15 @@ class ScriptedClient:
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
         if "current_question" in payload:  # step2 judge
-            if payload["current_question"] in self.fail_on:
+            if payload["current_question"] in self.session_fail:
                 raise RuntimeError("simulated network failure")
             return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
         if "question" in payload:  # verify
-            if payload["question"] in self.fail_on:
+            if payload["question"] in self.verify_fail:
                 raise RuntimeError("simulated network failure")
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         if "text" in payload:  # translate
-            if payload["text"] in self.fail_on:
+            if payload["text"] in self.translate_fail:
                 raise RuntimeError("simulated network failure")
             return json.dumps({"translation": "翻译：" + payload["text"]}, ensure_ascii=False)
         raise AssertionError(f"unexpected payload: {sorted(payload)}")
@@ -88,9 +96,17 @@ class ScriptedClient:
         return None
 
 
-def _factory(clients: list[ScriptedClient], fail_on: set[str] | None) -> Any:
+def _factory(
+    clients: list[ScriptedClient],
+    *,
+    session_fail: set[str] | None = None,
+    verify_fail: set[str] | None = None,
+    translate_fail: set[str] | None = None,
+) -> Any:
     def factory(config: object) -> ScriptedClient:
-        client = ScriptedClient(fail_on)
+        client = ScriptedClient(
+            session_fail=session_fail, verify_fail=verify_fail, translate_fail=translate_fail
+        )
         client.config = config
         clients.append(client)
         return client
@@ -99,16 +115,20 @@ def _factory(clients: list[ScriptedClient], fail_on: set[str] | None) -> Any:
 
 
 def run_pipeline_with_fakes(
-    cfg: Any, *, session_fail: set[str] | None = None, verify_fail: set[str] | None = None, translate_fail: set[str] | None = None
-) -> tuple[Any, list[ScriptedClient], list[ScriptedClient], list[ScriptedClient]]:
-    session_clients: list[ScriptedClient] = []
-    verify_clients: list[ScriptedClient] = []
-    post_clients: list[ScriptedClient] = []
-    with patch("query_pipeline.steps.session_stage.LLMClient", _factory(session_clients, session_fail)), patch(
-        "query_pipeline.steps.verify_stage.LLMClient", _factory(verify_clients, verify_fail)
-    ), patch("query_pipeline.steps.post_stage.LLMClient", _factory(post_clients, translate_fail)):
+    cfg: Any,
+    *,
+    session_fail: set[str] | None = None,
+    verify_fail: set[str] | None = None,
+    translate_fail: set[str] | None = None,
+) -> tuple[Any, ScriptedClient]:
+    """Shared LLMClient for the whole run; fail sets are stage-specific."""
+    clients: list[ScriptedClient] = []
+    with patch(
+        "query_pipeline.pipeline.runner.LLMClient",
+        _factory(clients, session_fail=session_fail, verify_fail=verify_fail, translate_fail=translate_fail),
+    ):
         summary = run_pipeline(cfg)
-    return summary, session_clients, verify_clients, post_clients
+    return summary, clients[0] if clients else ScriptedClient()
 
 
 class CheckpointUnitTest(unittest.TestCase):
@@ -167,22 +187,26 @@ class SessionResumeTest(unittest.TestCase):
 
             # Run 1: session t1's judge call fails (outage). Its session is
             # NOT checkpointed so it retries; t0/t2 are checkpointed.
-            summary1, _, _, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
+            summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
-            cp_path = tmp_path / "work/checkpoints/session.jsonl"
-            self.assertEqual(_checkpoint_keys(cp_path), {"0", "2"})
+            cp_path = tmp_path / "work/checkpoints/discover.jsonl"
+            self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
-            # Run 2: only t1's judge re-runs (cache miss); t0/t2 replay from
-            # the checkpoint with zero LLM calls; the previously failed verify
-            # row also re-runs once.
-            summary2, session2, verify2, _ = run_pipeline_with_fakes(cfg)
+            # Run 2: only t1's judge re-runs; t0/t2 replay from checkpoint.
+            summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["llm_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
             self.assertEqual(summary2.stats["verify_kept"], 3)
-            self.assertEqual([c["current_question"] for c in session2[0].calls], ["S1 complex query"])
-            self.assertEqual([c["question"] for c in verify2[0].calls], ["S1 complex query"])
-            self.assertEqual(_checkpoint_keys(cp_path), {"0", "1", "2"})
+            self.assertEqual(
+                [c["current_question"] for c in client2.calls if "current_question" in c],
+                ["S1 complex query"],
+            )
+            self.assertEqual(
+                [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
+                ["S1 complex query"],
+            )
+            self.assertEqual(len(_checkpoint_keys(cp_path)), 3)
 
             rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
             self.assertEqual([r["input"]["text"] for r in rows], ["S0 complex query", "S1 complex query", "S2 complex query"])
@@ -198,19 +222,17 @@ class VerifyResumeTest(unittest.TestCase):
 
             # Run 1: verify for V1 fails (sticky fail-open keeps + checkpoints
             # the row); V0/V2 are checkpointed cleanly.
-            summary1, _, _, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
+            summary1, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
             self.assertEqual(summary1.stats["verify_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 3)
 
-            # Run 2: all three replay from the verify checkpoint — including the
-            # failed row — so resume cannot later flip a kept row to rejected.
-            summary2, session2, verify2, _ = run_pipeline_with_fakes(cfg)
+            # Run 2: all three replay from checkpoints (discover + verify).
+            summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["verify_kept"], 2)
             self.assertEqual(summary2.stats["verify_failed"], 1)
             self.assertEqual(summary2.stats["complex_rows"], 3)
-            self.assertEqual(session2[0].calls, [])  # session stage fully replayed
-            self.assertEqual(verify2[0].calls, [])
+            self.assertEqual(client2.calls, [])
 
 
 class TranslateResumeTest(unittest.TestCase):
@@ -223,18 +245,16 @@ class TranslateResumeTest(unittest.TestCase):
 
             # Run 1: translation of T1 fails (falls back to the original text)
             # and is not checkpointed; T0/T2 are.
-            summary1, _, _, _ = run_pipeline_with_fakes(cfg, translate_fail={"T1 complex query"})
+            summary1, _ = run_pipeline_with_fakes(cfg, translate_fail={"T1 complex query"})
             self.assertEqual(summary1.stats["translated"], 2)
             self.assertEqual(summary1.stats["translate_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 3)
 
             # Run 2: T0/T2 reuse checkpointed translations; only T1 re-translates.
-            summary2, session2, verify2, post2 = run_pipeline_with_fakes(cfg)
+            summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["translated"], 3)
             self.assertEqual(summary2.stats["translate_failed"], 0)
-            self.assertEqual(session2[0].calls, [])
-            self.assertEqual(verify2[0].calls, [])
-            self.assertEqual([c["text"] for c in post2[0].calls], ["T1 complex query"])
+            self.assertEqual([c["text"] for c in client2.calls if "text" in c], ["T1 complex query"])
 
             rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
             self.assertEqual(rows[1]["meta"]["translation"], "翻译：T1 complex query")
@@ -249,20 +269,21 @@ class CheckpointInvalidationTest(unittest.TestCase):
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
             run_pipeline_with_fakes(cfg)
 
-            # Rewrite the input with a new question; the session checkpoint no
-            # longer matches (size/mtime) and must be re-seeded, while the
-            # content-addressed verify checkpoint still serves unchanged rows.
+            # Rewrite the input with a new question; discover checkpoint meta
+            # (input size/mtime) no longer matches and is re-seeded.
             sessions[0]["context"][1]["question"] = "W0 complex query NEW"
             _write_jsonl(tmp_path / "input.jsonl", sessions)
-            summary, session2, verify2, _ = run_pipeline_with_fakes(cfg)
+            summary, client2 = run_pipeline_with_fakes(cfg)
 
             self.assertEqual(summary.stats["complex_rows"], 2)
-            # W0's changed question misses both the session checkpoint and the
-            # LLM cache, so its segment and judge calls re-run; W1 stays cached.
             self.assertEqual(
-                [c["current_question"] for c in session2[0].calls if "current_question" in c], ["W0 complex query NEW"]
+                [c["current_question"] for c in client2.calls if "current_question" in c],
+                ["W0 complex query NEW"],
             )
-            self.assertEqual([c["question"] for c in verify2[0].calls], ["W0 complex query NEW"])
+            self.assertEqual(
+                [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
+                ["W0 complex query NEW"],
+            )
 
             rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
             texts = [r["input"]["text"] for r in rows]
@@ -275,7 +296,7 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
     post_block = ""
     if post_enabled:
         post_block = """
-            post_stage:
+            post:
               enabled: true
               dedup:
                 enabled: true
@@ -289,26 +310,28 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
             name: test_pipeline
             input:
               path: input.jsonl
+              format: session
             output:
               dir: out
               complex_queries: complex_queries.jsonl
               summary: summary.json
             work_dir: work
-            session_stage:
+            segmentation:
               enabled: true
-              segmentation:
-                enabled: true
-              step1:
-                enabled: true
-                reject_rules: true
-                min_chain_tool_calls: 7
-                min_chain_steps: 1
-                min_unique_tools: 2
-              step2:
-                enabled: true
-                prompt_id: complex_judge
+            step1:
+              enabled: true
+              reject_rules: true
+              min_chain_tool_calls: 7
+              min_chain_steps: 1
+              min_unique_tools: 2
+            step2:
+              enabled: true
+              prompt_id: complex_judge
+            verify:
+              enabled: true
+              prompt_id: verify_complex
             {post_block}
-            llm_stage:
+            llm:
               enabled: true
               base_url_env: OPENAI_BASE_URL
               model: fake-model

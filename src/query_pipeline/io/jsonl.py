@@ -18,36 +18,39 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
             yield record
 
 
-def read_jsonl_skipping(path: Path) -> tuple[list[dict[str, Any]], int]:
-    """Read input records, skipping lines that fail to parse.
-
-    The upstream exporter may write truncated/garbage lines (a strict
-    read would crash the whole run); callers get (records, skipped_count)
-    and should surface the skipped count in stats/logs. errors="replace"
-    also tolerates a byte-torn trailing line (invalid UTF-8 at EOF) — it
-    decodes to a replacement char and the line fails JSON parsing, so it
-    lands in the skipped count instead of crashing the read.
-    """
+def read_jsonl_with_bad_lines(path: Path, bad_path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read records; unparseable lines go to bad_path (one raw line each) and are skipped."""
     records: list[dict[str, Any]] = []
     skipped = 0
+    bad_lines: list[str] = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
+            raw = line.rstrip("\n")
+            stripped = raw.strip()
+            if not stripped:
                 continue
             try:
-                record = json.loads(line)
+                record = json.loads(stripped)
             except json.JSONDecodeError:
                 skipped += 1
+                bad_lines.append(raw)
+                continue
+            if not isinstance(record, dict):
+                skipped += 1
+                bad_lines.append(raw)
                 continue
             record.setdefault("_line_number", line_number)
             records.append(record)
+    if bad_lines:
+        bad_path.parent.mkdir(parents=True, exist_ok=True)
+        with bad_path.open("w", encoding="utf-8") as handle:
+            for line in bad_lines:
+                handle.write(line + "\n")
     return records, skipped
 
 
 def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
-    """Write records atomically (tmp + replace) so a crash mid-write cannot
-    leave a truncated file that looks complete to the next reader."""
+    """Write records atomically (tmp + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as handle:

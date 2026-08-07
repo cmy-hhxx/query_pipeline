@@ -2,7 +2,7 @@ name: session_pipeline
 
 input:
   path: data/aime/0806.jsonl
-  format: session  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
+  format: session
 
 output:
   dir: outputs/aime
@@ -11,33 +11,33 @@ output:
 
 work_dir: work/aime/0806
 
-session_stage:
+segmentation:
   enabled: true
-  concurrency: 16
-  segmentation:
-    enabled: true
-  step1:
-    enabled: true
-    reject_rules: true
-    min_chain_tool_calls: 7
-    min_chain_steps: 1
-    min_unique_tools: 2
-  step2:
-    enabled: true
-    prompt_id: complex_judge
 
-verify_stage:
+step1:
+  enabled: true
+  reject_rules: true
+  min_chain_tool_calls: 7
+  min_chain_steps: 1
+  min_unique_tools: 2
+
+step2:
+  enabled: true
+  prompt_id: complex_judge
+
+verify:
   enabled: true
   prompt_id: verify_complex
 
-post_stage:
+post:
   enabled: true
   dedup:
     enabled: true
     threshold: 0.85
   translate:
     enabled: true
-llm_stage:
+
+llm:
   enabled: true
   base_url_env: OPENAI_BASE_URL
   model: gpt-5.4-mini
@@ -51,3 +51,6 @@ llm_stage:
 checkpoint:
   enabled: true
   dir: work/aime/0806/checkpoints
+
+debug:
+  dump_intermediates: true

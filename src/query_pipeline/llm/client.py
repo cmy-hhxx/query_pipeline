@@ -7,11 +7,11 @@ from typing import Any, cast
 
 from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
-from query_pipeline.config.models import LLMStageConfig
+from query_pipeline.config.models import LLMConfig
 
 
 class LLMClient:
-    def __init__(self, config: LLMStageConfig) -> None:
+    def __init__(self, config: LLMConfig) -> None:
         api_key = os.environ.get(config.api_key_env)
         if not api_key:
             raise RuntimeError(f"{config.api_key_env} is not set")
@@ -20,8 +20,7 @@ class LLMClient:
             raise RuntimeError(f"{config.base_url_env} is not set")
         self.config = config
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        # Cap in-flight HTTP calls process-wide. Session concurrency × per-session
-        # judge concurrency would otherwise multiply into thousands of open requests.
+        # Cap in-flight HTTP calls process-wide across all pipeline stages.
         self._semaphore = asyncio.Semaphore(max(1, config.concurrency))
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:

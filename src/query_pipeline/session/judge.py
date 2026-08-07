@@ -7,11 +7,12 @@ from typing import Any
 
 from rich.progress import Progress
 
-from query_pipeline.config.models import LLMStageConfig, Step2Config
+from query_pipeline.config.models import LLMConfig, Step2Config
 from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
 from query_pipeline.models.session import Segment, parse_step2_payload, parse_step2_response, prior_indices
+from query_pipeline.models.turn import Turn
 from query_pipeline.prompts import resolve_prompt
 
 
@@ -22,28 +23,24 @@ def segment_of(segments: list[Segment], idx: int) -> Segment:
     raise IndexError(f"index {idx} not covered by any segment")
 
 
-def build_judge_payload(turns: list[dict[str, Any]], segment: Segment, idx: int) -> dict[str, Any]:
-    prior = [turns[k].get("question", "") for k in prior_indices(segment, idx)]
-    return {"prior_questions": prior, "current_question": turns[idx].get("question", "")}
+def build_judge_payload(turns: list[Turn], segment: Segment, idx: int) -> dict[str, Any]:
+    prior = [turns[k].question for k in prior_indices(segment, idx)]
+    return {"prior_questions": prior, "current_question": turns[idx].question}
 
 
 async def judge_candidates(
     *,
     client: LLMClient,
-    turns: list[dict[str, Any]],
+    turns: list[Turn],
     segments: list[Segment],
     candidates: list[int],
-    llm_cfg: LLMStageConfig,
+    llm_cfg: LLMConfig,
     step2_cfg: Step2Config,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
     cache_lock: asyncio.Lock | None = None,
     progress: Progress | None = None,
 ) -> list[dict[str, Any]]:
-    """Judge each candidate turn via LLM. Returns one dict per candidate:
-    {idx, is_complex, category_id, reason, error}. error is set on LLM/parse
-    failure; is_complex is None then.
-    """
     system_prompt = resolve_prompt(step2_cfg.prompt_id)
     lock = cache_lock or asyncio.Lock()
 

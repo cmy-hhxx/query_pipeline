@@ -3,60 +3,43 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from query_pipeline.io.checkpoint import Checkpoint, stage_checkpoint
+from query_pipeline.io.checkpoint import stage_checkpoint
 from query_pipeline.io.jsonl import write_jsonl
-from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.post.dedup import dedup_rows
 from query_pipeline.post.translate import translate_rows
 
 
-def run_post_stage(ctx: PipelineContext) -> PipelineContext:
-    """Post-processing of the assembled complex-query rows: MinHash rule dedup
-    first (fewer rows -> fewer LLM calls), then Chinese translation of
-    input.text into translation / meta.translation. Both modules are
-    independently toggleable.
-    """
+async def run_post_stage(
+    ctx: PipelineContext,
+    client: LLMClient | None,
+    cache: dict[str, dict[str, Any]],
+    cache_lock: asyncio.Lock,
+) -> PipelineContext:
     cfg = ctx.config
-    if not cfg.post_stage.enabled:
+    if not cfg.post.enabled:
         return ctx
 
-    if cfg.post_stage.dedup.enabled:
-        ctx.rows, dropped = dedup_rows(ctx.rows, cfg.post_stage.dedup)
+    if cfg.post.dedup.enabled:
+        ctx.rows, dropped = dedup_rows(ctx.rows, cfg.post.dedup)
         ctx.stats["dedup_removed"] = len(dropped)
-        if dropped:
+        if dropped and cfg.debug.dump_intermediates:
             ctx.work_dir.mkdir(parents=True, exist_ok=True)
             write_jsonl(ctx.path("deduped.jsonl"), dropped)
 
-    if cfg.post_stage.translate.enabled and cfg.llm_stage.enabled and ctx.rows:
-        client = LLMClient(cfg.llm_stage)
-        cache = load_cache(cfg.llm_stage.cache)
+    if cfg.post.translate.enabled and client is not None and ctx.rows:
         checkpoint = stage_checkpoint(cfg, "translate")
-        counts = asyncio.run(_translate_then_close(client, ctx, cache, checkpoint))
+        counts = await translate_rows(
+            ctx.rows,
+            client=client,
+            llm_cfg=cfg.llm,
+            cache=cache,
+            cache_path=cfg.llm.cache,
+            checkpoint=checkpoint,
+            cache_lock=cache_lock,
+        )
     else:
         counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     ctx.stats.update(counts)
     return ctx
-
-
-async def _translate_then_close(
-    client: LLMClient, ctx: PipelineContext, cache: dict[str, dict[str, Any]], checkpoint: Checkpoint
-) -> dict[str, int]:
-    """Run translation and close the client in the SAME event loop.
-
-    Closing an httpx connection pool in a different asyncio.run() than the one
-    that opened it raises "Event loop is closed".
-    """
-    cfg = ctx.config
-    try:
-        return await translate_rows(
-            ctx.rows,
-            client=client,
-            llm_cfg=cfg.llm_stage,
-            cache=cache,
-            cache_path=cfg.llm_stage.cache,
-            checkpoint=checkpoint,
-        )
-    finally:
-        await client.close()

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.config.models import DedupConfig, LLMStageConfig
+from query_pipeline.config.models import DedupConfig, LLMConfig
 from query_pipeline.io.jsonl import read_jsonl, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
@@ -36,8 +36,8 @@ def _row(text: str, trace_id: str) -> dict[str, Any]:
     }
 
 
-def _llm_cfg(tmp: str) -> LLMStageConfig:
-    return LLMStageConfig(model="fake-model", cache=Path(tmp) / "cache.jsonl", concurrency=2)
+def _llm_cfg(tmp: str) -> LLMConfig:
+    return LLMConfig(model="fake-model", cache=Path(tmp) / "cache.jsonl", concurrency=2)
 
 
 class FakeLLMClient(LLMClient):
@@ -221,9 +221,9 @@ class TranslateTest(unittest.TestCase):
 
 class PostStagePipelineTest(unittest.TestCase):
     def test_config_defaults_disabled(self) -> None:
-        from query_pipeline.config.models import PostStageConfig
+        from query_pipeline.config.models import PostConfig
 
-        post = PostStageConfig()
+        post = PostConfig()
         self.assertFalse(post.enabled)
         self.assertTrue(post.dedup.enabled)
         self.assertEqual(post.dedup.threshold, 0.85)
@@ -231,9 +231,9 @@ class PostStagePipelineTest(unittest.TestCase):
 
     def test_config_yaml_enables_post_stage(self) -> None:
         cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
-        self.assertTrue(cfg.post_stage.enabled)
-        self.assertEqual(cfg.post_stage.dedup.threshold, 0.85)
-        self.assertTrue(cfg.post_stage.translate.enabled)
+        self.assertTrue(cfg.post.enabled)
+        self.assertEqual(cfg.post.dedup.threshold, 0.85)
+        self.assertTrue(cfg.post.translate.enabled)
 
     def test_end_to_end_dedup_and_translate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,11 +245,7 @@ class PostStagePipelineTest(unittest.TestCase):
             ])
             cfg = load_pipeline_config(_write_config(tmp_path))
 
-            with (
-                patch("query_pipeline.steps.session_stage.LLMClient", FakePipelineLLMClient),
-                patch("query_pipeline.steps.verify_stage.LLMClient", FakePipelineLLMClient),
-                patch("query_pipeline.steps.post_stage.LLMClient", FakePipelineLLMClient),
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["complex_rows"], 1)  # post-dedup
@@ -277,18 +273,14 @@ class PostStagePipelineTest(unittest.TestCase):
             write_jsonl(tmp_path / "input.jsonl", [{"thread_id": "t1", "context": _turns("s1")}])
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            with (
-                patch("query_pipeline.steps.session_stage.LLMClient", FakePipelineLLMClient),
-                patch("query_pipeline.steps.verify_stage.LLMClient", FakePipelineLLMClient),
-                patch("query_pipeline.steps.post_stage.LLMClient", FakePipelineLLMClient),
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertNotIn("dedup_removed", summary.stats)
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00"}
+                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "translation": ""}
             )  # untouched by post stage
 
 
@@ -378,35 +370,34 @@ def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
             name: test_pipeline
             input:
               path: input.jsonl
+              format: session
             output:
               dir: out
               complex_queries: complex_queries.jsonl
               summary: summary.json
             work_dir: work
-            session_stage:
+            segmentation:
               enabled: true
-              segmentation:
-                enabled: true
-              step1:
-                enabled: true
-                reject_rules: true
-                min_chain_tool_calls: 7
-                min_chain_steps: 1
-                min_unique_tools: 2
-              step2:
-                enabled: true
-                prompt_id: complex_judge
-            verify_stage:
+            step1:
+              enabled: true
+              reject_rules: true
+              min_chain_tool_calls: 7
+              min_chain_steps: 1
+              min_unique_tools: 2
+            step2:
+              enabled: true
+              prompt_id: complex_judge
+            verify:
               enabled: true
               prompt_id: verify_complex
-            post_stage:
+            post:
               enabled: {str(post_enabled).lower()}
               dedup:
                 enabled: true
                 threshold: 0.85
               translate:
                 enabled: true
-            llm_stage:
+            llm:
               enabled: true
               base_url_env: OPENAI_BASE_URL
               model: fake-model

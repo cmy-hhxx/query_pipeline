@@ -21,7 +21,8 @@ from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
 from query_pipeline.session.assemble import assemble_row
 from query_pipeline.session.candidates import select_candidates
-from query_pipeline.session.cases import normalize_judge_data_record
+from query_pipeline.adapters.chat import adapt_chat
+from query_pipeline.adapters.session import adapt_turn, adapt_session
 from query_pipeline.session.judge import build_judge_payload
 
 
@@ -86,22 +87,22 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(cfg.input.path, (ROOT / "data/aime/0807.jsonl").resolve())
         self.assertEqual(cfg.input.format, "session")
         self.assertEqual(cfg.output.complex_queries, "complex_queries_0807.jsonl")
-        self.assertEqual(cfg.llm_stage.base_url_env, "OPENAI_BASE_URL")
-        self.assertEqual(cfg.llm_stage.api_key_env, "OPENAI_API_KEY")
-        self.assertEqual(cfg.session_stage.step1.min_chain_tool_calls, 7)
-        self.assertEqual(cfg.session_stage.step1.min_chain_steps, 1)
-        self.assertEqual(cfg.session_stage.step1.min_unique_tools, 2)
-        self.assertEqual(cfg.session_stage.step2.prompt_id, "complex_judge")
+        self.assertEqual(cfg.llm.base_url_env, "OPENAI_BASE_URL")
+        self.assertEqual(cfg.llm.api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(cfg.step1.min_chain_tool_calls, 7)
+        self.assertEqual(cfg.step1.min_chain_steps, 1)
+        self.assertEqual(cfg.step1.min_unique_tools, 2)
+        self.assertEqual(cfg.step2.prompt_id, "complex_judge")
 
     def test_input_format_validation(self) -> None:
         from query_pipeline.config.models import InputConfig
 
         self.assertEqual(InputConfig(path=Path("x.jsonl")).format, "session")
-        self.assertEqual(InputConfig(path=Path("x.jsonl"), format="judge_data").format, "judge_data")
+        self.assertEqual(InputConfig(path=Path("x.jsonl"), format="chat").format, "chat")
         with self.assertRaises(ValueError):
             InputConfig(path=Path("x.jsonl"), format="bogus")
 
-    def test_normalize_judge_data_record(self) -> None:
+    def test_adapt_chat(self) -> None:
         record = {
             "trace_id": "t1",
             "question": "当前问句",
@@ -116,20 +117,22 @@ class SessionPipelineContractTest(unittest.TestCase):
                 "meta": {"session_round": 3, "request_time": "2026-08-05 04:02:00", "first_token_time_cost": 10},
             },
         }
-        session = normalize_judge_data_record(record)
-        self.assertEqual(session["thread_id"], "c1")
-        self.assertEqual(len(session["context"]), 3)
-        self.assertEqual(session["context"][0], {"question": "前文1", "answer": "a1"})
-        current = session["context"][2]
-        self.assertEqual(current["question"], "当前问句")
-        self.assertEqual(current["answer"], "text")  # text_answer preferred over raw_answer
-        self.assertEqual(current["trace_id"], "t1")
-        self.assertEqual(current["first_token_ms"], 10)
-        self.assertEqual(current["request_time"], "2026-08-05 04:02:00")
+        session = adapt_chat(record)
+        self.assertEqual(session.thread_id, "c1")
+        self.assertEqual(len(session.turns), 3)
+        self.assertEqual(session.turns[0].question, "前文1")
+        self.assertEqual(session.turns[0].answer, "a1")
+        current = session.turns[2]
+        self.assertEqual(current.question, "当前问句")
+        self.assertEqual(current.answer, "text")  # text_answer preferred over raw_answer
+        self.assertEqual(current.trace_id, "t1")
+        self.assertEqual(current.first_token_ms, 10)
+        self.assertEqual(current.request_time, "2026-08-05 04:02:00")
+        self.assertEqual(session.candidate_mode, "last_only")
 
-    def test_normalize_judge_data_record_missing_wrapper(self) -> None:
+    def test_adapt_chat_missing_wrapper(self) -> None:
         with self.assertRaises(ValueError):
-            normalize_judge_data_record({"question": "x"})
+            adapt_chat({"question": "x"})
 
     def test_prompt_contracts(self) -> None:
         segment_prompt = resolve_prompt("segment")
@@ -254,7 +257,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_step1_select_candidates(self) -> None:
         cfg = Step1Config()
-        candidates = select_candidates(_sample_turns(), cfg)
+        candidates = select_candidates([adapt_turn(t) for t in _sample_turns()], cfg)
 
         # turn1 and turn2 clear all three AND thresholds (8 tool calls / 8 chain
         # steps / 3 unique tools); turn0 and turn3 do not.
@@ -269,30 +272,30 @@ class SessionPipelineContractTest(unittest.TestCase):
             _make_turn(3, "没有推理链", chain=[]),
         ]
         # turn1: tool_calls fail; turn2: unique fail; turn3: no chain.
-        self.assertEqual(select_candidates(turns, cfg), [0])
+        self.assertEqual(select_candidates([adapt_turn(t) for t in turns], cfg), [0])
 
     def test_assemble_row_context_fallback(self) -> None:
         turns = _sample_turns()
         # Segment-leading turn (idx == segment.start), not session-first:
         # context falls back to every earlier session turn.
         segment = Segment(start=2, end=3, topic="topic")
-        row = assemble_row({"thread_id": "t1"}, turns, segment, idx=2, category_id="03")
+        row = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), segment, idx=2, category_id="03")
         self.assertEqual(
             row["context"],
             [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}],
         )
         # Session-first turn: context stays empty (nothing precedes it).
-        first = assemble_row({"thread_id": "t1"}, turns, Segment(start=0, end=3, topic="topic"), idx=0, category_id="03")
+        first = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), Segment(start=0, end=3, topic="topic"), idx=0, category_id="03")
         self.assertEqual(first["context"], [])
 
     def test_judge_payload_context_fallback(self) -> None:
         turns = _sample_turns()
-        payload = build_judge_payload(turns, Segment(start=2, end=3, topic="t"), 2)
+        payload = build_judge_payload([adapt_turn(t) for t in turns], Segment(start=2, end=3, topic="t"), 2)
         self.assertEqual(payload["prior_questions"], ["Q1 简单查询", "Q2 复杂取数"])
-        first = build_judge_payload(turns, Segment(start=0, end=3, topic="t"), 0)
+        first = build_judge_payload([adapt_turn(t) for t in turns], Segment(start=0, end=3, topic="t"), 0)
         self.assertEqual(first["prior_questions"], [])
         # non-boundary turn keeps same-segment prior only
-        same = build_judge_payload(turns, Segment(start=0, end=3, topic="t"), 1)
+        same = build_judge_payload([adapt_turn(t) for t in turns], Segment(start=0, end=3, topic="t"), 1)
         self.assertEqual(same["prior_questions"], ["Q1 简单查询"])
 
     def test_step1_skips_ineligible_turns(self) -> None:
@@ -302,12 +305,12 @@ class SessionPipelineContractTest(unittest.TestCase):
             _make_turn(1, "失败状态", tool_names="web_search,finquery,compute", tool_count=8, status="failed", chain=_chain_with_steps(8, names)),
             _make_turn(2, "正常复杂问题", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
         ]
-        self.assertEqual(select_candidates(turns, Step1Config()), [2])
+        self.assertEqual(select_candidates([adapt_turn(t) for t in turns], Step1Config()), [2])
 
     def test_assemble_row_field_mapping(self) -> None:
         turns = _sample_turns()
         segment = Segment(start=0, end=3, topic="topic")
-        row = assemble_row({"thread_id": "t1"}, turns, segment, idx=2, category_id="03", reason="需要多步分析")
+        row = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), segment, idx=2, category_id="03", reason="需要多步分析")
 
         self.assertEqual(row["capture_mode"], "full_link")
         self.assertEqual(row["user_cohort"], "regular")
@@ -323,7 +326,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["user_id"], "u2")
         self.assertEqual(row["difficulty_level"], "hard")
         self.assertEqual(
-            row["meta"], {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00"}
+            row["meta"], {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "translation": ""}
         )
         self.assertEqual(row["first_token_time_ms"], 200)
         self.assertEqual(row["finish_answer_time_ms"], 400)
@@ -336,9 +339,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient), patch(
-                "query_pipeline.steps.verify_stage.LLMClient", FakeSessionLLMClient
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertTrue(summary.success)
@@ -363,7 +364,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["session_round"], 2)
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00"})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "translation": ""})
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -372,9 +373,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeFailingSessionLLMClient), patch(
-                "query_pipeline.steps.verify_stage.LLMClient", FakeFailingSessionLLMClient
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeFailingSessionLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertTrue(summary.success)
@@ -408,9 +407,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeJudgeThenVerifyClient), patch(
-                "query_pipeline.steps.verify_stage.LLMClient", FakeJudgeThenVerifyClient
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeJudgeThenVerifyClient):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["candidates"], 2)
@@ -442,9 +439,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [session])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, post_enabled=True))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakePostStageLLMClient), patch(
-                "query_pipeline.steps.verify_stage.LLMClient", FakePostStageLLMClient
-            ), patch("query_pipeline.steps.post_stage.LLMClient", FakePostStageLLMClient):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakePostStageLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["verify_kept"], 2)
@@ -459,8 +454,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(rows[0]["trace_id"], "trace1")
             self.assertEqual(rows[0]["meta"]["translation"], "翻译：complex calc A")
 
-    def test_end_to_end_judge_data_format(self) -> None:
-        # input.format=judge_data: each line is a single-case question with a
+    def test_end_to_end_chat_format(self) -> None:
+        # input.format=chat: each line is a single-case question with a
         # pre-assembled prior context. No segmentation or step1 heuristics — the
         # trailing turn is judged directly and its context is all prior turns.
         with tempfile.TemporaryDirectory() as tmp:
@@ -480,11 +475,9 @@ class SessionPipelineContractTest(unittest.TestCase):
                 },
             }
             _write_jsonl(tmp_path / "input.jsonl", [case])
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, input_format="judge_data"))
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, input_format="chat"))
 
-            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient), patch(
-                "query_pipeline.steps.verify_stage.LLMClient", FakeSessionLLMClient
-            ):
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
                 summary = run_pipeline(cfg)
 
             self.assertTrue(summary.success)
@@ -505,7 +498,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["tools"], ["web_search"])
             self.assertEqual(row["raw_answer"], "text_answer")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00"})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "translation": ""})
 
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -636,10 +629,13 @@ class FakeFailingSessionLLMClient:
 
 def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = False, input_format: str = "session") -> Path:
     config_path = tmp_path / "config.yaml"
+    is_chat = input_format == "chat"
+    seg_on = "false" if is_chat else "true"
+    step1_on = "false" if is_chat else "true"
     post_block = ""
     if post_enabled:
         post_block = """
-            post_stage:
+            post:
               enabled: true
               dedup:
                 enabled: true
@@ -659,21 +655,22 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = Fal
               complex_queries: complex_queries.jsonl
               summary: summary.json
             work_dir: work
-            session_stage:
+            segmentation:
+              enabled: {seg_on}
+            step1:
+              enabled: {step1_on}
+              reject_rules: true
+              min_chain_tool_calls: 7
+              min_chain_steps: 1
+              min_unique_tools: 2
+            step2:
               enabled: true
-              segmentation:
-                enabled: true
-              step1:
-                enabled: true
-                reject_rules: true
-                min_chain_tool_calls: 7
-                min_chain_steps: 1
-                min_unique_tools: 2
-              step2:
-                enabled: true
-                prompt_id: complex_judge
+              prompt_id: complex_judge
+            verify:
+              enabled: true
+              prompt_id: verify_complex
             {post_block}
-            llm_stage:
+            llm:
               enabled: {str(llm_enabled).lower()}
               base_url_env: OPENAI_BASE_URL
               model: fake-model

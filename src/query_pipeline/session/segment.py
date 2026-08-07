@@ -4,30 +4,28 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
-from query_pipeline.config.models import LLMStageConfig
+from query_pipeline.config.models import LLMConfig
 from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.models.session import Segment, parse_segment_response
+from query_pipeline.models.turn import Turn
 from query_pipeline.prompts import resolve_prompt
 
 logger = logging.getLogger(__name__)
 
 
-def build_segment_payload(turns: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "questions": [{"idx": i, "question": turns[i].get("question", "")} for i in range(len(turns))]
-    }
+def build_segment_payload(turns: list[Turn]) -> dict:
+    return {"questions": [{"idx": i, "question": turns[i].question} for i in range(len(turns))]}
 
 
-def _build_user_prompt(turns: list[dict[str, Any]]) -> str:
+def _build_user_prompt(turns: list[Turn]) -> str:
     return "请切分以下会话问句，只输出严格 JSON：\n" + json.dumps(
         build_segment_payload(turns), ensure_ascii=False, separators=(",", ":")
     )
 
 
-def _segments_from_cache(label: dict[str, Any], num_turns: int) -> list[Segment]:
+def _segments_from_cache(label: dict, num_turns: int) -> list[Segment]:
     items = label.get("segments") or []
     if not isinstance(items, list):
         raise ValueError("cached segments must be a list")
@@ -51,18 +49,13 @@ def _segments_from_cache(label: dict[str, Any], num_turns: int) -> list[Segment]
 async def segment_session(
     *,
     client: LLMClient,
-    turns: list[dict[str, Any]],
-    llm_cfg: LLMStageConfig,
-    cache: dict[str, dict[str, Any]],
+    turns: list[Turn],
+    llm_cfg: LLMConfig,
+    cache: dict[str, dict],
     cache_path: Path,
     cache_lock: asyncio.Lock | None = None,
 ) -> list[Segment]:
-    """Split a session's turns into topic-contiguous segments via one LLM call.
-
-    Falls back to a single whole-session segment on any LLM/parse error.
-    A poison cache entry (schema mismatch) is dropped and the LLM is re-called
-    instead of permanently forcing whole_session.
-    """
+    """Split turns into topic segments; fall back to whole_session on failure."""
     num_turns = len(turns)
     if num_turns <= 1:
         return [Segment(0, num_turns - 1, "whole_session")]
@@ -92,8 +85,6 @@ async def segment_session(
                 segments = parse_segment_response(raw, num_turns=num_turns)
                 break
             except ValueError:
-                # LLM output is not strictly deterministic; a malformed response
-                # is worth clean retries before giving up on the whole session.
                 if attempt == attempts - 1:
                     raise
                 logger.warning(

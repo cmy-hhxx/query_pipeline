@@ -11,14 +11,14 @@ class ConfigModel(BaseModel):
 
 class InputConfig(ConfigModel):
     path: Path
-    format: str = "session"  # "session" | "judge_data" (single-case lines with a judge_data wrapper)
+    format: str = "session"  # "session" | "chat"
 
     @field_validator("format")
     @classmethod
     def validate_format(cls, value: str) -> str:
         fmt = value.strip().lower()
-        if fmt not in {"session", "judge_data"}:
-            raise ValueError(f"invalid input.format: {value!r} (expected 'session' or 'judge_data')")
+        if fmt not in {"session", "chat"}:
+            raise ValueError(f"invalid input.format: {value!r} (expected 'session' or 'chat')")
         return fmt
 
 
@@ -56,15 +56,7 @@ class Step2Config(ConfigModel):
         return prompt_id
 
 
-class SessionStageConfig(ConfigModel):
-    enabled: bool = True
-    concurrency: int = 8
-    segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
-    step1: Step1Config = Field(default_factory=Step1Config)
-    step2: Step2Config = Field(default_factory=Step2Config)
-
-
-class LLMStageConfig(ConfigModel):
+class LLMConfig(ConfigModel):
     enabled: bool = True
     base_url_env: str = "OPENAI_BASE_URL"
     model: str = "gpt-5.4-mini"
@@ -76,7 +68,7 @@ class LLMStageConfig(ConfigModel):
     cache: Path = Path("work/llm_cache.jsonl")
 
 
-class VerifyStageConfig(ConfigModel):
+class VerifyConfig(ConfigModel):
     enabled: bool = True
     prompt_id: str = "verify_complex"
 
@@ -124,7 +116,7 @@ class TranslateConfig(ConfigModel):
     enabled: bool = True
 
 
-class PostStageConfig(ConfigModel):
+class PostConfig(ConfigModel):
     enabled: bool = False
     dedup: DedupConfig = Field(default_factory=DedupConfig)
     translate: TranslateConfig = Field(default_factory=TranslateConfig)
@@ -135,13 +127,20 @@ class CheckpointConfig(ConfigModel):
     dir: Path = Path("work/checkpoints")
 
 
+class DebugConfig(ConfigModel):
+    dump_intermediates: bool = True
+
+
 class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path = Path("work")
-    session_stage: SessionStageConfig = Field(default_factory=SessionStageConfig)
-    verify_stage: VerifyStageConfig = Field(default_factory=VerifyStageConfig)
-    llm_stage: LLMStageConfig
-    post_stage: PostStageConfig = Field(default_factory=PostStageConfig)
+    segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
+    step1: Step1Config = Field(default_factory=Step1Config)
+    step2: Step2Config = Field(default_factory=Step2Config)
+    verify: VerifyConfig = Field(default_factory=VerifyConfig)
+    llm: LLMConfig
+    post: PostConfig = Field(default_factory=PostConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
+    debug: DebugConfig = Field(default_factory=DebugConfig)

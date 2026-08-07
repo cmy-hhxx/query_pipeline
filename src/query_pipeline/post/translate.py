@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from query_pipeline.config.models import LLMStageConfig
+from query_pipeline.config.models import LLMConfig
 from query_pipeline.io.checkpoint import Checkpoint, content_key
 from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
@@ -18,7 +18,6 @@ _CJK = re.compile(r"[一-鿿]")
 
 
 def needs_translation(text: str, *, cjk_ratio: float = 0.3) -> bool:
-    """True unless the text is empty or already predominantly Chinese."""
     if not text.strip():
         return False
     return len(_CJK.findall(text)) / len(text) < cjk_ratio
@@ -35,19 +34,14 @@ async def translate_rows(
     rows: list[dict[str, Any]],
     *,
     client: LLMClient,
-    llm_cfg: LLMStageConfig,
+    llm_cfg: LLMConfig,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
     checkpoint: Checkpoint | None = None,
+    cache_lock: asyncio.Lock | None = None,
 ) -> dict[str, int]:
-    """Fill ``translation`` / ``meta.translation`` with the Chinese version of input.text.
-
-    Already-Chinese rows are kept as-is (no LLM call); LLM failures fall back
-    to the original text so downstream always has a translation value.
-    Returns {translated, translate_skipped, translate_failed}.
-    """
     system_prompt = resolve_prompt("translate")
-    lock = asyncio.Lock()
+    lock = cache_lock or asyncio.Lock()
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
 
@@ -90,7 +84,6 @@ async def translate_rows(
                 )
             put(row, translation)
             counts["translated"] += 1
-            # Only clean results are checkpointed; failed rows re-translate on resume.
             await checkpoint.mark(key, translation=translation, skipped=False)
         except (ValueError, RuntimeError):
             put(row, text)
