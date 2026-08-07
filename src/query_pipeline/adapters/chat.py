@@ -27,8 +27,11 @@ def adapt_chat(record: dict[str, Any]) -> Session:
         if isinstance(t, dict)
     ]
 
-    meta = jd.get("meta") if isinstance(jd.get("meta"), dict) else {}
+    meta = jd.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
     raw_input = jd.get("input")
+    chain = jd.get("chain")
     if isinstance(raw_input, dict):
         question = _as_str(raw_input.get("text") or record.get("question"))
     elif isinstance(raw_input, str):
@@ -41,7 +44,7 @@ def adapt_chat(record: dict[str, Any]) -> Session:
             question=question,
             answer=_as_str(jd.get("text_answer") or jd.get("raw_answer")),
             trace_id=_as_str(jd.get("trace_id") or record.get("trace_id")),
-            chain=jd.get("chain") if isinstance(jd.get("chain"), list) else [],
+            chain=chain if isinstance(chain, list) else [],
             request_time=_as_str(meta.get("request_time")),
             first_token_ms=meta.get("first_token_time_cost"),
             total_duration_ms=meta.get("finish_answer_time_cost"),

@@ -14,6 +14,7 @@ class OutputInput(BaseModel):
 class OutputMeta(BaseModel):
     reason: str | None = None
     request_time: str = ""
+    run_id: str = ""
     translation: str = ""
 
 

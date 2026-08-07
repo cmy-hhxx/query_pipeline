@@ -28,11 +28,13 @@ def _request_time(raw: dict[str, Any]) -> str:
 
 
 def adapt_turn(raw: dict[str, Any]) -> Turn:
+    chain = raw.get("chain")
     return Turn(
         question=_as_str(raw.get("question")),
         answer=_as_str(raw.get("answer") or raw.get("answer_full")),
-        trace_id=_as_str(raw.get("trace_id") or raw.get("run_id")),
-        chain=raw.get("chain") if isinstance(raw.get("chain"), list) else [],
+        trace_id=_as_str(raw.get("trace_id")),
+        run_id=_as_str(raw.get("run_id")),
+        chain=chain if isinstance(chain, list) else [],
         request_time=_request_time(raw),
         first_token_ms=raw.get("first_token_ms"),
         total_duration_ms=raw.get("total_duration_ms"),

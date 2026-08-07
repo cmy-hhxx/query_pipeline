@@ -37,6 +37,6 @@ def assemble_row(
         finish_answer_time_ms=turn.total_duration_ms,
         input_tokens=turn.input_tokens,
         output_tokens=turn.output_tokens,
-        meta=OutputMeta(reason=reason, request_time=turn.request_time),
+        meta=OutputMeta(reason=reason, request_time=turn.request_time, run_id=turn.run_id),
     )
     return row.model_dump(mode="python")

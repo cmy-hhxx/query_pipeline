@@ -1,0 +1,57 @@
+name: iwencai_pipeline
+
+input:
+  path: data/iwencai/judge_data_9662_part1.jsonl
+  format: chat
+
+output:
+  dir: outputs/iwencai
+  complex_queries: complex_queries_judge_9662.jsonl
+  summary: summary_judge_9662.json
+
+work_dir: work/iwencai/judge_9662
+
+segmentation:
+  enabled: false
+
+# 严格初筛:reject 规则 + 至少 2 个不同工具 / 至少 3 次工具调用
+step1:
+  enabled: true
+  reject_rules: true
+  min_chain_tool_calls: 3
+  min_chain_steps: 1
+  min_unique_tools: 2
+
+step2:
+  enabled: true
+  prompt_id: complex_judge
+
+verify:
+  enabled: true
+  prompt_id: verify_complex
+
+post:
+  enabled: true
+  dedup:
+    enabled: true
+    threshold: 0.85
+  translate:
+    enabled: true
+
+llm:
+  enabled: true
+  base_url_env: OPENAI_BASE_URL
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+  concurrency: 128
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+  cache: work/iwencai/judge_9662/llm_cache.jsonl
+
+checkpoint:
+  enabled: true
+  dir: work/iwencai/judge_9662/checkpoints
+
+debug:
+  dump_intermediates: true

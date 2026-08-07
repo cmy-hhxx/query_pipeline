@@ -280,7 +280,7 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertNotIn("dedup_removed", summary.stats)
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "translation": ""}
+                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1", "translation": ""}
             )  # untouched by post stage
 
 

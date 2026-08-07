@@ -11,6 +11,7 @@ class Turn(BaseModel):
     question: str = ""
     answer: str = ""
     trace_id: str = ""
+    run_id: str = ""
     chain: list[Any] = Field(default_factory=list)
     request_time: str = ""
     first_token_ms: int | float | None = None

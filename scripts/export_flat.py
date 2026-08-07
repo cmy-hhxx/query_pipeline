@@ -6,10 +6,10 @@ one JSONL record per complex query whose top-level keys are the columns of the
 legacy CSV export (see ``outputs/aime/complex_queries_0806.csv``)::
 
     trace_id, user_id, category, input.text, context, text_answer,
-    request_time_ms, run_id, meta.translation
+    request_time_ms, meta.run_id, meta.translation
 
-Nested values keep their JSON types — ``context`` stays an array; ``input.text``
-and ``meta.translation`` are lifted to dotted top-level keys.
+Nested values keep their JSON types — ``context`` stays an array; ``input.text``,
+``meta.run_id`` and ``meta.translation`` are lifted to dotted top-level keys.
 
 Usage::
 
@@ -32,7 +32,7 @@ FIELDS = [
     "context",
     "text_answer",
     "request_time_ms",
-    "run_id",
+    "meta.run_id",
     "meta.translation",
 ]
 
@@ -47,7 +47,7 @@ def flatten(row: dict) -> dict:
         "context": row.get("context", []),
         "text_answer": row.get("text_answer", ""),
         "request_time_ms": row.get("request_time_ms"),
-        "run_id": row.get("run_id"),
+        "meta.run_id": (row.get("meta") or {}).get("run_id", ""),
         "meta.translation": (row.get("meta") or {}).get("translation", ""),
     }
 

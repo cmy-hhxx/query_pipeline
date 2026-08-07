@@ -326,7 +326,8 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["user_id"], "u2")
         self.assertEqual(row["difficulty_level"], "hard")
         self.assertEqual(
-            row["meta"], {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "translation": ""}
+            row["meta"],
+            {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "run_id": "r2", "translation": ""},
         )
         self.assertEqual(row["first_token_time_ms"], 200)
         self.assertEqual(row["finish_answer_time_ms"], 400)
@@ -364,7 +365,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["session_round"], 2)
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "translation": ""})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1", "translation": ""})
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -498,7 +499,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["tools"], ["web_search"])
             self.assertEqual(row["raw_answer"], "text_answer")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "translation": ""})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "", "translation": ""})
 
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
