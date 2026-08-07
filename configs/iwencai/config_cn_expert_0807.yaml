@@ -1,25 +1,26 @@
-name: session_pipeline
+name: iwencai_pipeline
 
 input:
-  path: data/aime/0807.jsonl
+  path: data/iwencai/cn_expert_daily_2026-08-07.jsonl
   format: session
 
 output:
-  dir: outputs/aime
-  complex_queries: complex_queries_0807.jsonl
-  summary: summary_0807.json
+  dir: outputs/iwencai
+  complex_queries: complex_queries_cn_expert_0807.jsonl
+  summary: summary_cn_expert_0807.json
 
-work_dir: work/aime/0807
+work_dir: work/iwencai/cn_expert_0807
 
 segmentation:
-  enabled: true
+  enabled: false
 
+# 严格初筛:reject 规则 + 至少 3 个不同工具 / 至少 5 次工具调用（候选 ~3873）
 step1:
   enabled: true
   reject_rules: true
-  min_chain_tool_calls: 7
+  min_chain_tool_calls: 5
   min_chain_steps: 1
-  min_unique_tools: 2
+  min_unique_tools: 3
 
 step2:
   enabled: true
@@ -44,15 +45,15 @@ llm:
   base_url_env: OPENAI_BASE_URL
   model: gpt-5.4-mini
   api_key_env: OPENAI_API_KEY
-  concurrency: 256
+  concurrency: 128
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/aime/0807/llm_cache.jsonl
+  cache: work/iwencai/cn_expert_0807/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/aime/0807/checkpoints
+  dir: work/iwencai/cn_expert_0807/checkpoints
 
 debug:
   dump_intermediates: true

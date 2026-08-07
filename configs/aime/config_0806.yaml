@@ -34,7 +34,8 @@ post:
   enabled: true
   dedup:
     enabled: true
-    threshold: 0.85
+    threshold: 0.80
+    entity_slot: true
   translate:
     enabled: true
 

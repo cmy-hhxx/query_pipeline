@@ -843,7 +843,7 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = Fal
               enabled: true
               dedup:
                 enabled: true
-                threshold: 0.85
+                threshold: 0.80
               translate:
                 enabled: true
 """

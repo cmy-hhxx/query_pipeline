@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from query_pipeline.models.output import ContextTurn, OutputInput, OutputMeta, OutputRow
 from query_pipeline.models.records import ENGLISH_CATEGORIES
 from query_pipeline.models.session import Segment, prior_indices
 from query_pipeline.models.turn import Session
 from query_pipeline.session.candidates import extract_tool_names
+
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _request_time_ms(request_time: str) -> int | None:
+    """Parse a Beijing-local time string like ``2026-08-07 17:49:42`` to epoch ms."""
+    if not request_time or not request_time.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(request_time.strip())
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_SHANGHAI)
+    return int(dt.timestamp() * 1000)
 
 
 def assemble_row(
@@ -37,6 +55,7 @@ def assemble_row(
         finish_answer_time_ms=turn.total_duration_ms,
         input_tokens=turn.input_tokens,
         output_tokens=turn.output_tokens,
+        request_time_ms=_request_time_ms(turn.request_time),
         meta=OutputMeta(reason=reason, request_time=turn.request_time, run_id=turn.run_id),
     )
     return row.model_dump(mode="python")

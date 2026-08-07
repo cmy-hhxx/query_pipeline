@@ -32,7 +32,7 @@ uv run python run.py -c configs/aime/config.yaml --dry-run   # 临时换配置
 | step2 | LLM `complex_judge`：结合同段上文，输出 `{is_complex, category_id, reason}` |
 | step3 | 组装输出行（`context` 为同段上文；`trace_id` = turn 的 `run_id`） |
 | step4 | LLM 独立复核（不带上下文），最多 3 轮级联、逐轮从严剔除；失败 fail-open |
-| step5 | `dedup`（MinHash，Jaccard≥0.85）→ `translate`（写入 `meta.translation`） |
+| step5 | `dedup`（实体槽化 token-Jaccard≥0.80）→ `translate`（写入 `meta.translation`） |
 
 ## 断点续跑
 

@@ -19,8 +19,9 @@ from query_pipeline.io.jsonl import read_jsonl, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.pipeline.runner import run_pipeline
-from query_pipeline.post.dedup import dedup_rows, jaccard_estimate, minhash_signature
+from query_pipeline.post.dedup import dedup_rows
 from query_pipeline.post.translate import needs_translation, translate_rows
+from query_pipeline.rules.normalize import exact_token_jaccard, tokenize_question
 
 _BASE = "how does the fed rate hike affect bond prices this year and what should investors watch for"
 _NEAR = _BASE.replace("affect", "impact")
@@ -68,8 +69,8 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(dropped[0]["dedup_of_trace_id"], "r1")
         self.assertEqual(dropped[1]["dedup_of_trace_id"], "r1")
         self.assertEqual(dropped[0]["similarity"], 1.0)
-        self.assertGreaterEqual(dropped[1]["similarity"], 0.85)
-        self.assertEqual(dropped[0]["method"], "minhash_threshold_0.85")
+        self.assertGreaterEqual(dropped[1]["similarity"], 0.8)
+        self.assertEqual(dropped[0]["method"], "token_jaccard_threshold_0.8")
 
     def test_near_duplicate_survives_high_threshold(self) -> None:
         kept, dropped = dedup_rows([_row(_BASE, "r1"), _row(_NEAR, "r2")], DedupConfig(threshold=0.99))
@@ -88,10 +89,11 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(len(kept), 3)
         self.assertEqual(dropped, [])
 
-    def test_signatures_deterministic(self) -> None:
-        a = minhash_signature(_BASE, n_gram=3, num_perm=128)
-        b = minhash_signature(_BASE, n_gram=3, num_perm=128)
+    def test_tokenization_deterministic(self) -> None:
+        a = tokenize_question(_BASE)
+        b = tokenize_question(_BASE)
         self.assertEqual(a, b)
+        self.assertEqual(exact_token_jaccard(a, b), 1.0)
 
     def test_threshold_range_validated(self) -> None:
         with self.assertRaises(ValueError):
@@ -100,11 +102,102 @@ class DedupTest(unittest.TestCase):
             DedupConfig(threshold=-0.1)
 
     def test_near_duplicate_similarity_above_default_threshold(self) -> None:
-        sig_base = minhash_signature(_BASE, n_gram=3, num_perm=128)
-        sig_near = minhash_signature(_NEAR, n_gram=3, num_perm=128)
-        assert sig_base is not None and sig_near is not None
-        sim = jaccard_estimate(sig_base, sig_near)
-        self.assertGreaterEqual(sim, 0.85)
+        sim = exact_token_jaccard(tokenize_question(_BASE), tokenize_question(_NEAR))
+        self.assertGreaterEqual(sim, 0.8)
+
+    def test_template_variants_merged(self) -> None:
+        rows = [
+            _row("Forecast $EYE for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios", "r1"),
+            _row("Forecast $AA for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios", "r2"),
+            _row("Forecast $NVDA for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios", "r3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(dropped), 2)
+        self.assertEqual({d["dedup_of_trace_id"] for d in dropped}, {kept[0]["trace_id"]})
+        self.assertEqual(dropped[0]["similarity"], 1.0)
+
+    def test_rephrase_merged(self) -> None:
+        a = "Check NEARUSDT for the rest of today on 4hr time frame in futures market and recommend as to entry/exit points"
+        b = "How is NEARUSDT going to perform for the rest of today on 4hr time frame in futures market and recommend as to entry/exit points"
+        kept, dropped = dedup_rows([_row(a, "r1"), _row(b, "r2")], DedupConfig())
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(dropped), 1)
+        # 代表选更长更完整的改写版本(r2),被删的指向它。
+        self.assertEqual(kept[0]["trace_id"], "r2")
+        self.assertEqual(dropped[0]["dedup_of_trace_id"], "r2")
+        self.assertGreaterEqual(dropped[0]["similarity"], 0.8)
+
+    def test_distinct_intent_kept(self) -> None:
+        rows = [
+            _row("Forecast $AAPL for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels", "r1"),
+            _row("Forecast NVDA trend this week", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+
+    def test_content_word_not_slotted(self) -> None:
+        a = "The price is stalled 1955 now, Do again fundamental analysis [strong/weak], do sentiment/catalyst/outlook analysis [positive/negative] and Do chart analysis on indonesian stock IDX:WIFI chart and give"
+        b = "The price is rallying now, Do again fundamental analysis [strong/weak], do sentiment/catalyst/outlook analysis [positive/negative] and Do chart analysis on indonesian stock IDX:CBDK chart and give me "
+        # 真实语料中该对 J=0.786<0.8:stalled/rallying 是内容词,不被槽化,保持分开。
+        ta = tokenize_question(a)
+        tb = tokenize_question(b)
+        self.assertIn("stalled", ta)
+        self.assertIn("rallying", tb)
+        self.assertNotEqual(ta, tb)
+        kept, dropped = dedup_rows([_row(a, "r1"), _row(b, "r2")], DedupConfig())
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+
+    def test_entity_slotting_switch(self) -> None:
+        a = "What is the P/E of $AAPL at 100"
+        b = "What is the P/E of $MSFT at 200"
+        rows = [_row(a, "r1"), _row(b, "r2")]
+        kept, dropped = dedup_rows(rows, DedupConfig(entity_slot=True))
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(dropped), 1)
+        kept2, dropped2 = dedup_rows(rows, DedupConfig(entity_slot=False))
+        self.assertEqual(len(kept2), 2)
+        self.assertEqual(dropped2, [])
+
+    def test_number_only_difference_merged(self) -> None:
+        rows = [
+            _row("The price is stalled 1955 now, do again fundamental analysis on this stock", "r1"),
+            _row("The price is stalled 875 now, do again fundamental analysis on this stock", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped[0]["similarity"], 1.0)
+
+    def test_representative_selection_and_determinism(self) -> None:
+        rows = [
+            _row("Forecast  SNDK for the next 1 day, — bull / base / bear scenarios with confidence levels and what would trigger each.", "r1"),
+            _row("Forecast $AAPL for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels and what would trigger each.", "r2"),
+            _row("Forecast $MSFT for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels and what would trigger each.", "r3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["trace_id"], "r2")
+        self.assertEqual({d["dedup_of_trace_id"] for d in dropped}, {"r2"})
+        kept2, dropped2 = dedup_rows(rows, DedupConfig())
+        self.assertEqual([r["trace_id"] for r in kept2], [r["trace_id"] for r in kept])
+        self.assertEqual([d["trace_id"] for d in dropped2], [d["trace_id"] for d in dropped])
+
+    def test_cjk_near_duplicate_merged(self) -> None:
+        rows = [
+            _row("帮我分析一下nvidia的估值并给出建议", "r1"),
+            _row("帮我分析一下amd的估值并给出建议", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(dropped), 1)
+
+    def test_pure_slot_query_never_dropped(self) -> None:
+        rows = [_row("1234", "r1"), _row("5678", "r2")]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
 
 
 class TranslateTest(unittest.TestCase):
@@ -226,13 +319,13 @@ class PostStagePipelineTest(unittest.TestCase):
         post = PostConfig()
         self.assertFalse(post.enabled)
         self.assertTrue(post.dedup.enabled)
-        self.assertEqual(post.dedup.threshold, 0.85)
+        self.assertEqual(post.dedup.threshold, 0.80)
         self.assertTrue(post.translate.enabled)
 
     def test_config_yaml_enables_post_stage(self) -> None:
         cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
         self.assertTrue(cfg.post.enabled)
-        self.assertEqual(cfg.post.dedup.threshold, 0.85)
+        self.assertEqual(cfg.post.dedup.threshold, 0.80)
         self.assertTrue(cfg.post.translate.enabled)
 
     def test_end_to_end_dedup_and_translate(self) -> None:
@@ -394,7 +487,8 @@ def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
               enabled: {str(post_enabled).lower()}
               dedup:
                 enabled: true
-                threshold: 0.85
+                threshold: 0.80
+                entity_slot: true
               translate:
                 enabled: true
             llm:

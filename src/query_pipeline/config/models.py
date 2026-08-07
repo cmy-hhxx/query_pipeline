@@ -94,29 +94,14 @@ class VerifyConfig(ConfigModel):
 
 class DedupConfig(ConfigModel):
     enabled: bool = True
-    threshold: float = 0.85
-    n_gram: int = 3
-    num_perm: int = 128
+    threshold: float = 0.80
+    entity_slot: bool = True
 
     @field_validator("threshold")
     @classmethod
     def validate_threshold(cls, value: float) -> float:
         if not 0.0 <= value <= 1.0:
             raise ValueError("threshold must be in [0, 1]")
-        return value
-
-    @field_validator("n_gram")
-    @classmethod
-    def validate_n_gram(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("n_gram must be >= 1")
-        return value
-
-    @field_validator("num_perm")
-    @classmethod
-    def validate_num_perm(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("num_perm must be >= 1")
         return value
 
 

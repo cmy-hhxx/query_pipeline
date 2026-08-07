@@ -1,26 +1,26 @@
 name: iwencai_pipeline
 
 input:
-  path: data/iwencai/judge_data_9662_part1.jsonl
-  format: chat
+  path: data/iwencai/cn_expert_daily_2026-08-06.jsonl
+  format: session
 
 output:
   dir: outputs/iwencai
-  complex_queries: complex_queries_judge_9662.jsonl
-  summary: summary_judge_9662.json
+  complex_queries: complex_queries_cn_expert_0806.jsonl
+  summary: summary_cn_expert_0806.json
 
-work_dir: work/iwencai/judge_9662
+work_dir: work/iwencai/cn_expert_0806
 
 segmentation:
   enabled: false
 
-# 严格初筛:reject 规则 + 至少 2 个不同工具 / 至少 3 次工具调用
+# 严格初筛:reject 规则 + 至少 4 个不同工具 / 至少 4 次工具调用（候选 ~3821）
 step1:
   enabled: true
   reject_rules: true
-  min_chain_tool_calls: 3
+  min_chain_tool_calls: 4
   min_chain_steps: 1
-  min_unique_tools: 2
+  min_unique_tools: 4
 
 step2:
   enabled: true
@@ -35,7 +35,8 @@ post:
   enabled: true
   dedup:
     enabled: true
-    threshold: 0.85
+    threshold: 0.80
+    entity_slot: true
   translate:
     enabled: true
 
@@ -48,11 +49,11 @@ llm:
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/iwencai/judge_9662/llm_cache.jsonl
+  cache: work/iwencai/cn_expert_0806/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/iwencai/judge_9662/checkpoints
+  dir: work/iwencai/cn_expert_0806/checkpoints
 
 debug:
   dump_intermediates: true

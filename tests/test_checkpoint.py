@@ -300,7 +300,7 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
               enabled: true
               dedup:
                 enabled: true
-                threshold: 0.85
+                threshold: 0.80
               translate:
                 enabled: true
 """
