@@ -4,11 +4,11 @@ input:
   path: data/aime/0807.jsonl
 
 output:
-  dir: outputs_all
-  complex_queries: complex_queries0807.jsonl
-  summary: summary0807.json
+  dir: outputs/aime
+  complex_queries: complex_queries_0807.jsonl
+  summary: summary_0807.json
 
-work_dir: work_0807_full
+work_dir: work/aime/0807
 
 session_stage:
   enabled: true
@@ -47,8 +47,8 @@ llm_stage:
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/llm_cache.jsonl
+  cache: work/aime/0807/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work_0807_full/checkpoints
+  dir: work/aime/0807/checkpoints

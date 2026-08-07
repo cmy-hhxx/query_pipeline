@@ -1,15 +1,15 @@
 name: session_pipeline
 
 input:
-  path: data/aime/input.jsonl
+  path: data/aime/input_test.jsonl
   format: session  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
 
 output:
-  dir: outputs
-  complex_queries: complex_queries.jsonl
-  summary: summary.json
+  dir: outputs/aime
+  complex_queries: complex_queries_test.jsonl
+  summary: summary_test.json
 
-work_dir: work
+work_dir: work/aime/test
 
 session_stage:
   enabled: true
@@ -47,8 +47,8 @@ llm_stage:
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/llm_cache.jsonl
+  cache: work/aime/test/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/checkpoints
+  dir: work/aime/test/checkpoints

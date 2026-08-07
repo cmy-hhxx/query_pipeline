@@ -33,14 +33,14 @@ The pipeline processes sessions one at a time (a `Sessions` progress bar counts 
 3. `step2` (LLM `complex_judge`): for each candidate, send the same-segment prior questions plus the current question; the LLM returns `{is_complex, category_id, reason}`.
 4. `step3` (assemble): for each turn judged complex, emit one row in the `filter_out.jsonc` schema (`context[]` holds prior turns trimmed to `{question, answer}` — same-segment prior, falling back to every earlier session turn for a segment-leading turn, so only a session's very first turn has empty context; `trace_id` = the turn's `run_id`; `category` = `id-slug`, e.g. `01-data-metrics-calculation`).
 5. `step4` (verify, LLM `verify_complex`): pass 1 judges with context, which lets connective short turns ride on rich context — so every exported question is re-judged **standalone** (no context): only questions complex on their own survive. LLM failures keep the row (fail-open) and count as `verify_failed`.
-6. `step5` (post): two toggleable modules on the assembled rows. `dedup` (rules, MinHash): character n-gram shingles → 128-perm signature, LSH banding limits candidate pairs; rows with Jaccard ≥ `threshold` (default 0.85) are dropped, keeping the first occurrence; dropped rows with provenance land in `work/deduped.jsonl` (`dedup_removed` in summary). `translate` (LLM): `input.text` is translated to `target` (default `zh`, cached in `work/llm_cache.jsonl`) and written to `meta.translation`; already-CJK text is skipped, LLM failures fall back to the original text (counted as `translate_failed`). Runs dedup before translate so fewer rows hit the LLM.
+6. `step5` (post): two toggleable modules on the assembled rows. `dedup` (rules, MinHash): character n-gram shingles → 128-perm signature, LSH banding limits candidate pairs; rows with Jaccard ≥ `threshold` (default 0.85) are dropped, keeping the first occurrence; dropped rows with provenance land in `work/aime/test/deduped.jsonl` (`dedup_removed` in summary). `translate` (LLM): `input.text` is translated to `target` (default `zh`, cached in `work/aime/test/llm_cache.jsonl`) and written to `meta.translation`; already-CJK text is skipped, LLM failures fall back to the original text (counted as `translate_failed`). Runs dedup before translate so fewer rows hit the LLM.
 
 ## Checkpoint / resume
 
 A killed run (network outage, Ctrl-C, OOM) can simply be re-run: completed units are skipped instead of re-done. This works at two layers:
 
-- **LLM call layer**: every successful LLM response is append-cached in `work/llm_cache.jsonl` keyed by (prompt, question, model), so re-runs never re-pay for calls that already succeeded.
-- **Unit layer**: each completed unit is marked in an append-only checkpoint under `work/checkpoints/` — `session.jsonl` (one line per processed session, holding its rows/stats/debug), `verify.jsonl` and `translate.jsonl` (one line per row, keyed by content). On resume, units already marked are replayed from the checkpoint and their LLM work is skipped entirely.
+- **LLM call layer**: every successful LLM response is append-cached in `work/aime/test/llm_cache.jsonl` keyed by (prompt, question, model), so re-runs never re-pay for calls that already succeeded.
+- **Unit layer**: each completed unit is marked in an append-only checkpoint under `work/aime/test/checkpoints/` — `session.jsonl` (one line per processed session, holding its rows/stats/debug), `verify.jsonl` and `translate.jsonl` (one line per row, keyed by content). On resume, units already marked are replayed from the checkpoint and their LLM work is skipped entirely.
 
 Semantics:
 
@@ -48,7 +48,7 @@ Semantics:
 - The session checkpoint is tied to the input file (path, size, mtime) and to a fingerprint of the config + all resolved prompts; the verify/translate checkpoints are tied to the config/prompt fingerprint and are keyed by content, so editing the input only re-processes the changed sessions. Any mismatch is logged (`checkpoint ... starting fresh`) and the file is re-seeded rather than reused, so stale results are never silently served.
 - Torn trailing lines from a hard-killed run are dropped on load (that unit just re-runs, with its LLM calls being cache hits).
 
-Progress bars are shown for every LLM-heavy stage. Toggle checkpointing with `checkpoint.enabled`; change the directory with `checkpoint.dir` (both in `configs/aime/config.yaml`). To force a full re-run, delete `work/checkpoints/` (or `work/llm_cache.jsonl` to also drop the call cache).
+Progress bars are shown for every LLM-heavy stage. Toggle checkpointing with `checkpoint.enabled`; change the directory with `checkpoint.dir` (both in `configs/aime/config.yaml`). To force a full re-run, delete `work/aime/test/checkpoints/` (or `work/aime/test/llm_cache.jsonl` to also drop the call cache).
 
 ## Output Contract
 
@@ -85,13 +85,15 @@ One output row per complex query:
 }
 ```
 
+Per-dataset layouts: inputs live in `data/{aime,iwencai}/`, final outputs in `outputs/{aime,iwencai}/`, intermediates in `work/{aime,iwencai}/<dataset>/`.
+
 Public outputs:
 
-- `outputs/complex_queries.jsonl` — one row per complex query (deduped + translated when `post_stage` is enabled)
-- `outputs/summary.json` — per-run counters (sessions, segments, candidates, complex/non-complex/llm-failed rows, verify kept/rejected/failed, dedup removed, translated/skipped/failed, category counts)
+- `outputs/aime/complex_queries_test.jsonl` — one row per complex query (deduped + translated when `post_stage` is enabled)
+- `outputs/aime/summary_test.json` — per-run counters (sessions, segments, candidates, complex/non-complex/llm-failed rows, verify kept/rejected/failed, dedup removed, translated/skipped/failed, category counts)
 
 When `llm_stage.enabled=false`, rules-based candidate selection still runs but no rows are classified, so `complex_queries.jsonl` stays empty.
 
-Intermediate debug files are written under `work/` (`segments.jsonl`, `candidates.jsonl`, `judged.jsonl`, `verified.jsonl`, `deduped.jsonl`) and LLM responses are cached in `work/llm_cache.jsonl`.
+Intermediate debug files are written under `work/aime/test/` (`segments.jsonl`, `candidates.jsonl`, `judged.jsonl`, `verified.jsonl`, `deduped.jsonl`) and LLM responses are cached in `work/aime/test/llm_cache.jsonl`.
 
-`difficulty_level` is fixed to `"hard"` (rows are already judged complex). Each output row's `meta.reason` carries the judge's rationale and `meta.translation` the translated question; the full per-candidate decision (including non-complex and LLM-failure cases) with `is_complex`/`category_id`/`reason`/`error` is in `work/judged.jsonl` for debugging.
+`difficulty_level` is fixed to `"hard"` (rows are already judged complex). Each output row's `meta.reason` carries the judge's rationale and `meta.translation` the translated question; the full per-candidate decision (including non-complex and LLM-failure cases) with `is_complex`/`category_id`/`reason`/`error` is in `work/aime/test/judged.jsonl` for debugging.

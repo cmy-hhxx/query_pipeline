@@ -13,3 +13,4 @@ old/
 .env
 outputs_*/
 work_*
+logs/
