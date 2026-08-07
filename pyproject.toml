@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 query-pipeline = "query_pipeline.cli:main"
+query-pipeline-qc = "query_pipeline.quality.cli:main"
 
 [dependency-groups]
 dev = [
