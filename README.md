@@ -63,3 +63,29 @@ uv run python run.py -c configs/aime/config.yaml --dry-run   # 临时换配置
 4. 缺 UTF-8 BOM → 中文乱码，需加 `EF BB BF`
 
 jsonl 是无损源；CSV 仅为表格可读。
+
+## 质检（quality）
+
+对 `outputs/{dataset}/complex_queries_{date}.jsonl` 做质量校验：全量规则 + LLM 抽检（问句质量 / 标签归属）。源文件只读，产物写入 `work/{dataset}/{date}/qc/`。
+
+```bash
+uv run query-pipeline-qc run --dataset aime --date 0807              # 规则 + LLM 抽检（默认 5%）
+uv run query-pipeline-qc run --dataset aime --date 0807 --no-llm    # 只跑规则，不联网
+uv run query-pipeline-qc run --dataset aime --date 0807 --ratio 0.02 --seed 42
+```
+
+- 规则失败 → 记录 `fail`（确定）；LLM 判定低质/标签不符 → 单列 `needs_review`（概率性，不并入 fail）
+- 逐条规则：结构合法性、问句长度/乱码、分类标签 `{id}-{slug}`、chain 结构、回答非空/截断、时间与 token 顺序、翻译/理由元信息
+- 数据集级规则（挂总览）：字段恒值、近重复问句（复用 MinHash）、长度离群、类别偏斜、空值率、未知顶层字段
+- LLM 缓存复用 `work/{dataset}/{date}/llm_cache.jsonl`，重跑命中不重复调用
+
+产物目录 `work/{dataset}/{date}/qc/`：`results.jsonl`（逐条）、`overview.json`（总览）、`sampled.jsonl`（抽检明细）、`report.md`（人读报告）、`bad_lines.jsonl`（无法解析的行）。
+
+外部 agent 只读接口（Python API）：
+
+```python
+from query_pipeline.quality import overview, record_detail
+
+overview("aime", "0807")                        # 总览：三档计数、规则命中、抽样判定、被标记列表
+record_detail("aime", "0807", "<trace_id>")     # 单条：原始记录 + 规则明细 + LLM 判定
+```
