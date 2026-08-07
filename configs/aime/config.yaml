@@ -1,18 +1,19 @@
 name: session_pipeline
 
 input:
-  path: data/aime/input_test.jsonl
+  path: data/aime/0807.jsonl
   format: session  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
 
 output:
   dir: outputs/aime
-  complex_queries: complex_queries_test.jsonl
-  summary: summary_test.json
+  complex_queries: complex_queries_0807.jsonl
+  summary: summary_0807.json
 
-work_dir: work/aime/test
+work_dir: work/aime/0807
 
 session_stage:
   enabled: true
+  concurrency: 16
   segmentation:
     enabled: true
   step1:
@@ -43,12 +44,12 @@ llm_stage:
   base_url_env: OPENAI_BASE_URL
   model: gpt-5.4-mini
   api_key_env: OPENAI_API_KEY
-  concurrency: 64
+  concurrency: 256
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/aime/test/llm_cache.jsonl
+  cache: work/aime/0807/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/aime/test/checkpoints
+  dir: work/aime/0807/checkpoints

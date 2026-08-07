@@ -83,9 +83,9 @@ class SessionPipelineContractTest(unittest.TestCase):
         cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
 
         self.assertEqual(cfg.name, "session_pipeline")
-        self.assertEqual(cfg.input.path, (ROOT / "data/aime/input_test.jsonl").resolve())
+        self.assertEqual(cfg.input.path, (ROOT / "data/aime/0807.jsonl").resolve())
         self.assertEqual(cfg.input.format, "session")
-        self.assertEqual(cfg.output.complex_queries, "complex_queries_test.jsonl")
+        self.assertEqual(cfg.output.complex_queries, "complex_queries_0807.jsonl")
         self.assertEqual(cfg.llm_stage.base_url_env, "OPENAI_BASE_URL")
         self.assertEqual(cfg.llm_stage.api_key_env, "OPENAI_API_KEY")
         self.assertEqual(cfg.session_stage.step1.min_chain_tool_calls, 7)

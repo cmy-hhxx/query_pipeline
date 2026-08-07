@@ -1,18 +1,19 @@
-name: iwencai_pipeline
+name: session_pipeline
 
 input:
-  path: data/iwencai/judge_data_9662.jsonl
-  format: judge_data  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
+  path: data/aime/0806.jsonl
+  format: session  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
 
 output:
-  dir: outputs/iwencai
-  complex_queries: complex_queries.jsonl
-  summary: summary.json
+  dir: outputs/aime
+  complex_queries: complex_queries_0806.jsonl
+  summary: summary_0806.json
 
-work_dir: work/iwencai
+work_dir: work/aime/0806
 
 session_stage:
   enabled: true
+  concurrency: 16
   segmentation:
     enabled: true
   step1:
@@ -43,12 +44,12 @@ llm_stage:
   base_url_env: OPENAI_BASE_URL
   model: gpt-5.4-mini
   api_key_env: OPENAI_API_KEY
-  concurrency: 64
+  concurrency: 256
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/iwencai/llm_cache.jsonl
+  cache: work/aime/0806/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/iwencai/checkpoints
+  dir: work/aime/0806/checkpoints
