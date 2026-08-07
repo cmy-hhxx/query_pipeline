@@ -231,7 +231,7 @@ def _dataset_constant_field(records: list[dict[str, Any]]) -> tuple[bool, str, l
 def _dataset_near_duplicate(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
     if len(records) < 2:
         return True, "记录太少，跳过", []
-    cfg = DedupConfig(enabled=True, threshold=NEAR_DUP_THRESHOLD, n_gram=3, num_perm=128)
+    cfg = DedupConfig(enabled=True, threshold=NEAR_DUP_THRESHOLD)
     kept, dropped = dedup_rows(records, cfg)
     if not dropped:
         return True, f"未发现相似度≥{NEAR_DUP_THRESHOLD} 的近重复问句", []
@@ -239,7 +239,7 @@ def _dataset_near_duplicate(records: list[dict[str, Any]]) -> tuple[bool, str, l
         f"{d['trace_id']} 与 {d['dedup_of_trace_id']} 相似度 {d['similarity']:.3f}：{d['text']}"
         for d in dropped[:20]
     ]
-    return False, f"发现 {len(dropped)} 条近重复问句（MinHash Jaccard≥{NEAR_DUP_THRESHOLD}）", evidence
+    return False, f"发现 {len(dropped)} 条近重复问句（实体槽化 token-Jaccard≥{NEAR_DUP_THRESHOLD}）", evidence
 
 
 def _dataset_length_outlier(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:

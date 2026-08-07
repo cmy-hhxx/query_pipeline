@@ -151,7 +151,7 @@ class DatasetRuleTest(unittest.TestCase):
             _row(trace_id="t1", category="03-analysis-research"),
             _row(trace_id="t2", category="06-investment-decision"),
         ]
-        # identical question text -> MinHash Jaccard 1.0
+        # identical question text -> token-Jaccard 1.0
         rows[1]["input"] = dict(rows[0]["input"])
         rules = {r["rule"]: r for r in run_dataset_rules(rows)}
         self.assertFalse(rules["near_duplicate"]["ok"])
