@@ -1,0 +1,328 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from query_pipeline.models.output import OutputRow
+from query_pipeline.models.records import CATEGORIES, ENGLISH_CATEGORIES
+from query_pipeline.post.dedup import dedup_rows
+from query_pipeline.config.models import DedupConfig
+
+# Rule thresholds — code constants, no per-rule config (project convention).
+QUESTION_MIN_LEN = 5
+QUESTION_MAX_LEN = 2000
+MIN_ANSWER_LEN = 50
+EMPTY_FIELD_RATIO = 0.10
+CATEGORY_SKEW_MAX_SHARE = 0.50
+NEAR_CONSTANT_SHARE = 0.90  # soft tier: top value covers >=90% of records
+NEAR_DUP_THRESHOLD = 0.85
+
+_SENTENCE_END = ".。!?！？…"
+# ; / ； excluded: in Greek, ";" is the question mark (ερωτηματικό), so an
+# answer legitimately ends with it. Comma/colon/dash endings remain strong
+# truncation signals.
+_DANGLING_END = ",，:：-—–"
+
+# Content fields monitored for constant/near-constant values at the dataset level.
+_CONTENT_FIELDS = ("text_answer", "raw_answer", "input.text", "category", "tools", "meta.reason")
+
+# Key fields whose empty rate is tracked at the dataset level.
+_KEY_FIELDS = ("trace_id", "source_case_id", "category", "input.text", "text_answer", "meta.reason", "meta.translation")
+
+
+@dataclass(frozen=True)
+class RuleCheck:
+    name: str
+    check: Callable[[dict[str, Any]], tuple[bool, str]]  # -> (ok, detail)
+
+
+@dataclass(frozen=True)
+class DatasetRule:
+    name: str
+    check: Callable[[list[dict[str, Any]]], tuple[bool, str, list[str]]]  # -> (ok, detail, evidence)
+
+
+def _has_cjk(text: str) -> bool:
+    return any("一" <= ch <= "鿿" for ch in text)
+
+
+def _field_value(row: dict[str, Any], dotted: str) -> Any:
+    value: Any = row
+    for part in dotted.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return value
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or value == "" or value == []
+
+
+# ---------------------------------------------------------------------------
+# Per-record rules
+# ---------------------------------------------------------------------------
+
+def _check_structure(row: dict[str, Any]) -> tuple[bool, str]:
+    try:
+        OutputRow.model_validate(row)
+        return True, "ok"
+    except Exception as exc:  # pydantic.ValidationError and friends
+        return False, str(exc)[:200]
+
+
+def _check_question(row: dict[str, Any]) -> tuple[bool, str]:
+    inp = row.get("input")
+    text = inp.get("text") if isinstance(inp, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        return False, "input.text 缺失或为空"
+    length = len(text.strip())
+    if length < QUESTION_MIN_LEN:
+        return False, f"input.text 过短（{length}<{QUESTION_MIN_LEN}）"
+    if length > QUESTION_MAX_LEN:
+        return False, f"input.text 过长（{length}>{QUESTION_MAX_LEN}）"
+    if "�" in text:
+        return False, "input.text 含乱码字符"
+    return True, "ok"
+
+
+def _check_category(row: dict[str, Any]) -> tuple[bool, str]:
+    category = row.get("category")
+    if not isinstance(category, str) or not category:
+        return False, "category 缺失或非字符串"
+    category_id, _, slug = category.partition("-")
+    if category_id not in CATEGORIES:
+        return False, f"未知分类 id：{category_id!r}"
+    if slug != ENGLISH_CATEGORIES[category_id]:
+        return False, f"slug 与 id 不匹配：{category!r}（期望 {category_id}-{ENGLISH_CATEGORIES[category_id]}）"
+    return True, "ok"
+
+
+def _check_chain(row: dict[str, Any]) -> tuple[bool, str]:
+    chain = row.get("chain")
+    if not isinstance(chain, list) or not chain:
+        return False, "chain 缺失、非列表或为空"
+    for i, hop in enumerate(chain):
+        if not isinstance(hop, dict):
+            return False, f"chain[{i}] 非对象"
+        if not isinstance(hop.get("plan"), str):
+            return False, f"chain[{i}].plan 非字符串"
+        tools = hop.get("tools")
+        if not isinstance(tools, list):
+            return False, f"chain[{i}].tools 非列表"
+        for j, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                return False, f"chain[{i}].tools[{j}] 非对象"
+            if not isinstance(tool.get("name"), str) or not tool["name"]:
+                return False, f"chain[{i}].tools[{j}].name 缺失或为空"
+            if not isinstance(tool.get("input"), dict):
+                return False, f"chain[{i}].tools[{j}].input 非对象"
+            if not isinstance(tool.get("output"), str):
+                return False, f"chain[{i}].tools[{j}].output 非字符串"
+    return True, "ok"
+
+
+def _check_answer(row: dict[str, Any]) -> tuple[bool, str]:
+    text = row.get("text_answer")
+    if not isinstance(text, str) or not text.strip():
+        return False, "text_answer 缺失或为空"
+    length = len(text.strip())
+    if length < MIN_ANSWER_LEN:
+        return False, f"text_answer 过短（{length}<{MIN_ANSWER_LEN}）"
+    return True, "ok"
+
+
+def _check_truncation(row: dict[str, Any]) -> tuple[bool, str]:
+    text = (row.get("text_answer") or "").strip()
+    if not text:
+        return False, "text_answer 为空"
+    if text[-1] in _SENTENCE_END:
+        return True, "ok"
+    if text[-1] in _DANGLING_END:
+        return False, f"回答以未完结标点结尾，疑似截断：…{text[-40:]}"
+    return True, "ok"
+
+
+def _check_timing(row: dict[str, Any]) -> tuple[bool, str]:
+    first = row.get("first_token_time_ms")
+    finish = row.get("finish_answer_time_ms")
+    if first is not None and finish is not None:
+        try:
+            if float(first) > float(finish):
+                return False, f"first_token_time_ms({first}) > finish_answer_time_ms({finish})"
+        except (TypeError, ValueError):
+            return False, f"时间字段非数值：first={first!r} finish={finish!r}"
+    for field in ("input_tokens", "output_tokens"):
+        value = row.get(field)
+        if value is not None and not isinstance(value, (int, float)):
+            return False, f"{field} 非数值：{value!r}"
+        if isinstance(value, (int, float)) and value < 0:
+            return False, f"{field} 为负：{value!r}"
+    session_round = row.get("session_round")
+    if isinstance(session_round, (int, float)) and session_round < 1:
+        return False, f"session_round 非法：{session_round!r}"
+    return True, "ok"
+
+
+def _check_meta(row: dict[str, Any]) -> tuple[bool, str]:
+    meta = row.get("meta")
+    if not isinstance(meta, dict):
+        return False, "meta 缺失或非对象"
+    reason = meta.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return False, "meta.reason 缺失或为空"
+    inp = row.get("input")
+    question = inp.get("text") if isinstance(inp, dict) else ""
+    if _has_cjk(str(question)):
+        translation = meta.get("translation")
+        if not isinstance(translation, str) or not translation.strip():
+            return False, "中文问句缺少 meta.translation 翻译"
+    return True, "ok"
+
+
+PER_RECORD_RULES: list[RuleCheck] = [
+    RuleCheck("structure", _check_structure),
+    RuleCheck("question", _check_question),
+    RuleCheck("category", _check_category),
+    RuleCheck("chain", _check_chain),
+    RuleCheck("answer", _check_answer),
+    RuleCheck("truncation", _check_truncation),
+    RuleCheck("timing", _check_timing),
+    RuleCheck("meta", _check_meta),
+]
+
+
+def check_record(row: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"rule": rule.name, "ok": ok, "detail": detail}
+        for rule in PER_RECORD_RULES
+        for ok, detail in (rule.check(row),)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Dataset-level rules
+# ---------------------------------------------------------------------------
+
+def _dataset_constant_field(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    if not records:
+        return True, "无记录", []
+    n = len(records)
+    issues: list[str] = []
+    for field in _CONTENT_FIELDS:
+        counts: dict[Any, int] = {}
+        for row in records:
+            value = _field_value(row, field)
+            counts[value] = counts.get(value, 0) + 1
+        if len(counts) == 1:
+            issues.append(f"字段 {field} 在所有 {n} 条记录中恒值")
+        else:
+            top_value, top_count = max(counts.items(), key=lambda kv: kv[1])
+            if top_count / n >= NEAR_CONSTANT_SHARE:
+                issues.append(f"字段 {field} 取值高度集中（单一值占 {top_count / n:.0%}）")
+    if issues:
+        return False, "；".join(issues), issues
+    return True, "ok", []
+
+
+def _dataset_near_duplicate(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    if len(records) < 2:
+        return True, "记录太少，跳过", []
+    cfg = DedupConfig(enabled=True, threshold=NEAR_DUP_THRESHOLD, n_gram=3, num_perm=128)
+    kept, dropped = dedup_rows(records, cfg)
+    if not dropped:
+        return True, f"未发现相似度≥{NEAR_DUP_THRESHOLD} 的近重复问句", []
+    evidence = [
+        f"{d['trace_id']} 与 {d['dedup_of_trace_id']} 相似度 {d['similarity']:.3f}：{d['text']}"
+        for d in dropped[:20]
+    ]
+    return False, f"发现 {len(dropped)} 条近重复问句（MinHash Jaccard≥{NEAR_DUP_THRESHOLD}）", evidence
+
+
+def _dataset_length_outlier(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    if not records:
+        return True, "无记录", []
+    issues: list[str] = []
+    for field, lower, upper in (
+        ("input.text", QUESTION_MIN_LEN, QUESTION_MAX_LEN),
+        ("text_answer", MIN_ANSWER_LEN, None),
+    ):
+        lengths = [
+            len(str(v)) if isinstance(v, str) else 0 for v in (_field_value(r, field) for r in records)
+        ]
+        too_short = sum(1 for ln in lengths if ln < lower)
+        too_long = sum(1 for ln in lengths if upper is not None and ln > upper)
+        if too_short or too_long:
+            issues.append(f"{field}：过短 {too_short} 条、过长 {too_long} 条")
+    if issues:
+        return False, "；".join(issues), issues
+    return True, "长度分布正常", []
+
+
+def _dataset_category_skew(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    if not records:
+        return True, "无记录", []
+    counts: dict[str, int] = {}
+    for row in records:
+        category = str(row.get("category") or "")
+        counts[category] = counts.get(category, 0) + 1
+    n = len(records)
+    top_count = max(counts.values())
+    top_share = top_count / n
+    evidence = [f"{cat}: {cnt}（{cnt / n:.0%}）" for cat, cnt in sorted(counts.items(), key=lambda kv: -kv[1])]
+    zero_ids = [
+        cid for cid in CATEGORIES if cid not in {str(cat).split("-")[0] for cat in counts}
+    ]
+    detail = f"最高类别占 {top_share:.0%}"
+    if zero_ids:
+        detail += f"；零记录类别：{', '.join(zero_ids)}"
+    if top_share > CATEGORY_SKEW_MAX_SHARE:
+        return False, f"类别分布偏斜：{detail}", evidence
+    return True, detail, evidence
+
+
+def _dataset_empty_rate(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    if not records:
+        return True, "无记录", []
+    n = len(records)
+    issues: list[str] = []
+    for field in _KEY_FIELDS:
+        empty = sum(1 for r in records if _is_empty(_field_value(r, field)))
+        ratio = empty / n
+        if ratio > EMPTY_FIELD_RATIO:
+            issues.append(f"{field} 空值率 {ratio:.0%}")
+    if issues:
+        return False, "；".join(issues), issues
+    return True, "ok", []
+
+
+def _dataset_unknown_fields(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    known = set(OutputRow.model_fields.keys())
+    # Ignore underscore-prefixed keys: reader bookkeeping (e.g. _line_number).
+    unknown = sorted(
+        {k for row in records for k in row.keys() if k not in known and not k.startswith("_")}
+    )
+    if not unknown:
+        return True, "无未知顶层字段", []
+    return True, f"发现未知顶层字段（信息，不标失败）：{', '.join(unknown)}", unknown
+
+
+DATASET_RULES: list[DatasetRule] = [
+    DatasetRule("constant_field", _dataset_constant_field),
+    DatasetRule("near_duplicate", _dataset_near_duplicate),
+    DatasetRule("length_outlier", _dataset_length_outlier),
+    DatasetRule("category_skew", _dataset_category_skew),
+    DatasetRule("empty_field_rate", _dataset_empty_rate),
+    DatasetRule("unknown_fields", _dataset_unknown_fields),
+]
+
+
+def run_dataset_rules(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"rule": rule.name, "ok": ok, "detail": detail, "evidence": evidence}
+        for rule in DATASET_RULES
+        for ok, detail, evidence in (rule.check(records),)
+    ]
