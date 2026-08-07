@@ -20,12 +20,11 @@ async def run_verify_stage(
     cache: dict[str, dict[str, Any]],
     cache_lock: asyncio.Lock,
 ) -> PipelineContext:
-    """Standalone second-pass; LLM failures keep the row (fail-open, sticky)."""
+    """Standalone multi-round re-check; LLM failures keep the row (fail-open, sticky)."""
     cfg = ctx.config
     if not cfg.verify.enabled or client is None or not ctx.rows:
         return ctx
 
-    system_prompt = resolve_prompt(cfg.verify.prompt_id)
     checkpoint = stage_checkpoint(cfg, "verify")
     counts = {"kept": 0, "rejected": 0, "failed": 0}
     debug: list[dict[str, Any]] = []
@@ -36,39 +35,58 @@ async def run_verify_stage(
         key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
         record = checkpoint.get(key)
         if record is not None:
-            return {"keep": record["keep"], "reason": record["reason"], "error": record.get("error")}
+            return {
+                "keep": record["keep"],
+                "reason": record["reason"],
+                "error": record.get("error"),
+                "rounds": record.get("rounds", []),
+            }
         user_prompt = "请判断以下单个问句是否属于复杂金融问句，只输出严格 JSON：\n" + json.dumps(
             {"question": question}, ensure_ascii=False, separators=(",", ":")
         )
-        cache_key = make_cache_key(
-            user_prompt, step=f"verify:{cfg.verify.prompt_id}", model=cfg.llm.model, prompt=system_prompt
-        )
-        try:
-            if cache_key in cache:
-                parsed = parse_verify_payload(cache[cache_key])
+        rounds: list[dict[str, Any]] = []
+        error: str | None = None
+        reason: str | None = None
+        for round_no in range(1, cfg.verify.max_rounds + 1):
+            if round_no == 1:
+                prompt_id = cfg.verify.prompt_id
+                system_prompt = resolve_prompt(prompt_id)
             else:
-                raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
-                parsed = parse_verify_response(raw)
-                await put_cache(
-                    cache,
-                    cfg.llm.cache,
-                    cache_key,
-                    parsed.to_cache_label(),
-                    meta={
-                        "step": "verify",
-                        "prompt_id": cfg.verify.prompt_id,
-                        "model": cfg.llm.model,
-                        "question": question[:120],
-                    },
-                    lock=cache_lock,
-                )
-            result = {"keep": parsed.is_complex, "reason": parsed.reason, "error": None}
-            await checkpoint.mark(key, keep=result["keep"], reason=result["reason"], error=None)
-            return result
-        except (ValueError, RuntimeError) as exc:
-            error = str(exc)[:200]
-            await checkpoint.mark(key, keep=True, reason=None, error=error)
-            return {"keep": True, "reason": None, "error": error}
+                prompt_id = "verify_recheck"
+                system_prompt = resolve_prompt(prompt_id).format(round_no=round_no)
+            cache_key = make_cache_key(
+                user_prompt, step=f"verify:{prompt_id}", model=cfg.llm.model, prompt=system_prompt
+            )
+            try:
+                if cache_key in cache:
+                    parsed = parse_verify_payload(cache[cache_key])
+                else:
+                    raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+                    parsed = parse_verify_response(raw)
+                    await put_cache(
+                        cache,
+                        cfg.llm.cache,
+                        cache_key,
+                        parsed.to_cache_label(),
+                        meta={
+                            "step": "verify",
+                            "prompt_id": prompt_id,
+                            "round": round_no,
+                            "model": cfg.llm.model,
+                            "question": question[:120],
+                        },
+                        lock=cache_lock,
+                    )
+            except (ValueError, RuntimeError) as exc:
+                error = str(exc)[:200]
+                break
+            reason = parsed.reason
+            rounds.append({"round": round_no, "is_complex": parsed.is_complex, "reason": parsed.reason})
+            if not parsed.is_complex:
+                break
+        keep = error is not None or (bool(rounds) and all(r["is_complex"] for r in rounds))
+        await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
+        return {"keep": keep, "reason": reason, "error": error, "rounds": rounds}
 
     results = await run_concurrent(
         ctx.rows,
@@ -92,6 +110,7 @@ async def run_verify_stage(
                 "is_complex": keep,
                 "reason": reason,
                 "error": error,
+                "rounds": result.get("rounds", []),
             }
         )
         if error is not None:

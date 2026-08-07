@@ -28,6 +28,7 @@ step2:
 verify:
   enabled: true
   prompt_id: verify_complex
+  max_rounds: 3
 
 post:
   enabled: true

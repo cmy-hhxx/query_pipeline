@@ -3,12 +3,13 @@ from __future__ import annotations
 from query_pipeline.prompts.complex_judge import COMPLEX_JUDGE
 from query_pipeline.prompts.segment import SEGMENT
 from query_pipeline.prompts.translate import TRANSLATE
-from query_pipeline.prompts.verify import VERIFY_COMPLEX
+from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
 
 PROMPTS: dict[str, str] = {
     "segment": SEGMENT,
     "complex_judge": COMPLEX_JUDGE,
     "verify_complex": VERIFY_COMPLEX,
+    "verify_recheck": VERIFY_RECHECK,
     "translate": TRANSLATE,
 }
 

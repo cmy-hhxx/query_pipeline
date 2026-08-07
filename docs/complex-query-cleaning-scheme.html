@@ -628,7 +628,7 @@
               <span class="step-name">独立复判</span>
             </div>
             <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-            <div class="step-rule">单句无上下文复判；失败 sticky fail-open（保留并 checkpoint，resume 不翻转）</div>
+            <div class="step-rule">单句无上下文复判，最多 <span class="threshold">3 轮</span>级联、逐轮从严剔除；失败 sticky fail-open（保留并 checkpoint，resume 不翻转）</div>
             <div class="step-artifact"><span class="step-artifact-label">产物</span><span class="step-artifact-value">work/verified.jsonl</span></div>
           </div>
 
@@ -929,7 +929,7 @@ JSON 格式：
           <summary>
             <span class="summary-title">
               <strong>独立复判提示词</strong>
-              <span class="step-subtitle" style="margin-top:2px">verify_complex · 输出 {"is_complex","reason"}</span>
+              <span class="step-subtitle" style="margin-top:2px">verify_complex · 输出 {"is_complex","reason"} · 多轮级联（默认 3 轮）</span>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
@@ -1006,7 +1006,7 @@ JSON 格式：
           { id: 2, name: '候选筛选',     sub: 'step1 · 规则',      kind: 'code' },
           { id: 3, name: '语义判定',     sub: 'complex_judge',     kind: 'llm'  },
           { id: 4, name: '组装输出行',   sub: 'assemble · 规则',   kind: 'code' },
-          { id: 5, name: '独立复判',     sub: 'verify_complex',    kind: 'llm'  },
+          { id: 5, name: '独立复判',     sub: 'verify · 最多 3 轮级联', kind: 'llm'  },
           { id: 6, name: '去重 + 翻译',  sub: 'post_stage',        kind: 'both' },
         ];
         nodes.forEach((n, i) => { n.x = LEFT_PAD + i * STEP; n.cy = MAIN_Y + H / 2; });

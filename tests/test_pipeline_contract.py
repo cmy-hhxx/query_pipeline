@@ -13,12 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.config.models import Step1Config
+from query_pipeline.config.models import Step1Config, VerifyConfig
 from query_pipeline.llm.cache import make_cache_key
 from query_pipeline.models.records import ENGLISH_CATEGORIES
 from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
+from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
 from query_pipeline.session.assemble import assemble_row
 from query_pipeline.session.candidates import select_candidates
 from query_pipeline.adapters.chat import adapt_chat
@@ -424,6 +425,133 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual([v["trace_id"] for v in verified], ["trace1", "trace2"])
             self.assertEqual(verified[1]["is_complex"], False)
 
+    def test_verify_config_max_rounds(self) -> None:
+        self.assertEqual(VerifyConfig().max_rounds, 3)
+        self.assertEqual(VerifyConfig(max_rounds=1).max_rounds, 1)
+        with self.assertRaises(ValueError):
+            VerifyConfig(max_rounds=0)
+
+    def test_cache_key_verify_rounds_distinct(self) -> None:
+        q = "question"
+        base = make_cache_key(q, step="verify:verify_complex", model="m", prompt=VERIFY_COMPLEX)
+        r2 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=VERIFY_RECHECK.format(round_no=2))
+        r3 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=VERIFY_RECHECK.format(round_no=3))
+        self.assertNotEqual(base, r2)
+        self.assertNotEqual(r2, r3)
+        self.assertNotEqual(base, r3)
+
+    def test_verify_multi_round_cascade(self) -> None:
+        # Cascade filter: "reject r1" drops in round 1, "reject r2" survives
+        # round 1 but drops in round 2, "keep" survives all 3 rounds. Round 2/3
+        # are distinct LLM calls (not cache replays) — proven by the recorded
+        # per-question round sequence.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            names = ("web_search", "finquery", "compute")
+            turns = [
+                _make_turn(0, "帮我分析贵州茅台的估值并给出买卖建议", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+                _make_turn(1, "分析一下宁德时代的三季度业绩并预测走势", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+                _make_turn(2, "计算比亚迪过去五年的平均市盈率", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+            ]
+            session = {"thread_id": "t1", "context": turns}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            clients: list[FakeVerifyCascadeLLMClient] = []
+
+            def factory(config: object) -> FakeVerifyCascadeLLMClient:
+                client = FakeVerifyCascadeLLMClient(config)
+                clients.append(client)
+                return client
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory):
+                summary = run_pipeline(cfg)
+            client = clients[0]
+
+            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_rejected"], 2)
+            self.assertEqual(summary.stats["verify_failed"], 0)
+            self.assertEqual(
+                client.rounds_called,
+                {
+                    "帮我分析贵州茅台的估值并给出买卖建议": [1, 2, 3],
+                    "分析一下宁德时代的三季度业绩并预测走势": [1],
+                    "计算比亚迪过去五年的平均市盈率": [1, 2],
+                },
+            )
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual([r["input"]["text"] for r in rows], ["帮我分析贵州茅台的估值并给出买卖建议"])
+
+            verified = _read_jsonl(tmp_path / "work/verified.jsonl")
+            self.assertEqual([v["trace_id"] for v in verified], ["trace0", "trace1", "trace2"])
+            by_q = {v["question"]: v for v in verified}
+            self.assertTrue(by_q["帮我分析贵州茅台的估值并给出买卖建议"]["is_complex"])
+            self.assertEqual([r["round"] for r in by_q["帮我分析贵州茅台的估值并给出买卖建议"]["rounds"]], [1, 2, 3])
+            self.assertFalse(by_q["分析一下宁德时代的三季度业绩并预测走势"]["is_complex"])
+            self.assertEqual([r["round"] for r in by_q["分析一下宁德时代的三季度业绩并预测走势"]["rounds"]], [1])
+            self.assertFalse(by_q["计算比亚迪过去五年的平均市盈率"]["is_complex"])
+            self.assertEqual(
+                [(r["round"], r["is_complex"]) for r in by_q["计算比亚迪过去五年的平均市盈率"]["rounds"]],
+                [(1, True), (2, False)],
+            )
+
+    def test_verify_multi_round_error_mid_round_fail_open(self) -> None:
+        # Round 2 of the "flaky" question raises: fail-open keeps the row
+        # (verify_failed=1) and checkpoints the partial cascade so a re-run
+        # makes zero LLM calls.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            names = ("web_search", "finquery", "compute")
+            turns = [
+                _make_turn(0, "帮我构建一个沪深300的增强策略并回测", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+                _make_turn(1, "分析一下中概股的估值并给出配置建议", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
+            ]
+            session = {"thread_id": "t1", "context": turns}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            clients: list[FakeVerifyMidRoundErrorLLMClient] = []
+
+            def factory(config: object) -> FakeVerifyMidRoundErrorLLMClient:
+                client = FakeVerifyMidRoundErrorLLMClient(config)
+                clients.append(client)
+                return client
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory):
+                summary = run_pipeline(cfg)
+            client = clients[0]
+
+            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_failed"], 1)
+            self.assertEqual(summary.stats["verify_rejected"], 0)
+            self.assertEqual(
+                client.rounds_called,
+                {
+                    "帮我构建一个沪深300的增强策略并回测": [1, 2, 3],
+                    "分析一下中概股的估值并给出配置建议": [1, 2],
+                },
+            )
+
+            clients2: list[FakeVerifyMidRoundErrorLLMClient] = []
+
+            def factory2(config: object) -> FakeVerifyMidRoundErrorLLMClient:
+                client = FakeVerifyMidRoundErrorLLMClient(config)
+                clients2.append(client)
+                return client
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory2):
+                summary2 = run_pipeline(cfg)
+            self.assertEqual(summary2.stats["verify_kept"], 1)
+            self.assertEqual(summary2.stats["verify_failed"], 1)
+            self.assertEqual(clients2[0].calls, [])
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual(
+                {r["input"]["text"] for r in rows},
+                {"帮我构建一个沪深300的增强策略并回测", "分析一下中概股的估值并给出配置建议"},
+            )
+
     def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
         # Two candidate turns with identical English text: verify keeps both,
         # dedup drops the second, translate fills meta.translation on the
@@ -623,6 +751,81 @@ class FakeFailingSessionLLMClient:
                 raise RuntimeError("simulated judge failure")
             return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
         raise RuntimeError("simulated verify failure")
+
+    async def close(self) -> None:
+        return None
+
+
+_CASCADE_VERDICTS: dict[str, dict[int, bool]] = {
+    "帮我分析贵州茅台的估值并给出买卖建议": {1: True, 2: True, 3: True},
+    "分析一下宁德时代的三季度业绩并预测走势": {1: False},
+    "计算比亚迪过去五年的平均市盈率": {1: True, 2: False},
+}
+
+
+class FakeVerifyCascadeLLMClient:
+    """Judge marks every candidate complex; verify flips per question per round.
+
+    Rounds are told apart by the system prompt (round 1 = VERIFY_COMPLEX,
+    round >= 2 = formatted VERIFY_RECHECK). The recorded round sequence proves
+    rounds 2/3 are genuinely fresh calls, not cache replays.
+    """
+
+    def __init__(self, config: object) -> None:
+        self.config = config
+        self.rounds_called: dict[str, list[int]] = {}
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "questions" in payload:  # segmentation
+            n = len(payload["questions"])
+            return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
+        if "current_question" in payload:  # step2 judge
+            return json.dumps({"is_complex": True, "category_id": "03", "reason": "上下文复杂"}, ensure_ascii=False)
+        question = payload["question"]
+        if system_prompt == VERIFY_COMPLEX:
+            round_no = 1
+        elif system_prompt == VERIFY_RECHECK.format(round_no=2):
+            round_no = 2
+        elif system_prompt == VERIFY_RECHECK.format(round_no=3):
+            round_no = 3
+        else:
+            raise AssertionError(f"unexpected verify system prompt: {system_prompt[:60]!r}")
+        self.rounds_called.setdefault(question, []).append(round_no)
+        is_complex = _CASCADE_VERDICTS[question][round_no]
+        return json.dumps({"is_complex": is_complex, "reason": f"第{round_no}轮"}, ensure_ascii=False)
+
+    async def close(self) -> None:
+        return None
+
+
+class FakeVerifyMidRoundErrorLLMClient:
+    """Round 2 of the 'flaky' question raises (fail-open keeps the row)."""
+
+    def __init__(self, config: object) -> None:
+        self.config = config
+        self.calls: list[dict[str, Any]] = []
+        self.rounds_called: dict[str, list[int]] = {}
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        self.calls.append(payload)
+        if "questions" in payload:  # segmentation
+            n = len(payload["questions"])
+            return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
+        if "current_question" in payload:  # step2 judge
+            return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
+        question = payload["question"]
+        if system_prompt == VERIFY_COMPLEX:
+            round_no = 1
+        elif system_prompt == VERIFY_RECHECK.format(round_no=2):
+            round_no = 2
+        else:
+            round_no = 3
+        self.rounds_called.setdefault(question, []).append(round_no)
+        if question == "分析一下中概股的估值并给出配置建议" and round_no == 2:
+            raise RuntimeError("simulated verify failure")
+        return json.dumps({"is_complex": True, "reason": "复杂"}, ensure_ascii=False)
 
     async def close(self) -> None:
         return None

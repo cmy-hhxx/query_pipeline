@@ -71,6 +71,7 @@ class LLMConfig(ConfigModel):
 class VerifyConfig(ConfigModel):
     enabled: bool = True
     prompt_id: str = "verify_complex"
+    max_rounds: int = 3
 
     @field_validator("prompt_id")
     @classmethod
@@ -82,6 +83,13 @@ class VerifyConfig(ConfigModel):
 
         resolve_prompt(prompt_id)
         return prompt_id
+
+    @field_validator("max_rounds")
+    @classmethod
+    def validate_max_rounds(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("max_rounds must be >= 1")
+        return value
 
 
 class DedupConfig(ConfigModel):
