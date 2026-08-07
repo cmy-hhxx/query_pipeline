@@ -14,8 +14,9 @@ from query_pipeline.post.translate import translate_rows
 
 def run_post_stage(ctx: PipelineContext) -> PipelineContext:
     """Post-processing of the assembled complex-query rows: MinHash rule dedup
-    first (fewer rows -> fewer LLM calls), then translation of input.text into
-    meta.translation. Both modules are independently toggleable.
+    first (fewer rows -> fewer LLM calls), then Chinese translation of
+    input.text into translation / meta.translation. Both modules are
+    independently toggleable.
     """
     cfg = ctx.config
     if not cfg.post_stage.enabled:
@@ -53,7 +54,6 @@ async def _translate_then_close(
             ctx.rows,
             client=client,
             llm_cfg=cfg.llm_stage,
-            translate_cfg=cfg.post_stage.translate,
             cache=cache,
             cache_path=cfg.llm_stage.cache,
             checkpoint=checkpoint,

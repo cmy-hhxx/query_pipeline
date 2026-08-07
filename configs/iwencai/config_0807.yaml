@@ -36,8 +36,6 @@ post_stage:
     threshold: 0.85
   translate:
     enabled: true
-    target: zh
-
 llm_stage:
   enabled: true
   base_url_env: OPENAI_BASE_URL

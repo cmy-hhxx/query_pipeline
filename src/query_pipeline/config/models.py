@@ -105,10 +105,23 @@ class DedupConfig(ConfigModel):
             raise ValueError("threshold must be in [0, 1]")
         return value
 
+    @field_validator("n_gram")
+    @classmethod
+    def validate_n_gram(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("n_gram must be >= 1")
+        return value
+
+    @field_validator("num_perm")
+    @classmethod
+    def validate_num_perm(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("num_perm must be >= 1")
+        return value
+
 
 class TranslateConfig(ConfigModel):
     enabled: bool = True
-    target: str = "zh"
 
 
 class PostStageConfig(ConfigModel):

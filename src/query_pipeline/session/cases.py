@@ -29,8 +29,18 @@ def normalize_judge_data_record(record: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(meta, dict):
         meta = {}
 
+    raw_input = jd.get("input")
+    if isinstance(raw_input, dict):
+        question = raw_input.get("text") or record.get("question", "")
+    elif isinstance(raw_input, str):
+        question = raw_input or record.get("question", "")
+    else:
+        question = record.get("question", "")
+    if not isinstance(question, str):
+        question = str(question) if question is not None else ""
+
     current: dict[str, Any] = {
-        "question": (jd.get("input") or {}).get("text") or record.get("question", ""),
+        "question": question,
         "answer": jd.get("text_answer") or jd.get("raw_answer") or "",
         "trace_id": jd.get("trace_id") or record.get("trace_id", ""),
         "chain": jd.get("chain") if isinstance(jd.get("chain"), list) else [],

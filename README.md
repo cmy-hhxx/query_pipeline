@@ -1,110 +1,65 @@
 # query_pipeline
 
-Config-driven pipeline that extracts complex financial queries from multi-turn agent sessions.
+从多轮 agent 会话中抽取复杂金融 query 的配置驱动流水线。
 
-## Run
+## 运行
 
-The default entrypoint reads `configs/aime/config.yaml`:
+默认读 `configs/aime/config.yaml`，`.env` 提供 `OPENAI_BASE_URL` / `OPENAI_API_KEY`：
 
 ```bash
 uv run python run.py --dry-run
 uv run python run.py
+uv run python run.py -c configs/aime/config.yaml --dry-run   # 临时换配置
 ```
 
-Use `-c` only for temporary experiments:
-
-```bash
-uv run python run.py -c configs/aime/config.yaml --dry-run
-```
-
-`.env` supplies `OPENAI_BASE_URL` and `OPENAI_API_KEY`; the loader reads it automatically.
-
-### Datasets & configs
-
-Each config is tied to one input file under `data/`:
-
-| Config | Input | Format |
+| 配置 | 输入 | 格式 |
 |---|---|---|
-| `configs/aime/config.yaml` (default) | `data/aime/0807.jsonl` | `session` |
+| `configs/aime/config.yaml`（默认） | `data/aime/0807.jsonl` | `session` |
 | `configs/aime/config_0806.yaml` | `data/aime/0806.jsonl` | `session` |
-| `configs/aime/config_0807.yaml` | `data/aime/0807.jsonl` | `session` |
 | `configs/iwencai/config_0807.yaml` | `data/iwencai/0807.jsonl` | `judge_data` |
 
-## Flow
+## 流程
 
-Input is JSONL. `input.format` selects the shape (default `session`):
+输入 JSONL，由 `input.format` 决定形态：
 
-- `session`: each line is one full thread — `{"thread_id": "...", "context": [ {question, answer, run_id, trace_id, tool_names, tool_count, chain, ...}, ... ]}`. The pipeline segments the thread, then screens candidate turns.
-- `judge_data`: each line is one single-case question — `{"trace_id": ..., "question": ..., "judge_data": {"case_id": ..., "input": {"text": ...}, "context": [ {question, answer}, ...], "chain": [...], "raw_answer": ..., "text_answer": ..., "meta": {...}}}`. The prior context is already assembled in `judge_data.context`, so no topic segmentation or chain/tool-call screening runs — the question is judged directly against that context. See `configs/iwencai/config_0807.yaml` for a runnable example.
+- **session**：整条会话 → 主题切分 → 规则筛候选 → LLM 判复杂 → 组装 → 独立复核 → 去重/翻译
+- **judge_data**：单题已带上下文，跳过切分与规则筛选，直接判复杂
 
-The pipeline processes sessions one at a time (a `Sessions` progress bar counts sessions, with a live `LLM complex judge` bar inside each session; verify and translate each show their own bar):
+| 步骤 | 做什么 |
+|---|---|
+| segment | LLM 按主题切会话；失败则整会话一段 |
+| step1 | 规则：拒低价值/过短，再按工具调用数/链路步数/工具种类筛候选 |
+| step2 | LLM `complex_judge`：结合同段上文，输出 `{is_complex, category_id, reason}` |
+| step3 | 组装输出行（`context` 为同段上文；`trace_id` = turn 的 `run_id`） |
+| step4 | LLM 独立复核（不带上下文），非独立复杂的剔除；失败 fail-open |
+| step5 | `dedup`（MinHash，Jaccard≥0.85）→ `translate`（写入 `meta.translation`） |
 
-1. `segment`: one LLM call splits a session's questions into topic-contiguous segments. A topic may not recur — if it does (A, B, A), the whole span is merged into one segment. On LLM failure the whole session is treated as one segment.
-2. `step1` (rules): within each segment, pick candidate turns that look complex: reject low-value / blank / too-short text first, then keep a turn only if it clears all of `min_chain_tool_calls` AND `min_chain_steps` AND `min_unique_tools` (default 7 tool calls / 1 chain step / 2 distinct tools).
-3. `step2` (LLM `complex_judge`): for each candidate, send the same-segment prior questions plus the current question; the LLM returns `{is_complex, category_id, reason}`.
-4. `step3` (assemble): for each turn judged complex, emit one row in the `filter_out.jsonc` schema (`context[]` holds prior turns trimmed to `{question, answer}` — same-segment prior, falling back to every earlier session turn for a segment-leading turn, so only a session's very first turn has empty context; `trace_id` = the turn's `run_id`; `category` = `id-slug`, e.g. `01-data-metrics-calculation`).
-5. `step4` (verify, LLM `verify_complex`): pass 1 judges with context, which lets connective short turns ride on rich context — so every exported question is re-judged **standalone** (no context): only questions complex on their own survive. LLM failures keep the row (fail-open) and count as `verify_failed`.
-6. `step5` (post): two toggleable modules on the assembled rows. `dedup` (rules, MinHash): character n-gram shingles → 128-perm signature, LSH banding limits candidate pairs; rows with Jaccard ≥ `threshold` (default 0.85) are dropped, keeping the first occurrence; dropped rows with provenance land in `work/aime/0807/deduped.jsonl` (`dedup_removed` in summary). `translate` (LLM): `input.text` is translated to `target` (default `zh`, cached in `work/aime/0807/llm_cache.jsonl`) and written to `meta.translation`; already-CJK text is skipped, LLM failures fall back to the original text (counted as `translate_failed`). Runs dedup before translate so fewer rows hit the LLM.
+## 断点续跑
 
-## Checkpoint / resume
+杀进程后直接重跑即可：
 
-A killed run (network outage, Ctrl-C, OOM) can simply be re-run: completed units are skipped instead of re-done. This works at two layers:
+- **LLM 缓存**：`work/.../llm_cache.jsonl`，按 (prompt, question, model) 命中
+- **单元 checkpoint**：`work/.../checkpoints/`（session / verify / translate），已完成单元跳过
 
-- **LLM call layer**: every successful LLM response is append-cached in `work/aime/0807/llm_cache.jsonl` keyed by (prompt, question, model), so re-runs never re-pay for calls that already succeeded.
-- **Unit layer**: each completed unit is marked in an append-only checkpoint under `work/aime/0807/checkpoints/` — `session.jsonl` (one line per processed session, holding its rows/stats/debug), `verify.jsonl` and `translate.jsonl` (one line per row, keyed by content). On resume, units already marked are replayed from the checkpoint and their LLM work is skipped entirely.
+配置指纹或输入文件变化会自动失效旧 checkpoint。强制全量重跑：删 `checkpoints/`（或连同 `llm_cache.jsonl`）。
 
-Semantics:
+## 输出
 
-- Only units whose LLM work **completed cleanly** are marked. A session or row that hit LLM failures is not marked, so the next run retries exactly those calls — once the network is back they succeed and get marked. (Each run also keeps going past failures: sessions continue, verify keeps rows fail-open, translate falls back to the original text.)
-- The session checkpoint is tied to the input file (path, size, mtime) and to a fingerprint of the config + all resolved prompts; the verify/translate checkpoints are tied to the config/prompt fingerprint and are keyed by content, so editing the input only re-processes the changed sessions. Any mismatch is logged (`checkpoint ... starting fresh`) and the file is re-seeded rather than reused, so stale results are never silently served.
-- Torn trailing lines from a hard-killed run are dropped on load (that unit just re-runs, with its LLM calls being cache hits).
+目录约定：`data/{dataset}/` → `work/{dataset}/<name>/` → `outputs/{dataset}/`
 
-Progress bars are shown for every LLM-heavy stage. Toggle checkpointing with `checkpoint.enabled`; change the directory with `checkpoint.dir` (both in `configs/aime/config.yaml`). To force a full re-run, delete `work/aime/0807/checkpoints/` (or `work/aime/0807/llm_cache.jsonl` to also drop the call cache).
+- `outputs/aime/complex_queries_0807.jsonl` — 复杂 query（一行一条）
+- `outputs/aime/summary_0807.json` — 计数汇总
+- `work/aime/0807/` — 中间产物（`segments` / `candidates` / `judged` / `verified` / `deduped`）
 
-## Output Contract
+输出行关键字段：`trace_id`、`category`、`input.text`、`context`、`tools`、`meta.reason`；`difficulty_level` 固定 `"hard"`。
 
-One output row per complex query:
+## CSV 导出注意
 
-```json
-{
-  "capture_mode": "full_link",
-  "user_cohort": "regular",
-  "source_case_id": "<thread_id>",
-  "answer_key": "",
-  "trace_id": "<turn run_id>",
-  "category": "01-data-metrics-calculation",
-  "input": {"text": "<question>", "image": "", "file": ""},
-  "session_round": 3,
-  "context": [{"question": "...", "answer": "..."}],
-  "chain": [],
-  "tools": ["web_search", "finquery"],
-  "raw_answer": "...",
-  "text_answer": "...",
-  "multimodal": [],
-  "model_version": "",
-  "release_id": "",
-  "agent_mode": "",
-  "translation": "",
-  "user_id": "1885129394",
-  "difficulty_level": "hard",
-  "first_token_time_ms": 31407,
-  "finish_answer_time_ms": 52383,
-  "input_tokens": 0,
-  "output_tokens": 0,
-  "request_time_ms": null,
-  "meta": {"reason": "需要多步工具调用与综合判断"}
-}
-```
+`complex_queries_flat.csv` 由 `clean_script.jq` 从主输出生成，供 WPS/Excel 用。踩过的坑：
 
-Per-dataset layouts: inputs live in `data/{aime,iwencai}/`, final outputs in `outputs/{aime,iwencai}/`, intermediates in `work/{aime,iwencai}/<dataset>/`.
+1. 字段内换行/Tab → 替换为空格
+2. 内嵌 HTML/echarts → 替换为 `[HTML图表代码已省略]`
+3. 单格 > 32767 字符会截断并错列 → 截到 ≤32000，完整数据留 jsonl
+4. 缺 UTF-8 BOM → 中文乱码，需加 `EF BB BF`
 
-Public outputs:
-
-- `outputs/aime/complex_queries_0807.jsonl` — one row per complex query (deduped + translated when `post_stage` is enabled)
-- `outputs/aime/summary_0807.json` — per-run counters (sessions, segments, candidates, complex/non-complex/llm-failed rows, verify kept/rejected/failed, dedup removed, translated/skipped/failed, category counts)
-
-When `llm_stage.enabled=false`, rules-based candidate selection still runs but no rows are classified, so `complex_queries.jsonl` stays empty.
-
-Intermediate debug files are written under `work/aime/0807/` (`segments.jsonl`, `candidates.jsonl`, `judged.jsonl`, `verified.jsonl`, `deduped.jsonl`) and LLM responses are cached in `work/aime/0807/llm_cache.jsonl`.
-
-`difficulty_level` is fixed to `"hard"` (rows are already judged complex). Each output row's `meta.reason` carries the judge's rationale and `meta.translation` the translated question; the full per-candidate decision (including non-complex and LLM-failure cases) with `is_complex`/`category_id`/`reason`/`error` is in `work/aime/0807/judged.jsonl` for debugging.
+jsonl 是无损源；CSV 仅为表格可读。

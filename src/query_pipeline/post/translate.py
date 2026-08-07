@@ -6,27 +6,29 @@ import re
 from pathlib import Path
 from typing import Any
 
-from query_pipeline.config.models import LLMStageConfig, TranslateConfig
+from query_pipeline.config.models import LLMStageConfig
 from query_pipeline.io.checkpoint import Checkpoint, content_key
-from query_pipeline.llm.cache import append_cache, make_cache_key
+from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
+from query_pipeline.models.session import parse_json_object
 from query_pipeline.prompts import resolve_prompt
 
 _CJK = re.compile(r"[一-鿿]")
 
-_TARGET_LABELS: dict[str, str] = {"zh": "简体中文", "en": "英文"}
-
 
 def needs_translation(text: str, *, cjk_ratio: float = 0.3) -> bool:
-    """True unless the text is empty or already predominantly CJK (target zh)."""
+    """True unless the text is empty or already predominantly Chinese."""
     if not text.strip():
         return False
     return len(_CJK.findall(text)) / len(text) < cjk_ratio
 
 
-def _target_label(target: str) -> str:
-    return _TARGET_LABELS.get(target, target)
+def _row_text(row: dict[str, Any]) -> str:
+    inp = row.get("input")
+    if isinstance(inp, dict):
+        return str(inp.get("text") or "")
+    return ""
 
 
 async def translate_rows(
@@ -34,27 +36,27 @@ async def translate_rows(
     *,
     client: LLMClient,
     llm_cfg: LLMStageConfig,
-    translate_cfg: TranslateConfig,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
     checkpoint: Checkpoint | None = None,
 ) -> dict[str, int]:
-    """Fill meta.translation for each row's input.text.
+    """Fill ``translation`` / ``meta.translation`` with the Chinese version of input.text.
 
     Already-Chinese rows are kept as-is (no LLM call); LLM failures fall back
-    to the original text so downstream always has a meta.translation value.
+    to the original text so downstream always has a translation value.
     Returns {translated, translate_skipped, translate_failed}.
     """
-    system_prompt = resolve_prompt("translate").format(target=_target_label(translate_cfg.target))
+    system_prompt = resolve_prompt("translate")
     lock = asyncio.Lock()
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
 
     def put(row: dict[str, Any], translation: str) -> None:
+        row["translation"] = translation
         row.setdefault("meta", {})["translation"] = translation
 
     async def worker(row: dict[str, Any]) -> None:
-        text = row.get("input", {}).get("text", "") if isinstance(row.get("input"), dict) else ""
+        text = _row_text(row)
         key = content_key(text)
         record = checkpoint.get(key)
         if record is not None:
@@ -78,19 +80,14 @@ async def translate_rows(
             else:
                 raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
                 translation = parse_translation(raw)
-                async with lock:
-                    cache[cache_key] = {"translation": translation}
-                    append_cache(
-                        cache_path,
-                        cache_key,
-                        {"translation": translation},
-                        meta={
-                            "step": "translate",
-                            "target": translate_cfg.target,
-                            "model": llm_cfg.model,
-                            "text": text[:120],
-                        },
-                    )
+                await put_cache(
+                    cache,
+                    cache_path,
+                    cache_key,
+                    {"translation": translation},
+                    meta={"step": "translate", "model": llm_cfg.model, "text": text[:120]},
+                    lock=lock,
+                )
             put(row, translation)
             counts["translated"] += 1
             # Only clean results are checkpointed; failed rows re-translate on resume.
@@ -106,7 +103,7 @@ async def translate_rows(
 
 
 def parse_translation(raw: str) -> str:
-    translation = json.loads(raw).get("translation")
+    translation = parse_json_object(raw).get("translation")
     if not isinstance(translation, str) or not translation.strip():
         raise ValueError("missing translation in response")
     return translation

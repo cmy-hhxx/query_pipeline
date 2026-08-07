@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from query_pipeline.io.checkpoint import content_key, stage_checkpoint
-from query_pipeline.llm.cache import append_cache, load_cache, make_cache_key
+from query_pipeline.llm.cache import load_cache, make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
 from query_pipeline.models.session import parse_verify_payload, parse_verify_response
@@ -19,7 +19,8 @@ def run_verify_stage(ctx: PipelineContext) -> PipelineContext:
     Pass 1 judged questions *with* same-segment context, which lets
     connective short turns ride on rich context. This stage re-judges the
     bare question (no context) so only questions that are complex on their
-    own survive. LLM failures keep the row (fail-open) and are counted.
+    own survive. LLM failures keep the row (fail-open), are counted, and are
+    checkpointed sticky so a resume cannot later flip a kept row to rejected.
     """
     cfg = ctx.config
     if not cfg.verify_stage.enabled or not cfg.llm_stage.enabled or not ctx.rows:
@@ -51,7 +52,8 @@ async def _verify_all(
     debug: list[dict[str, Any]] = []
 
     async def worker(row: dict[str, Any]) -> dict[str, Any]:
-        question = row.get("input", {}).get("text", "") if isinstance(row.get("input"), dict) else ""
+        inp = row.get("input")
+        question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
         record = checkpoint.get(key)
         if record is not None:
@@ -68,26 +70,28 @@ async def _verify_all(
             else:
                 raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
                 parsed = parse_verify_response(raw)
-                label = parsed.to_cache_label()
-                async with lock:
-                    cache[cache_key] = label
-                    append_cache(
-                        cfg.llm_stage.cache,
-                        cache_key,
-                        label,
-                        meta={
-                            "step": "verify",
-                            "prompt_id": cfg.verify_stage.prompt_id,
-                            "model": cfg.llm_stage.model,
-                            "question": question[:120],
-                        },
-                    )
+                await put_cache(
+                    cache,
+                    cfg.llm_stage.cache,
+                    cache_key,
+                    parsed.to_cache_label(),
+                    meta={
+                        "step": "verify",
+                        "prompt_id": cfg.verify_stage.prompt_id,
+                        "model": cfg.llm_stage.model,
+                        "question": question[:120],
+                    },
+                    lock=lock,
+                )
             result = {"keep": parsed.is_complex, "reason": parsed.reason, "error": None}
-            # Only clean results are checkpointed; errored rows re-verify on resume.
             await checkpoint.mark(key, keep=result["keep"], reason=result["reason"], error=None)
             return result
         except (ValueError, RuntimeError) as exc:
-            return {"keep": None, "reason": None, "error": str(exc)[:200]}
+            # Sticky fail-open: persist keep=True so resume cannot drop a row
+            # that a completed prior run already emitted.
+            error = str(exc)[:200]
+            await checkpoint.mark(key, keep=True, reason=None, error=error)
+            return {"keep": True, "reason": None, "error": error}
 
     results = await run_concurrent(
         rows,
@@ -101,12 +105,14 @@ async def _verify_all(
     kept: list[dict[str, Any]] = []
     for row, result in zip(rows, results):
         keep, reason, error = result["keep"], result["reason"], result["error"]
+        inp = row.get("input")
+        question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         debug.append(
             {
                 "source_case_id": row.get("source_case_id", ""),
                 "trace_id": row.get("trace_id", ""),
                 "category": row.get("category", ""),
-                "question": (row.get("input") or {}).get("text", "")[:200],
+                "question": question[:200],
                 "is_complex": keep,
                 "reason": reason,
                 "error": error,

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.config.models import DedupConfig, LLMStageConfig, TranslateConfig
+from query_pipeline.config.models import DedupConfig, LLMStageConfig
 from query_pipeline.io.jsonl import read_jsonl, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
@@ -121,7 +121,6 @@ class TranslateTest(unittest.TestCase):
                     rows,
                     client=FakeLLMClient(handler),
                     llm_cfg=_llm_cfg(tmp),
-                    translate_cfg=TranslateConfig(),
                     cache={},
                     cache_path=Path(tmp) / "cache.jsonl",
                 )
@@ -143,7 +142,6 @@ class TranslateTest(unittest.TestCase):
                     rows,
                     client=FakeLLMClient(handler),
                     llm_cfg=_llm_cfg(tmp),
-                    translate_cfg=TranslateConfig(),
                     cache={},
                     cache_path=Path(tmp) / "cache.jsonl",
                 )
@@ -165,7 +163,6 @@ class TranslateTest(unittest.TestCase):
                     rows,
                     client=FakeLLMClient(handler),
                     llm_cfg=_llm_cfg(tmp),
-                    translate_cfg=TranslateConfig(),
                     cache={},
                     cache_path=Path(tmp) / "cache.jsonl",
                 )
@@ -189,7 +186,6 @@ class TranslateTest(unittest.TestCase):
                     rows,
                     client=FakeLLMClient(handler),
                     llm_cfg=_llm_cfg(tmp),
-                    translate_cfg=TranslateConfig(),
                     cache=cache,
                     cache_path=cache_path,
                 )
@@ -207,7 +203,6 @@ class TranslateTest(unittest.TestCase):
                     rows2,
                     client=FakeLLMClient(fail_if_called),
                     llm_cfg=_llm_cfg(tmp),
-                    translate_cfg=TranslateConfig(),
                     cache=load_cache(cache_path),
                     cache_path=cache_path,
                 )
@@ -233,13 +228,12 @@ class PostStagePipelineTest(unittest.TestCase):
         self.assertTrue(post.dedup.enabled)
         self.assertEqual(post.dedup.threshold, 0.85)
         self.assertTrue(post.translate.enabled)
-        self.assertEqual(post.translate.target, "zh")
 
     def test_config_yaml_enables_post_stage(self) -> None:
         cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
         self.assertTrue(cfg.post_stage.enabled)
         self.assertEqual(cfg.post_stage.dedup.threshold, 0.85)
-        self.assertEqual(cfg.post_stage.translate.target, "zh")
+        self.assertTrue(cfg.post_stage.translate.enabled)
 
     def test_end_to_end_dedup_and_translate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -412,7 +406,6 @@ def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
                 threshold: 0.85
               translate:
                 enabled: true
-                target: zh
             llm_stage:
               enabled: true
               base_url_env: OPENAI_BASE_URL

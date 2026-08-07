@@ -63,7 +63,7 @@ def minhash_signature(text: str, *, n_gram: int, num_perm: int) -> list[int] | N
 
 def jaccard_estimate(left: list[int], right: list[int]) -> float:
     """Fraction of signature positions that match — unbiased Jaccard estimate."""
-    if len(left) != len(right):
+    if not left or len(left) != len(right):
         return 0.0
     return sum(1 for a, b in zip(left, right) if a == b) / len(left)
 
@@ -81,9 +81,12 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
     (representative trace_id + similarity + method) for the debug file.
     Returns (kept, dropped).
     """
+    def _text(row: dict[str, Any]) -> str:
+        inp = row.get("input")
+        return str(inp.get("text") or "") if isinstance(inp, dict) else ""
+
     signatures = [
-        minhash_signature(r.get("input", {}).get("text", "") if isinstance(r.get("input"), dict) else "", n_gram=cfg.n_gram, num_perm=cfg.num_perm)
-        for r in rows
+        minhash_signature(_text(r), n_gram=cfg.n_gram, num_perm=cfg.num_perm) for r in rows
     ]
     buckets: dict[tuple[int, ...], list[int]] = {}
     for index, signature in enumerate(signatures):

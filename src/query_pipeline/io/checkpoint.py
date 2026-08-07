@@ -13,29 +13,58 @@ from query_pipeline.prompts import resolve_prompt
 
 logger = logging.getLogger(__name__)
 
-# Every prompt that influences stage outputs; a prompt edit must invalidate
-# checkpoints the same way it invalidates the LLM cache.
-_PROMPT_IDS = ("segment", "complex_judge", "verify_complex", "translate")
+
+def _hash_material(material: dict[str, Any]) -> str:
+    blob = json.dumps(material, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def pipeline_fingerprint(cfg: PipelineConfig) -> str:
-    """Hash of everything that can change stage outputs (config + resolved
-    prompts; the input file is deliberately excluded — the session checkpoint
-    guards input identity via its own size/mtime meta, and verify/translate
-    results are pure functions of (text, prompt, model) so their checkpoints
-    may be safely shared across configs). Any change invalidates existing
-    checkpoints."""
-    material = json.dumps(
-        {"config": cfg.model_dump(mode="json"), "prompts": {pid: resolve_prompt(pid) for pid in _PROMPT_IDS}},
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
+    """Hash of only the knobs that can change this stage's outputs.
+
+    Unrelated stages (and pure orchestration knobs like concurrency) are
+    excluded so e.g. editing the translate prompt does not wipe the session
+    checkpoint.
+    """
+    llm = {
+        "model": cfg.llm_stage.model,
+        "enabled": cfg.llm_stage.enabled,
+        "response_format": cfg.llm_stage.response_format,
+    }
+    if stage == "session":
+        return _hash_material(
+            {
+                "input_format": cfg.input.format,
+                "session_stage": cfg.session_stage.model_dump(mode="json"),
+                "llm": llm,
+                "prompts": {
+                    "segment": resolve_prompt("segment"),
+                    cfg.session_stage.step2.prompt_id: resolve_prompt(cfg.session_stage.step2.prompt_id),
+                },
+            }
+        )
+    if stage == "verify":
+        return _hash_material(
+            {
+                "verify_stage": cfg.verify_stage.model_dump(mode="json"),
+                "llm": llm,
+                "prompts": {cfg.verify_stage.prompt_id: resolve_prompt(cfg.verify_stage.prompt_id)},
+            }
+        )
+    if stage == "translate":
+        return _hash_material(
+            {
+                "translate": cfg.post_stage.translate.model_dump(mode="json"),
+                "llm": llm,
+                "prompts": {"translate": resolve_prompt("translate")},
+            }
+        )
+    raise ValueError(f"unknown checkpoint stage: {stage!r}")
 
 
 def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
     """Meta that ties a stage's checkpoint to the run that produced it."""
-    meta: dict[str, Any] = {"pipeline_hash": pipeline_fingerprint(cfg)}
+    meta: dict[str, Any] = {"stage_hash": stage_fingerprint(cfg, stage)}
     if stage == "session":
         stat = cfg.input.path.stat()
         meta.update(
@@ -120,7 +149,8 @@ class Checkpoint:
                     continue
                 key = row.get("key")
                 if not isinstance(key, str):
-                    raise ValueError(f"invalid checkpoint row {self.path}:{line_number}")
+                    skipped += 1
+                    continue
                 self.records[key] = row
         if skipped:
             logger.warning("checkpoint: dropped %d unparseable line(s) in %s", skipped, self.path)
@@ -131,9 +161,10 @@ class Checkpoint:
     async def mark(self, key: str, **record: Any) -> None:
         if not self.enabled:
             return
-        self.records[key] = {"key": key, **record}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(self.records[key], ensure_ascii=False, separators=(",", ":")) + "\n"
+        row = {"key": key, **record}
+        line = json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
         async with self._lock:
+            self.records[key] = row
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line)

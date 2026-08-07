@@ -646,7 +646,6 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = Fal
                 threshold: 0.85
               translate:
                 enabled: true
-                target: zh
 """
     config_path.write_text(
         textwrap.dedent(

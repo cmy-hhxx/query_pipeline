@@ -196,19 +196,21 @@ class VerifyResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            # Run 1: verify for V1 fails (fail-open keeps the row but does not
-            # checkpoint it); V0/V2 are checkpointed.
+            # Run 1: verify for V1 fails (sticky fail-open keeps + checkpoints
+            # the row); V0/V2 are checkpointed cleanly.
             summary1, _, _, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
             self.assertEqual(summary1.stats["verify_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 3)
 
-            # Run 2: V0/V2 replay from the verify checkpoint; only V1 re-verifies.
+            # Run 2: all three replay from the verify checkpoint — including the
+            # failed row — so resume cannot later flip a kept row to rejected.
             summary2, session2, verify2, _ = run_pipeline_with_fakes(cfg)
-            self.assertEqual(summary2.stats["verify_kept"], 3)
-            self.assertEqual(summary2.stats["verify_failed"], 0)
+            self.assertEqual(summary2.stats["verify_kept"], 2)
+            self.assertEqual(summary2.stats["verify_failed"], 1)
+            self.assertEqual(summary2.stats["complex_rows"], 3)
             self.assertEqual(session2[0].calls, [])  # session stage fully replayed
-            self.assertEqual([c["question"] for c in verify2[0].calls], ["V1 complex query"])
+            self.assertEqual(verify2[0].calls, [])
 
 
 class TranslateResumeTest(unittest.TestCase):
@@ -280,7 +282,6 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
                 threshold: 0.85
               translate:
                 enabled: true
-                target: zh
 """
     config_path.write_text(
         textwrap.dedent(

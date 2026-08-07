@@ -98,13 +98,19 @@ async def _run_all(
             cache = load_cache(cfg.llm_stage.cache)
         else:
             cache = {}
+            if cfg.session_stage.step2.enabled:
+                logging.getLogger(__name__).warning(
+                    "llm_stage.enabled=false: step2 judge is skipped, complex_queries will be empty"
+                )
 
         # Sessions are independent (segments/judging only read the session's
-        # own turns), so process several concurrently. The LLM endpoint is the
-        # bottleneck, not our code; batching with session_stage.concurrency
-        # turns the wall-clock from sum-of-sessions into max-of-a-few.
+        # own turns), so process several concurrently. LLMClient caps in-flight
+        # HTTP calls at llm_stage.concurrency; session_stage.concurrency only
+        # limits how many sessions are in the orchestration pipeline at once.
+        # One shared cache lock serializes appends across concurrent sessions.
         results: dict[int, tuple[list[Any], dict[str, Any], list[Any], list[Any], list[Any]]] = {}
         semaphore = asyncio.Semaphore(cfg.session_stage.concurrency)
+        cache_lock = asyncio.Lock()
 
         async def process_session(index: int, session: dict[str, Any]) -> None:
             async with semaphore:
@@ -120,7 +126,7 @@ async def _run_all(
                     return
                 try:
                     sess_rows, sess_stats, seg, cand, judged = await _process_session(
-                        cfg, client, cache, session, progress=progress
+                        cfg, client, cache, session, cache_lock=cache_lock, progress=progress
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad session must not kill the run
                     sess_rows, sess_stats = [], {"session_error": 1, "error": str(exc)[:200]}
@@ -170,6 +176,7 @@ async def _process_session(
     client: LLMClient | None,
     cache: dict[str, dict[str, Any]],
     session: dict[str, Any],
+    cache_lock: asyncio.Lock | None = None,
     progress: Progress | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     s = cfg.session_stage
@@ -187,7 +194,12 @@ async def _process_session(
     else:
         if s.segmentation.enabled and client is not None:
             segments = await segment_session(
-                client=client, turns=turns, llm_cfg=cfg.llm_stage, cache=cache, cache_path=cfg.llm_stage.cache
+                client=client,
+                turns=turns,
+                llm_cfg=cfg.llm_stage,
+                cache=cache,
+                cache_path=cfg.llm_stage.cache,
+                cache_lock=cache_lock,
             )
         else:
             segments = [Segment(0, len(turns) - 1, "whole_session")]
@@ -208,6 +220,7 @@ async def _process_session(
             step2_cfg=s.step2,
             cache=cache,
             cache_path=cfg.llm_stage.cache,
+            cache_lock=cache_lock,
             progress=progress,
         )
 

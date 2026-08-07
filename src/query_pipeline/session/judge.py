@@ -8,10 +8,10 @@ from typing import Any
 from rich.progress import Progress
 
 from query_pipeline.config.models import LLMStageConfig, Step2Config
-from query_pipeline.llm.cache import append_cache, make_cache_key
+from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.llm.runner import run_concurrent
-from query_pipeline.models.session import Segment, Step2Result, parse_step2_payload, parse_step2_response, prior_indices
+from query_pipeline.models.session import Segment, parse_step2_payload, parse_step2_response, prior_indices
 from query_pipeline.prompts import resolve_prompt
 
 
@@ -37,6 +37,7 @@ async def judge_candidates(
     step2_cfg: Step2Config,
     cache: dict[str, dict[str, Any]],
     cache_path: Path,
+    cache_lock: asyncio.Lock | None = None,
     progress: Progress | None = None,
 ) -> list[dict[str, Any]]:
     """Judge each candidate turn via LLM. Returns one dict per candidate:
@@ -44,7 +45,7 @@ async def judge_candidates(
     failure; is_complex is None then.
     """
     system_prompt = resolve_prompt(step2_cfg.prompt_id)
-    lock = asyncio.Lock()
+    lock = cache_lock or asyncio.Lock()
 
     async def worker(idx: int) -> dict[str, Any]:
         segment = segment_of(segments, idx)
@@ -61,20 +62,19 @@ async def judge_candidates(
             else:
                 raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
                 parsed = parse_step2_response(raw)
-                label = parsed.to_cache_label()
-                async with lock:
-                    cache[cache_key] = label
-                    append_cache(
-                        cache_path,
-                        cache_key,
-                        label,
-                        meta={
-                            "step": "complex_judge",
-                            "prompt_id": step2_cfg.prompt_id,
-                            "model": llm_cfg.model,
-                            "current_question": payload["current_question"][:120],
-                        },
-                    )
+                await put_cache(
+                    cache,
+                    cache_path,
+                    cache_key,
+                    parsed.to_cache_label(),
+                    meta={
+                        "step": "complex_judge",
+                        "prompt_id": step2_cfg.prompt_id,
+                        "model": llm_cfg.model,
+                        "current_question": payload["current_question"][:120],
+                    },
+                    lock=lock,
+                )
             return {
                 "idx": idx,
                 "is_complex": parsed.is_complex,

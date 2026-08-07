@@ -628,7 +628,7 @@
               <span class="step-name">独立复判</span>
             </div>
             <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-            <div class="step-rule">单句无上下文复判；失败 fail-open 保留并计 verify_failed</div>
+            <div class="step-rule">单句无上下文复判；失败 sticky fail-open（保留并 checkpoint，resume 不翻转）</div>
             <div class="step-artifact"><span class="step-artifact-label">产物</span><span class="step-artifact-value">work/verified.jsonl</span></div>
           </div>
 

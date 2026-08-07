@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_pipeline_config(args.config)
     if args.dry_run:
-        print(f"OK: pipeline={cfg.name}, flow=session_stage->llm_stage")
+        print(f"OK: pipeline={cfg.name}, flow=session_stage->verify_stage->post_stage")
         return 0
 
     summary = run_pipeline(cfg)

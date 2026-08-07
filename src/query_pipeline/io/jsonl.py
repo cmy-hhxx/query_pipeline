@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -45,11 +46,15 @@ def read_jsonl_skipping(path: Path) -> tuple[list[dict[str, Any]], int]:
 
 
 def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    """Write records atomically (tmp + replace) so a crash mid-write cannot
+    leave a truncated file that looks complete to the next reader."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
         for record in records:
             out = {k: v for k, v in record.items() if not k.startswith("_")}
             handle.write(json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n")
+    os.replace(tmp, path)
 
 
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:

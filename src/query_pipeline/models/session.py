@@ -71,7 +71,8 @@ class Step2Result(BaseModel):
         }
 
 
-def _parse_json_object(raw: str) -> dict[str, Any]:
+def parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse a JSON object from an LLM response, tolerating markdown fences."""
     text = raw.strip()
     try:
         data = json.loads(text)
@@ -86,7 +87,7 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
 
 
 def parse_step2_response(raw: str) -> Step2Result:
-    data = _parse_json_object(raw)
+    data = parse_json_object(raw)
     return Step2Result.model_validate(data)
 
 
@@ -119,7 +120,7 @@ class VerifyResult(BaseModel):
 
 
 def parse_verify_response(raw: str) -> VerifyResult:
-    return VerifyResult.model_validate(_parse_json_object(raw))
+    return VerifyResult.model_validate(parse_json_object(raw))
 
 
 def parse_verify_payload(data: dict[str, Any]) -> VerifyResult:
@@ -138,7 +139,7 @@ def parse_segment_response(raw: str, *, num_turns: int) -> list[Segment]:
     are repaired into a valid covering instead of rejected; grossly malformed
     output still raises so the caller can fall back to whole-session.
     """
-    data = _parse_json_object(raw)
+    data = parse_json_object(raw)
     raw_segments = data.get("segments")
     if not isinstance(raw_segments, list):
         raise ValueError("segments must be a list")

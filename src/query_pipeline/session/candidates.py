@@ -51,7 +51,10 @@ def extract_tool_names(turn: dict[str, Any]) -> list[str]:
         for step in chain:
             if not isinstance(step, dict):
                 continue
-            for tool in step.get("tools") or []:
+            tools = step.get("tools")
+            if not isinstance(tools, list):
+                continue
+            for tool in tools:
                 if isinstance(tool, dict):
                     name = str(tool.get("name") or "").strip()
                     if name and name not in seen:

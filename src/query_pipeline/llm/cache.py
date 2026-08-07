@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def load_cache(cache_path: Path) -> dict[str, dict[str, Any]]:
@@ -26,10 +30,11 @@ def load_cache(cache_path: Path) -> dict[str, dict[str, Any]]:
             key = row.get("cache_key")
             label = row.get("label")
             if not isinstance(key, str) or not isinstance(label, dict):
-                raise ValueError(f"invalid cache row {cache_path}:{line_number}")
+                skipped += 1
+                continue
             cache[key] = label
     if skipped:
-        logging.getLogger(__name__).warning("llm cache: dropped %d unparseable line(s) in %s", skipped, cache_path)
+        logger.warning("llm cache: dropped %d unparseable line(s) in %s", skipped, cache_path)
     return cache
 
 
@@ -40,9 +45,29 @@ def append_cache(cache_path: Path, cache_key: str, label: dict[str, Any], *, met
         handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
-def make_cache_key(question: str, *, step: str, model: str, prompt: str = "") -> str:
-    import hashlib
+async def put_cache(
+    cache: dict[str, dict[str, Any]],
+    cache_path: Path,
+    cache_key: str,
+    label: dict[str, Any],
+    *,
+    meta: dict[str, Any],
+    lock: asyncio.Lock,
+) -> None:
+    """Atomically publish a cache entry to memory + disk under a shared lock.
 
+    Concurrent sessions share one cache file; without serialization, appends of
+    long JSON lines can tear. If another writer already stored the same key,
+    leave their entry (avoid duplicate appends for the common race).
+    """
+    async with lock:
+        if cache_key in cache:
+            return
+        cache[cache_key] = label
+        append_cache(cache_path, cache_key, label, meta=meta)
+
+
+def make_cache_key(question: str, *, step: str, model: str, prompt: str = "") -> str:
     # Include the system prompt so a prompt change invalidates stale cached
     # results (otherwise old labels are reused for the new instructions).
     material = (prompt + "\n") + question if prompt else question
