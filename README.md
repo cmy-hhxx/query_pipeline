@@ -4,7 +4,7 @@ Config-driven pipeline that extracts complex financial queries from multi-turn a
 
 ## Run
 
-The default entrypoint reads the root `config.yaml`:
+The default entrypoint reads `configs/aime/config.yaml`:
 
 ```bash
 uv run python run.py --dry-run
@@ -14,14 +14,17 @@ uv run python run.py
 Use `-c` only for temporary experiments:
 
 ```bash
-uv run python run.py -c config.yaml --dry-run
+uv run python run.py -c configs/aime/config.yaml --dry-run
 ```
 
 `.env` supplies `OPENAI_BASE_URL` and `OPENAI_API_KEY`; the loader reads it automatically.
 
 ## Flow
 
-Input is JSONL where each line is one session: `{"thread_id": "...", "context": [ {question, answer, run_id, trace_id, tool_names, tool_count, chain, ...}, ... ]}`.
+Input is JSONL. `input.format` selects the shape (default `session`):
+
+- `session`: each line is one full thread — `{"thread_id": "...", "context": [ {question, answer, run_id, trace_id, tool_names, tool_count, chain, ...}, ... ]}`. The pipeline segments the thread, then screens candidate turns.
+- `judge_data`: each line is one single-case question — `{"trace_id": ..., "question": ..., "judge_data": {"case_id": ..., "input": {"text": ...}, "context": [ {question, answer}, ...], "chain": [...], "raw_answer": ..., "text_answer": ..., "meta": {...}}}`. The prior context is already assembled in `judge_data.context`, so no topic segmentation or chain/tool-call screening runs — the question is judged directly against that context. See `configs/iwencai/config_iwencai.yaml` for a runnable example.
 
 The pipeline processes sessions one at a time (a `Sessions` progress bar counts sessions, with a live `LLM complex judge` bar inside each session; verify and translate each show their own bar):
 
@@ -45,7 +48,7 @@ Semantics:
 - The session checkpoint is tied to the input file (path, size, mtime) and to a fingerprint of the config + all resolved prompts; the verify/translate checkpoints are tied to the config/prompt fingerprint and are keyed by content, so editing the input only re-processes the changed sessions. Any mismatch is logged (`checkpoint ... starting fresh`) and the file is re-seeded rather than reused, so stale results are never silently served.
 - Torn trailing lines from a hard-killed run are dropped on load (that unit just re-runs, with its LLM calls being cache hits).
 
-Progress bars are shown for every LLM-heavy stage. Toggle checkpointing with `checkpoint.enabled`; change the directory with `checkpoint.dir` (both in `config.yaml`). To force a full re-run, delete `work/checkpoints/` (or `work/llm_cache.jsonl` to also drop the call cache).
+Progress bars are shown for every LLM-heavy stage. Toggle checkpointing with `checkpoint.enabled`; change the directory with `checkpoint.dir` (both in `configs/aime/config.yaml`). To force a full re-run, delete `work/checkpoints/` (or `work/llm_cache.jsonl` to also drop the call cache).
 
 ## Output Contract
 

@@ -1,14 +1,15 @@
-name: session_pipeline
+name: iwencai_pipeline
 
 input:
-  path: data/aime/input_all.jsonl
+  path: data/iwencai/judge_data_9662_copy.jsonl
+  format: judge_data  # session (full thread per line) | judge_data (single-case lines with a judge_data wrapper)
 
 output:
-  dir: outputs_all
-  complex_queries: complex_queries.jsonl
-  summary: summary.json
+  dir: outputs_iwencai
+  complex_queries: complex_queries_iwencai.jsonl
+  summary: summary_iwencai.json
 
-work_dir: work_all
+work_dir: work_iwencai
 
 session_stage:
   enabled: true
@@ -46,8 +47,8 @@ llm_stage:
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/llm_cache.jsonl
+  cache: work_iwencai/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work_all/checkpoints
+  dir: work_iwencai/checkpoints

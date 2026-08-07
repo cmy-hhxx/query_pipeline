@@ -11,3 +11,5 @@ data/
 old/
 .claude
 .env
+outputs_*/
+work_*

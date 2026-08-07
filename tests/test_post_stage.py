@@ -236,7 +236,7 @@ class PostStagePipelineTest(unittest.TestCase):
         self.assertEqual(post.translate.target, "zh")
 
     def test_config_yaml_enables_post_stage(self) -> None:
-        cfg = load_pipeline_config(ROOT / "config.yaml")
+        cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
         self.assertTrue(cfg.post_stage.enabled)
         self.assertEqual(cfg.post_stage.dedup.threshold, 0.85)
         self.assertEqual(cfg.post_stage.translate.target, "zh")
@@ -294,7 +294,7 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertNotIn("dedup_removed", summary.stats)
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "question_at": "2026-08-05 04:01:00"}
+                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00"}
             )  # untouched by post stage
 
 
@@ -328,7 +328,7 @@ def _make_turn(
         "answer": f"answer{idx}",
         "run_id": f"{prefix}r{idx}",
         "trace_id": f"{prefix}trace{idx}",
-        "question_at": f"2026-08-05 04:{idx:02d}:00",
+        "request_time": f"2026-08-05 04:{idx:02d}:00",
         "user_id": f"{prefix}u{idx}",
         "status": "completed",
         "outcome": "success",

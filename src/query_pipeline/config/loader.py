@@ -10,10 +10,19 @@ from query_pipeline.config.models import PipelineConfig
 
 def load_pipeline_config(path: str | Path = "config.yaml") -> PipelineConfig:
     config_path = Path(path).resolve()
-    load_dotenv(config_path.parent / ".env", override=False)
+    root = _project_root(config_path)
+    load_dotenv(root / ".env", override=False)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     cfg = PipelineConfig.model_validate(data)
-    return _resolve_paths(cfg, config_path.parent)
+    return _resolve_paths(cfg, root)
+
+
+def _project_root(config_path: Path) -> Path:
+    """Nearest ancestor holding pyproject.toml/.git; fall back to the config's own dir."""
+    for parent in (config_path.parent, *config_path.parent.parents):
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
+            return parent
+    return config_path.parent
 
 
 def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:

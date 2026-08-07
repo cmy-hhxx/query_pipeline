@@ -21,6 +21,7 @@ from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
 from query_pipeline.session.assemble import assemble_row
 from query_pipeline.session.candidates import select_candidates
+from query_pipeline.session.cases import normalize_judge_data_record
 from query_pipeline.session.judge import build_judge_payload
 
 
@@ -40,7 +41,7 @@ def _make_turn(
         "answer": answer if answer is not None else f"answer{idx}",
         "run_id": f"r{idx}",
         "trace_id": f"trace{idx}",
-        "question_at": f"2026-08-05 04:{idx:02d}:00",
+        "request_time": f"2026-08-05 04:{idx:02d}:00",
         "user_id": f"u{idx}",
         "status": status,
         "outcome": outcome,
@@ -79,10 +80,11 @@ def _sample_turns() -> list[dict[str, Any]]:
 
 class SessionPipelineContractTest(unittest.TestCase):
     def test_default_config_loads(self) -> None:
-        cfg = load_pipeline_config(ROOT / "config.yaml")
+        cfg = load_pipeline_config(ROOT / "configs/aime/config.yaml")
 
         self.assertEqual(cfg.name, "session_pipeline")
         self.assertEqual(cfg.input.path, (ROOT / "data/aime/input.jsonl").resolve())
+        self.assertEqual(cfg.input.format, "session")
         self.assertEqual(cfg.output.complex_queries, "complex_queries.jsonl")
         self.assertEqual(cfg.llm_stage.base_url_env, "OPENAI_BASE_URL")
         self.assertEqual(cfg.llm_stage.api_key_env, "OPENAI_API_KEY")
@@ -90,6 +92,44 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(cfg.session_stage.step1.min_chain_steps, 1)
         self.assertEqual(cfg.session_stage.step1.min_unique_tools, 2)
         self.assertEqual(cfg.session_stage.step2.prompt_id, "complex_judge")
+
+    def test_input_format_validation(self) -> None:
+        from query_pipeline.config.models import InputConfig
+
+        self.assertEqual(InputConfig(path=Path("x.jsonl")).format, "session")
+        self.assertEqual(InputConfig(path=Path("x.jsonl"), format="judge_data").format, "judge_data")
+        with self.assertRaises(ValueError):
+            InputConfig(path=Path("x.jsonl"), format="bogus")
+
+    def test_normalize_judge_data_record(self) -> None:
+        record = {
+            "trace_id": "t1",
+            "question": "当前问句",
+            "judge_data": {
+                "case_id": "c1",
+                "trace_id": "t1",
+                "input": {"text": "当前问句", "image": None, "file": None},
+                "context": [{"question": "前文1", "answer": "a1"}, {"question": "前文2", "answer": "a2"}],
+                "chain": [{"plan": "", "tools": [{"name": "Search", "input": {}, "output": "x"}]}],
+                "raw_answer": "raw",
+                "text_answer": "text",
+                "meta": {"session_round": 3, "request_time": "2026-08-05 04:02:00", "first_token_time_cost": 10},
+            },
+        }
+        session = normalize_judge_data_record(record)
+        self.assertEqual(session["thread_id"], "c1")
+        self.assertEqual(len(session["context"]), 3)
+        self.assertEqual(session["context"][0], {"question": "前文1", "answer": "a1"})
+        current = session["context"][2]
+        self.assertEqual(current["question"], "当前问句")
+        self.assertEqual(current["answer"], "text")  # text_answer preferred over raw_answer
+        self.assertEqual(current["trace_id"], "t1")
+        self.assertEqual(current["first_token_ms"], 10)
+        self.assertEqual(current["request_time"], "2026-08-05 04:02:00")
+
+    def test_normalize_judge_data_record_missing_wrapper(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_judge_data_record({"question": "x"})
 
     def test_prompt_contracts(self) -> None:
         segment_prompt = resolve_prompt("segment")
@@ -283,7 +323,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["user_id"], "u2")
         self.assertEqual(row["difficulty_level"], "hard")
         self.assertEqual(
-            row["meta"], {"reason": "需要多步分析", "question_at": "2026-08-05 04:02:00"}
+            row["meta"], {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00"}
         )
         self.assertEqual(row["first_token_time_ms"], 200)
         self.assertEqual(row["finish_answer_time_ms"], 400)
@@ -323,7 +363,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["session_round"], 2)
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "question_at": "2026-08-05 04:01:00"})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00"})
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,6 +458,54 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["trace_id"], "trace1")
             self.assertEqual(rows[0]["meta"]["translation"], "翻译：complex calc A")
+
+    def test_end_to_end_judge_data_format(self) -> None:
+        # input.format=judge_data: each line is a single-case question with a
+        # pre-assembled prior context. No segmentation or step1 heuristics — the
+        # trailing turn is judged directly and its context is all prior turns.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            case = {
+                "trace_id": "t1",
+                "question": "Q2 复杂取数",
+                "judge_data": {
+                    "case_id": "c1",
+                    "trace_id": "t1",
+                    "input": {"text": "Q2 复杂取数", "image": None, "file": None},
+                    "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
+                    "chain": [{"plan": "", "tools": [{"name": "web_search", "input": {}, "output": "x"}]}],
+                    "raw_answer": "raw_answer",
+                    "text_answer": "text_answer",
+                    "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
+                },
+            }
+            _write_jsonl(tmp_path / "input.jsonl", [case])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, input_format="judge_data"))
+
+            with patch("query_pipeline.steps.session_stage.LLMClient", FakeSessionLLMClient), patch(
+                "query_pipeline.steps.verify_stage.LLMClient", FakeSessionLLMClient
+            ):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["total_sessions"], 1)
+            self.assertEqual(summary.stats["segments"], 1)  # single whole-session segment, no segmentation call
+            self.assertEqual(summary.stats["candidates"], 1)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["verify_kept"], 1)
+
+            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["source_case_id"], "c1")
+            self.assertEqual(row["trace_id"], "t1")
+            self.assertEqual(row["category"], "01-data-metrics-calculation")
+            self.assertEqual(row["input"]["text"], "Q2 复杂取数")
+            self.assertEqual(row["session_round"], 2)  # context_len + 1 == judge_data.meta.session_round
+            self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
+            self.assertEqual(row["tools"], ["web_search"])
+            self.assertEqual(row["raw_answer"], "text_answer")
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00"})
 
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -546,7 +634,7 @@ class FakeFailingSessionLLMClient:
         return None
 
 
-def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = False) -> Path:
+def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = False, input_format: str = "session") -> Path:
     config_path = tmp_path / "config.yaml"
     post_block = ""
     if post_enabled:
@@ -566,6 +654,7 @@ def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = Fal
             name: test_pipeline
             input:
               path: input.jsonl
+              format: {input_format}
             output:
               dir: out
               complex_queries: complex_queries.jsonl

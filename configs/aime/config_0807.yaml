@@ -1,0 +1,54 @@
+name: session_pipeline
+
+input:
+  path: data/aime/0807_head2000.jsonl
+
+output:
+  dir: outputs_all
+  complex_queries: complex_queries0807.jsonl
+  summary: summary0807.json
+
+work_dir: work_0807
+
+session_stage:
+  enabled: true
+  concurrency: 16
+  segmentation:
+    enabled: true
+  step1:
+    enabled: true
+    reject_rules: true
+    min_chain_tool_calls: 7
+    min_chain_steps: 1
+    min_unique_tools: 2
+  step2:
+    enabled: true
+    prompt_id: complex_judge
+
+verify_stage:
+  enabled: true
+  prompt_id: verify_complex
+
+post_stage:
+  enabled: true
+  dedup:
+    enabled: true
+    threshold: 0.85
+  translate:
+    enabled: true
+    target: zh
+
+llm_stage:
+  enabled: true
+  base_url_env: OPENAI_BASE_URL
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+  concurrency: 256
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+  cache: work/llm_cache.jsonl
+
+checkpoint:
+  enabled: true
+  dir: work_0807/checkpoints

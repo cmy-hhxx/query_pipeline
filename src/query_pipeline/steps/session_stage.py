@@ -16,6 +16,7 @@ from query_pipeline.models.session import Segment
 from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.session.assemble import assemble_row
 from query_pipeline.session.candidates import is_eligible, select_candidates
+from query_pipeline.session.cases import normalize_judge_data_record
 from query_pipeline.session.judge import is_complex_result, judge_candidates, segment_of
 from query_pipeline.session.segment import segment_session
 
@@ -23,6 +24,9 @@ from query_pipeline.session.segment import segment_session
 def run_session_stage(ctx: PipelineContext) -> PipelineContext:
     cfg = ctx.config
     sessions, skipped = read_jsonl_skipping(cfg.input.path)
+    if cfg.input.format == "judge_data":
+        sessions, case_skipped = _normalize_cases(sessions)
+        skipped += case_skipped
     if skipped:
         logging.getLogger(__name__).warning("input: skipped %d unparseable line(s) in %s", skipped, cfg.input.path)
     ctx.stats["total_sessions"] = len(sessions)
@@ -36,6 +40,22 @@ def run_session_stage(ctx: PipelineContext) -> PipelineContext:
     ctx.rows, ctx.stats, debug = asyncio.run(_run_all(ctx, sessions, skipped))
     _write_debug_files(ctx, debug)
     return ctx
+
+
+def _normalize_cases(sessions: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Fold judge_data lines into the canonical session shape.
+
+    Lines that structurally parse but lack a judge_data object (or whose
+    context is malformed) are dropped and counted like bad input lines.
+    """
+    normalized: list[dict[str, Any]] = []
+    skipped = 0
+    for record in sessions:
+        try:
+            normalized.append(normalize_judge_data_record(record))
+        except ValueError:
+            skipped += 1
+    return normalized, skipped
 
 
 async def _run_all(
@@ -79,14 +99,25 @@ async def _run_all(
         else:
             cache = {}
 
-        with Progress() as progress:
-            task_id = progress.add_task("Sessions", total=len(sessions))
-            for index, session in enumerate(sessions):
+        # Sessions are independent (segments/judging only read the session's
+        # own turns), so process several concurrently. The LLM endpoint is the
+        # bottleneck, not our code; batching with session_stage.concurrency
+        # turns the wall-clock from sum-of-sessions into max-of-a-few.
+        results: dict[int, tuple[list[Any], dict[str, Any], list[Any], list[Any], list[Any]]] = {}
+        semaphore = asyncio.Semaphore(cfg.session_stage.concurrency)
+
+        async def process_session(index: int, session: dict[str, Any]) -> None:
+            async with semaphore:
                 record = checkpoint.get(str(index))
                 if record is not None and {"rows", "stats", "segments", "candidates", "judged"} <= set(record):
-                    absorb(record["rows"], record["stats"], record["segments"], record["candidates"], record["judged"])
-                    progress.advance(task_id)
-                    continue
+                    results[index] = (
+                        record["rows"],
+                        record["stats"],
+                        record["segments"],
+                        record["candidates"],
+                        record["judged"],
+                    )
+                    return
                 try:
                     sess_rows, sess_stats, seg, cand, judged = await _process_session(
                         cfg, client, cache, session, progress=progress
@@ -98,8 +129,23 @@ async def _run_all(
                     await checkpoint.mark(
                         str(index), rows=sess_rows, stats=sess_stats, segments=seg, candidates=cand, judged=judged
                     )
-                absorb(sess_rows, sess_stats, seg, cand, judged)
+                results[index] = (sess_rows, sess_stats, seg, cand, judged)
+
+        with Progress() as progress:
+            task_id = progress.add_task("Sessions", total=len(sessions))
+
+            async def tracked(index: int, session: dict[str, Any]) -> None:
+                await process_session(index, session)
                 progress.advance(task_id)
+
+            await asyncio.gather(*(tracked(i, session) for i, session in enumerate(sessions)))
+
+        # Reassemble in input order so output rows stay deterministic.
+        for index in range(len(sessions)):
+            if index not in results:
+                continue  # gather never drops a task; defensive only
+            sess_rows, sess_stats, seg, cand, judged = results[index]
+            absorb(sess_rows, sess_stats, seg, cand, judged)
     finally:
         if client is not None:
             await client.close()
@@ -127,21 +173,29 @@ async def _process_session(
     progress: Progress | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     s = cfg.session_stage
+    is_case = cfg.input.format == "judge_data"
     turns = session.get("context") or []
     if not isinstance(turns, list) or not turns:
         return [], {"empty_sessions": 1}, [], [], []
 
-    if s.segmentation.enabled and client is not None:
-        segments = await segment_session(
-            client=client, turns=turns, llm_cfg=cfg.llm_stage, cache=cache, cache_path=cfg.llm_stage.cache
-        )
-    else:
+    if is_case:
+        # judge_data lines are single-case: the trailing turn is the question
+        # to judge, and judge_data.context is already the relevant prior
+        # context — no topic segmentation or chain/tool-call heuristics needed.
         segments = [Segment(0, len(turns) - 1, "whole_session")]
-
-    if s.step1.enabled:
-        candidates = select_candidates(turns, s.step1)
+        candidates = [len(turns) - 1] if turns[-1].get("question", "").strip() else []
     else:
-        candidates = [i for i, turn in enumerate(turns) if is_eligible(turn)]
+        if s.segmentation.enabled and client is not None:
+            segments = await segment_session(
+                client=client, turns=turns, llm_cfg=cfg.llm_stage, cache=cache, cache_path=cfg.llm_stage.cache
+            )
+        else:
+            segments = [Segment(0, len(turns) - 1, "whole_session")]
+
+        if s.step1.enabled:
+            candidates = select_candidates(turns, s.step1)
+        else:
+            candidates = [i for i, turn in enumerate(turns) if is_eligible(turn)]
 
     judged: list[dict[str, Any]] = []
     if s.step2.enabled and client is not None and candidates:

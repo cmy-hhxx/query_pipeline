@@ -21,7 +21,7 @@ def assemble_row(
     segment-leading turn falls back to every earlier session turn, so only the
     session's very first turn yields an empty context. trace_id carries the
     original input turn's trace_id, and meta carries the judge's reason plus
-    the original question timestamp (question_at).
+    the original question timestamp (request_time).
     """
     turn = turns[idx]
     prior = [
@@ -55,5 +55,5 @@ def assemble_row(
         "input_tokens": turn.get("input_tokens"),
         "output_tokens": turn.get("output_tokens"),
         "request_time_ms": None,
-        "meta": {"reason": reason, "question_at": turn.get("question_at", "")},
+        "meta": {"reason": reason, "request_time": turn.get("request_time", "")},
     }

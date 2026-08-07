@@ -22,11 +22,14 @@ def read_jsonl_skipping(path: Path) -> tuple[list[dict[str, Any]], int]:
 
     The upstream exporter may write truncated/garbage lines (a strict
     read would crash the whole run); callers get (records, skipped_count)
-    and should surface the skipped count in stats/logs.
+    and should surface the skipped count in stats/logs. errors="replace"
+    also tolerates a byte-torn trailing line (invalid UTF-8 at EOF) — it
+    decodes to a replacement char and the line fails JSON parsing, so it
+    lands in the skipped count instead of crashing the read.
     """
     records: list[dict[str, Any]] = []
     skipped = 0
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:

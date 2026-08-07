@@ -9,7 +9,7 @@ from query_pipeline.pipeline.runner import run_pipeline
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run question cleaning and classification pipeline")
-    parser.add_argument("-c", "--config", default="config.yaml", help="Pipeline YAML config path")
+    parser.add_argument("-c", "--config", default="configs/aime/config.yaml", help="Pipeline YAML config path")
     parser.add_argument("--dry-run", action="store_true", help="Validate config only")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser

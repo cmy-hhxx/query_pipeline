@@ -11,6 +11,15 @@ class ConfigModel(BaseModel):
 
 class InputConfig(ConfigModel):
     path: Path
+    format: str = "session"  # "session" | "judge_data" (single-case lines with a judge_data wrapper)
+
+    @field_validator("format")
+    @classmethod
+    def validate_format(cls, value: str) -> str:
+        fmt = value.strip().lower()
+        if fmt not in {"session", "judge_data"}:
+            raise ValueError(f"invalid input.format: {value!r} (expected 'session' or 'judge_data')")
+        return fmt
 
 
 class OutputConfig(ConfigModel):
@@ -49,6 +58,7 @@ class Step2Config(ConfigModel):
 
 class SessionStageConfig(ConfigModel):
     enabled: bool = True
+    concurrency: int = 8
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     step1: Step1Config = Field(default_factory=Step1Config)
     step2: Step2Config = Field(default_factory=Step2Config)

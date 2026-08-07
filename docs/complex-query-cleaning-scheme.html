@@ -578,7 +578,7 @@
         <p class="pipe-sub">从多轮 agent 会话抽取复杂金融问句，6 步从原始 turn 走到评测样本。LLM 节点红边，规则节点灰边。</p>
 
         <div class="flow-chart">
-          <svg id="flow-chart-svg" viewBox="0 0 1280 580" preserveAspectRatio="xMidYMid meet" role="img" aria-label="复杂金融问句清洗流程图"></svg>
+          <svg id="flow-chart-svg" viewBox="0 0 1300 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="复杂金融问句清洗流程图"></svg>
         </div>
 
         <div class="step-grid">
@@ -993,32 +993,30 @@ JSON 格式：
         const s = document.getElementById('flow-chart-svg');
         if (!s) return;
 
-        // —— 节点几何 ——
-        const W = 150, H = 64, RX = 12;
-        const MAIN_Y = 260;
-        const STEP = 168;
-        const LEFT_PAD = 30;
-        const VB_W = 1280, VB_H = 560;
+        // 布局
+        const W = 144, H = 56, RX = 10;
+        const MAIN_Y = 240;
+        const STEP = 162;
+        const LEFT_PAD = 28;
+        const VB_W = 1300, VB_H = 480;
 
+        // 6 个主流程节点
         const nodes = [
-          { id: 1, name: '会话分段',    sub: 'segment · LLM',     kind: 'llm' },
-          { id: 2, name: '候选筛选',    sub: 'step1 · 规则',      kind: 'code' },
-          { id: 3, name: '语义判定',    sub: 'complex_judge · LLM', kind: 'llm' },
-          { id: 4, name: '组装输出行',  sub: 'assemble · 规则',   kind: 'code' },
-          { id: 5, name: '独立复判',    sub: 'verify_complex · LLM', kind: 'llm' },
-          { id: 6, name: '去重 + 翻译', sub: 'post_stage',        kind: 'both' },
+          { id: 1, name: '会话分段',     sub: 'segment · LLM',     kind: 'llm'  },
+          { id: 2, name: '候选筛选',     sub: 'step1 · 规则',      kind: 'code' },
+          { id: 3, name: '语义判定',     sub: 'complex_judge',     kind: 'llm'  },
+          { id: 4, name: '组装输出行',   sub: 'assemble · 规则',   kind: 'code' },
+          { id: 5, name: '独立复判',     sub: 'verify_complex',    kind: 'llm'  },
+          { id: 6, name: '去重 + 翻译',  sub: 'post_stage',        kind: 'both' },
         ];
-        nodes.forEach((n, i) => {
-          n.x = LEFT_PAD + i * STEP;
-          n.cy = MAIN_Y + H / 2;
-        });
+        nodes.forEach((n, i) => { n.x = LEFT_PAD + i * STEP; n.cy = MAIN_Y + H / 2; });
 
-        // —— arrow markers ——
+        // arrow markers
         const defs = el(s, 'defs', {});
         const mkArrow = (id, fill) => {
           const m = el(defs, 'marker', {
             id, viewBox: '0 0 10 10', refX: 9, refY: 5,
-            markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse'
+            markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse'
           });
           el(m, 'path', { d: 'M 0 0 L 10 5 L 0 10 z', fill });
         };
@@ -1028,15 +1026,13 @@ JSON 格式：
         mkArrow('a-amber', AMBER);
         mkArrow('a-red',   RED);
 
-        // 顶部 INPUT 标签
-        txt(s, { x: 28, y: 70, 'font-size': 10, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, 'INPUT · 原始 turn');
-
-        // 顶部 SKIPPED 标签
-        txt(s, { x: 28, y: 130, 'font-size': 9, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, 'SKIPPED');
-
-        // 底部 DROPPED 标签
-        txt(s, { x: 28, y: 410, 'font-size': 9, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, 'DROPPED');
-        txt(s, { x: 28, y: 470, 'font-size': 9, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, 'DROPPED');
+        // —— INPUT 入口提示 ——
+        el(s, 'rect', { x: 28, y: 64, width: 130, height: 86, rx: 8,
+                        fill: PAPER, stroke: GRID, 'stroke-width': 1 });
+        txt(s, { x: 38, y: 84, 'font-size': 9, 'font-weight': 800, fill: MUTED, 'letter-spacing': '0.18em' }, 'INPUT');
+        txt(s, { x: 38, y: 104, 'font-size': 11, 'font-weight': 700, fill: INK }, 'aime/input.jsonl');
+        txt(s, { x: 38, y: 122, 'font-size': 10, 'font-weight': 600, fill: MUTED }, '多轮 agent 会话');
+        txt(s, { x: 38, y: 138, 'font-size': 10, 'font-weight': 600, fill: MUTED }, '抽取金融问句');
 
         // —— 主线节点 ——
         const drawNode = (n) => {
@@ -1046,16 +1042,16 @@ JSON 格式：
                           fill: PAPER, stroke: isLlm ? RED : INK, 'stroke-width': isLlm ? 1.4 : 1 });
           el(s, 'circle', { cx: x + 14, cy: y + 14, r: 8, fill: isLlm ? RED : INK });
           txt(s, { x: x + 14, y: y + 17, 'font-size': 10, 'font-weight': 800, fill: '#fff', 'text-anchor': 'middle' }, n.id);
-          txt(s, { x: x + W / 2, y: y + 36, 'font-size': 13, 'font-weight': 700, fill: INK, 'text-anchor': 'middle' }, n.name);
-          txt(s, { x: x + W / 2, y: y + 54, 'font-size': 10, 'font-weight': 600, fill: MUTED, 'text-anchor': 'middle', 'letter-spacing': '0.04em' }, n.sub);
+          txt(s, { x: x + W / 2, y: y + 32, 'font-size': 12.5, 'font-weight': 700, fill: INK, 'text-anchor': 'middle' }, n.name);
+          txt(s, { x: x + W / 2, y: y + 48, 'font-size': 9.5, 'font-weight': 600, fill: MUTED, 'text-anchor': 'middle', 'letter-spacing': '0.04em' }, n.sub);
         };
         nodes.forEach(drawNode);
 
-        // —— 起点:进入节点 1 ——
-        el(s, 'line', { x1: 0, y1: MAIN_Y + H / 2, x2: 28, y2: MAIN_Y + H / 2,
+        // 输入箭头 → 节点1
+        el(s, 'line', { x1: 158, y1: MAIN_Y + H / 2, x2: nodes[0].x - 2, y2: MAIN_Y + H / 2,
                         stroke: INK, 'stroke-width': 1, 'marker-end': 'url(#a-ink)' });
 
-        // —— 主线节点间箭头 ——
+        // 节点间主箭头
         for (let i = 0; i < nodes.length - 1; i++) {
           const a = nodes[i], b = nodes[i + 1];
           el(s, 'line', {
@@ -1065,97 +1061,106 @@ JSON 格式：
           });
         }
 
-        // —— 桶定义:drawBucket 工具 ——
-        const drawBucket = (cx, cy, title, badge, color) => {
-          const bw = 130, bh = 44;
-          const bx = cx - bw / 2, by = cy - bh / 2;
-          el(s, 'rect', { x: bx, y: by, width: bw, height: bh, rx: 8, ry: 8,
-                          fill: PAPER, stroke: color, 'stroke-width': 1.2 });
-          el(s, 'rect', { x: bx + 8, y: by + 8, width: 38, height: 14, rx: 3, fill: color });
-          txt(s, { x: bx + 27, y: by + 18, 'font-size': 9, 'font-weight': 800, fill: '#fff',
+        // —— 4 个状态汇总 lane (顶部 1 / 底部 1 / 右侧 1 accepted) ——
+        // 顶部 skipped lane
+        const TOP_LANE_Y = 120;
+        // 底部 dropped lane
+        const BOT_LANE_Y = 400;
+
+        // 顶部 lane 边框
+        el(s, 'rect', { x: 28, y: TOP_LANE_Y - 30, width: LEFT_PAD + 5 * STEP + W, height: 60, rx: 8,
+                        fill: 'none', stroke: GRID, 'stroke-width': 0.5, 'stroke-dasharray': '4 4' });
+        txt(s, { x: 40, y: TOP_LANE_Y - 12, 'font-size': 9, 'font-weight': 800, fill: AMBER, 'letter-spacing': '0.18em' }, 'SKIPPED');
+        el(s, 'rect', { x: LEFT_PAD + 2 * STEP + 24, y: TOP_LANE_Y - 18, width: W - 48, height: 36, rx: 6,
+                        fill: PAPER, stroke: AMBER, 'stroke-width': 1.2 });
+        txt(s, { x: LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, y: TOP_LANE_Y + 0,
+                 'font-size': 10.5, 'font-weight': 800, fill: AMBER, 'text-anchor': 'middle',
+                 'letter-spacing': '0.04em' }, 'LLM 失败');
+        txt(s, { x: LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, y: TOP_LANE_Y + 12,
+                 'font-size': 9, 'font-weight': 600, fill: MUTED, 'text-anchor': 'middle' }, '解析异常 / 抽不到');
+
+        // 底部 lane 边框
+        el(s, 'rect', { x: 28, y: BOT_LANE_Y - 28, width: LEFT_PAD + 5 * STEP + W, height: 56, rx: 8,
+                        fill: 'none', stroke: GRID, 'stroke-width': 0.5, 'stroke-dasharray': '4 4' });
+        txt(s, { x: 40, y: BOT_LANE_Y - 12, 'font-size': 9, 'font-weight': 800, fill: RED, 'letter-spacing': '0.18em' }, 'DROPPED');
+        // 在底部 lane 里画 4 个 compact 桶
+        const drop_lane_y = BOT_LANE_Y;
+        const drawDrop = (cx, label, tone, badge) => {
+          const bw = 116, bh = 32;
+          const bx = cx - bw / 2;
+          el(s, 'rect', { x: bx, y: drop_lane_y - bh / 2, width: bw, height: bh, rx: 6,
+                          fill: PAPER, stroke: tone, 'stroke-width': 1.2 });
+          el(s, 'rect', { x: bx + 6, y: drop_lane_y - bh / 2 + 6, width: 32, height: 12, rx: 3, fill: tone });
+          txt(s, { x: bx + 22, y: drop_lane_y - bh / 2 + 15, 'font-size': 8.5, 'font-weight': 800, fill: '#fff',
                    'text-anchor': 'middle', 'letter-spacing': '0.04em' }, badge);
-          txt(s, { x: bx + 8, y: by + 36, 'font-size': 11.5, 'font-weight': 700, fill: INK }, title);
+          txt(s, { x: bx + 42, y: drop_lane_y - bh / 2 + 16, 'font-size': 10, 'font-weight': 700, fill: INK }, label);
         };
+        drawDrop(nodes[1].x + W / 2, '噪声 / 三信号未达', RED, 'REJ');
+        drawDrop(nodes[4].x + W / 2, '复判非复杂', MUTED, 'NON');
+        drawDrop(nodes[2].x + W / 2, 'LLM 判非复杂', MUTED, 'NON');
+        drawDrop(nodes[5].x + W / 2, 'dedup', RED, 'REJ');
 
-        // —— 5 个桶坐标 ——
-        // SKIPPED 桶:节点3正上方
-        const B_SK       = { cx: nodes[2].x + W / 2, cy: 168, title: 'skipped · LLM 失败', bad: 'SKIPP', tone: AMBER };
-        // DROPPED 第一层(浅):节点2/5 的桶
-        const B_DROP_A1  = { cx: nodes[1].x + W / 2, cy: 396, title: 'rejected · 噪声 / 三信号未达', bad: 'REJECT', tone: RED };
-        const B_DROP_A2  = { cx: nodes[4].x + W / 2, cy: 396, title: 'non_complex · 验证复判', bad: 'NONCPLX', tone: MUTED };
-        // DROPPED 第二层(深):节点3/6 的桶
-        const B_DROP_B1  = { cx: nodes[2].x + W / 2, cy: 458, title: 'non_complex · LLM 判非复杂', bad: 'NONCPLX', tone: MUTED };
-        const B_DROP_B2  = { cx: nodes[5].x + W / 2, cy: 458, title: 'rejected · dedup', bad: 'REJECT', tone: RED };
-
-        // —— accepted 输出桶(节点 6 右侧,独立大盒子) ——
-        const ACC_X = LEFT_PAD + (nodes.length - 1) * STEP + W + 28;
+        // —— 节点 6 → accepted 桶 ——
+        const ACC_X = LEFT_PAD + (nodes.length - 1) * STEP + W + 30;
         const ACC_Y = MAIN_Y + H / 2;
         el(s, 'line', {
           x1: nodes[5].x + W + 2, y1: ACC_Y,
           x2: ACC_X - 4, y2: ACC_Y,
-          stroke: GREEN, 'stroke-width': 1.8, 'marker-end': 'url(#a-green)'
+          stroke: GREEN, 'stroke-width': 2.2, 'marker-end': 'url(#a-green)'
         });
-        el(s, 'rect', { x: ACC_X, y: ACC_Y - 30, width: 100, height: 60, rx: 8,
+        el(s, 'rect', { x: ACC_X, y: ACC_Y - 32, width: 112, height: 64, rx: 8,
                         fill: PAPER, stroke: GREEN, 'stroke-width': 1.8 });
-        txt(s, { x: ACC_X + 50, y: ACC_Y - 10, 'font-size': 11, 'font-weight': 800, fill: GREEN,
+        txt(s, { x: ACC_X + 56, y: ACC_Y - 12, 'font-size': 10, 'font-weight': 800, fill: GREEN,
                  'text-anchor': 'middle', 'letter-spacing': '0.18em' }, 'ACCEPTED');
-        txt(s, { x: ACC_X + 50, y: ACC_Y + 10, 'font-size': 13, 'font-weight': 800, fill: INK,
+        txt(s, { x: ACC_X + 56, y: ACC_Y + 8, 'font-size': 14, 'font-weight': 800, fill: INK,
                  'text-anchor': 'middle' }, '进入样本');
-        txt(s, { x: ACC_X + 50, y: ACC_Y + 24, 'font-size': 9.5, 'font-weight': 600, fill: MUTED,
+        txt(s, { x: ACC_X + 56, y: ACC_Y + 22, 'font-size': 9, 'font-weight': 600, fill: MUTED,
                  'text-anchor': 'middle', 'letter-spacing': '0.02em' }, 'complex_queries.jsonl');
 
-        // —— 连接器:从节点某端口画折线到桶顶部 ——
-        // 上行:垂直向上到桶底,然后水平到桶中心
-        // 下行:垂直向下到桶顶,然后水平到桶中心
+        // —— 直角折线连接器 ——
         const arrowIdFor = (tone) => (
           tone === RED ? 'a-red' :
           tone === AMBER ? 'a-amber' :
           tone === GREEN ? 'a-green' : 'a-muted'
         );
-        const branchUp = (sx, sy, b) => {
-          // sy <= MAIN_Y (节点顶), 走到 b.cy + 22 (桶底)
-          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: b.cy + 22,
-                          stroke: b.tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
-          el(s, 'line', { x1: sx, y1: b.cy + 22, x2: b.cx - 4, y2: b.cy + 22,
-                          stroke: b.tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
-                          'marker-end': 'url(#' + arrowIdFor(b.tone) + ')' });
+        // 向上到顶部 lane
+        const branchUpToLane = (sx, sy, targetX, targetY, tone) => {
+          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: targetY,
+                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
+          el(s, 'line', { x1: sx, y1: targetY, x2: targetX - 4, y2: targetY,
+                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
+                          'marker-end': 'url(#' + arrowIdFor(tone) + ')' });
         };
-        const branchDown = (sx, sy, b) => {
-          // sy >= MAIN_Y + H (节点底), 走到 b.cy - 22 (桶顶)
-          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: b.cy - 22,
-                          stroke: b.tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
-          el(s, 'line', { x1: sx, y1: b.cy - 22, x2: b.cx - 4, y2: b.cy - 22,
-                          stroke: b.tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
-                          'marker-end': 'url(#' + arrowIdFor(b.tone) + ')' });
+        // 向下到底部 lane
+        const branchDownToLane = (sx, sy, targetX, targetY, tone) => {
+          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: targetY,
+                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
+          el(s, 'line', { x1: sx, y1: targetY, x2: targetX - 4, y2: targetY,
+                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
+                          'marker-end': 'url(#' + arrowIdFor(tone) + ')' });
         };
 
-        // 先连所有分叉(在桶之前画,避免线压在桶上面)
-        branchDown(nodes[1].x + W / 2, MAIN_Y + H, B_DROP_A1); // 节点2 → rejected (浅层)
-        branchDown(nodes[2].x + W / 2, MAIN_Y + H, B_DROP_B1); // 节点3 → non_complex (深层)
-        branchUp(nodes[2].x + W / 2,   MAIN_Y,     B_SK);     // 节点3 → skipped (上)
-        branchDown(nodes[4].x + W / 2, MAIN_Y + H, B_DROP_A2); // 节点5 → non_complex (浅层)
-        branchDown(nodes[5].x + W / 2, MAIN_Y + H, B_DROP_B2); // 节点6 → rejected (深层)
+        // 节点 3 → skipped (上)
+        branchUpToLane(nodes[2].x + W / 2, MAIN_Y, LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, TOP_LANE_Y + 0, AMBER);
 
-        // 再绘桶
-        drawBucket(B_SK.cx,     B_SK.cy,     B_SK.title,     B_SK.bad,     B_SK.tone);
-        drawBucket(B_DROP_A1.cx, B_DROP_A1.cy, B_DROP_A1.title, B_DROP_A1.bad, B_DROP_A1.tone);
-        drawBucket(B_DROP_A2.cx, B_DROP_A2.cy, B_DROP_A2.title, B_DROP_A2.bad, B_DROP_A2.tone);
-        drawBucket(B_DROP_B1.cx, B_DROP_B1.cy, B_DROP_B1.title, B_DROP_B1.bad, B_DROP_B1.tone);
-        drawBucket(B_DROP_B2.cx, B_DROP_B2.cy, B_DROP_B2.title, B_DROP_B2.bad, B_DROP_B2.tone);
+        // 4 条到 dropped lane
+        branchDownToLane(nodes[1].x + W / 2, MAIN_Y + H, nodes[1].x + W / 2, BOT_LANE_Y - 16, RED);    // 节点2 → rejected
+        branchDownToLane(nodes[4].x + W / 2, MAIN_Y + H, nodes[4].x + W / 2, BOT_LANE_Y - 16, MUTED);  // 节点5 → non_complex
+        branchDownToLane(nodes[2].x + W / 2, MAIN_Y + H, nodes[2].x + W / 2, BOT_LANE_Y - 16, MUTED);  // 节点3 → non_complex
+        branchDownToLane(nodes[5].x + W / 2, MAIN_Y + H, nodes[5].x + W / 2, BOT_LANE_Y - 16, RED);    // 节点6 → rejected
 
         // —— 底部图例 ——
-        const LEG_Y = 540;
+        const LEG_Y = 475;
         el(s, 'line', { x1: 28, y1: LEG_Y - 16, x2: VB_W - 28, y2: LEG_Y - 16, stroke: GRID, 'stroke-width': 0.5 });
         txt(s, { x: 28, y: LEG_Y - 4, 'font-size': 9, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, '图例');
-
         const chips = [
           { x: 28,  kind: 'rect', color: INK,   sw: 1,   text: '规则 · code' },
           { x: 138, kind: 'rect', color: RED,   sw: 1.4, text: '语义 · LLM' },
           { x: 248, kind: 'line', color: INK,   sw: 1,   text: '主线' },
-          { x: 308, kind: 'line', color: GREEN, sw: 1.8, text: 'accepted · 进入样本' },
+          { x: 308, kind: 'line', color: GREEN, sw: 2.2, text: 'accepted · 进入样本' },
           { x: 488, kind: 'line', color: RED,   sw: 1,   text: 'rejected · 规则拒绝 / dedup' },
-          { x: 698, kind: 'line', color: MUTED, sw: 1,   text: 'non_complex · 判定非复杂' },
-          { x: 898, kind: 'line', color: AMBER, sw: 1,   text: 'skipped · LLM 失败' },
+          { x: 700, kind: 'line', color: MUTED, sw: 1,   text: 'non_complex · 判定非复杂' },
+          { x: 900, kind: 'line', color: AMBER, sw: 1,   text: 'skipped · LLM 失败' },
         ];
         chips.forEach(g => {
           if (g.kind === 'rect') {
