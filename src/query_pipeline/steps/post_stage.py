@@ -18,6 +18,7 @@ async def run_post_stage(
     cache_lock: asyncio.Lock,
 ) -> PipelineContext:
     cfg = ctx.config
+    ctx.prune_debug_artifacts("deduped.jsonl")
     if not cfg.post.enabled:
         return ctx
 

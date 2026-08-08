@@ -43,6 +43,11 @@ def _segments_from_cache(label: dict, num_turns: int) -> list[Segment]:
         segments.append(Segment(start=start, end=end, topic=topic))
     if not segments:
         raise ValueError("cached segments must not be empty")
+    # Fresh labels are repaired to full [0, num_turns-1] coverage; a locally-contiguous but
+    # partial cache (e.g. [[0,2]] for 5 turns) would leave indices uncovered and later raise
+    # IndexError in segment_of. Reject it so the caller re-calls the LLM instead.
+    if segments[0].start != 0 or segments[-1].end != num_turns - 1:
+        raise ValueError("cached segments do not cover the whole session")
     return segments
 
 

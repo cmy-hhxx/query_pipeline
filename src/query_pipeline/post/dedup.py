@@ -15,7 +15,11 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
     """Drop near-duplicate rows by exact token-set Jaccard on the slotted text.
 
     实体槽化使"同模板不同实体"的查询骨架一致(按意图/模板合并);token 集合次序
-    无关,能抓住同句改写。分组用并查集(传递),每组保留最长最完整的代表。
+    无关,能抓住同句改写。分组用并查集(传递):任意相似度 >= 阈值的行对都会并进同一
+    簇,保证输出里不再有直接 >= 阈值的近重复对(与 QC near_duplicate 规则一致);
+    每组保留文本最长最完整的代表,簇内其余成员全部剔除。
+    注意:链式并入(A~B、B~C 过线而 A≁C)时,簇成员对代表可能低于阈值,
+    provenance 里的 similarity 仅作参考,不作"恒 >= 阈值"承诺。
     Dropped rows carry provenance (representative trace_id + similarity + method)
     for the debug file. Returns (kept, dropped).
     """

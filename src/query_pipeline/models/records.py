@@ -14,6 +14,10 @@ CATEGORIES: dict[str, str] = {
 
 # English slugs mirror fin_bench's SKILL/fulllink/complex-topic directory names
 # so downstream tooling can join on either id or slug.
+# NOTE: 07's slug "strategy-evaluation" is the fin_bench directory name (a join key),
+# NOT a semantic label — the category's meaning was redefined to 策略触发与设置
+# (trigger/alert/monitor), and the old 策略评估/回测审计 meaning moved to 03.
+# Do not "fix" the slug to match the CN name; that would break the fin_bench join.
 ENGLISH_CATEGORIES: dict[str, str] = {
     "01": "data-metrics-calculation",
     "02": "forecasting-and-projection",

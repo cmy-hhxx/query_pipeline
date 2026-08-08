@@ -42,12 +42,17 @@ async def translate_rows(
 ) -> dict[str, int]:
     system_prompt = resolve_prompt("translate")
     lock = cache_lock or asyncio.Lock()
+    # counts[...] += 1 is de-facto atomic: no `await` between load and store, and asyncio
+    # is single-threaded/cooperative, so the increments can never interleave. No lock needed.
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
 
     def put(row: dict[str, Any], translation: str) -> None:
         row["translation"] = translation
-        row.setdefault("meta", {})["translation"] = translation
+        # meta may be null on input rows; normalize to a dict before writing the translation.
+        meta = row.get("meta") or {}
+        row["meta"] = meta
+        meta["translation"] = translation
 
     async def worker(row: dict[str, Any]) -> None:
         text = _row_text(row)

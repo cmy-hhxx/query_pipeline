@@ -22,6 +22,7 @@ class Turn(BaseModel):
     status: str | None = "completed"
     outcome: str | None = "success"
     tool_names: str = ""  # fallback when chain has no tools (from tool_names / tool_names_text)
+    tool_count: int | None = None  # authoritative tool-call count when chain is absent
 
 
 class Session(BaseModel):

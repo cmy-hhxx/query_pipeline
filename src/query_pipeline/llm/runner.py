@@ -16,7 +16,9 @@ async def run_concurrent(
     show_progress: bool = True,
     progress: Progress | None = None,
 ) -> list[Any]:
-    semaphore = asyncio.Semaphore(concurrency)
+    # clamp: concurrency<=0 would deadlock every worker on a 0-permit semaphore.
+    # LLMClient already clamps to 1; this is the single shared choke point for all stages.
+    semaphore = asyncio.Semaphore(max(1, concurrency))
     results: list[Any] = [None] * len(items)
 
     async def wrapped(index: int, item: Any) -> None:

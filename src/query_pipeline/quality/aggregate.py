@@ -9,10 +9,12 @@ _STATUSES = ("pass", "fail", "needs_review")
 
 
 def record_key(row: dict[str, Any]) -> str:
-    """Stable per-record identity: trace_id when present, else source line number."""
+    """Stable per-record identity: source_case_id|trace_id when trace_id present,
+    else source line number. Composite key so duplicate trace_ids across sessions
+    or reimports fold onto their own rows instead of overwriting one another."""
     trace_id = row.get("trace_id")
     if trace_id:
-        return str(trace_id)
+        return f"{row.get('source_case_id') or ''}|{trace_id}"
     return f"line_{row.get('_line_number', '?')}"
 
 
@@ -56,7 +58,8 @@ def build_results(
         question = inp.get("text") if isinstance(inp, dict) else ""
         results.append(
             {
-                "trace_id": key,
+                # display the real trace_id (join keys are composite in record_key)
+                "trace_id": str(row.get("trace_id") or "") or key,
                 "source_case_id": str(row.get("source_case_id") or ""),
                 "category": str(row.get("category") or ""),
                 "question": str(question)[:80],

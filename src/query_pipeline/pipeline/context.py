@@ -24,6 +24,14 @@ class PipelineContext:
     def path(self, name: str) -> Path:
         return self.work_dir / name
 
+    def prune_debug_artifacts(self, *names: str) -> None:
+        # When intermediates aren't dumped, don't let a prior run's debug artifact
+        # masquerade as this run's.
+        if self.config.debug.dump_intermediates:
+            return
+        for name in names:
+            self.path(name).unlink(missing_ok=True)
+
 
 @dataclass
 class RunSummary:

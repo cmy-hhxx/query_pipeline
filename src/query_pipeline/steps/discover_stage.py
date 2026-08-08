@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import Counter
 from typing import Any
@@ -9,7 +10,7 @@ from rich.progress import Progress
 
 from query_pipeline.adapters import adapt_record
 from query_pipeline.io.checkpoint import content_key, stage_checkpoint
-from query_pipeline.io.jsonl import read_jsonl_with_bad_lines, write_jsonl
+from query_pipeline.io.jsonl import append_jsonl, read_jsonl_with_bad_lines, write_jsonl
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.models.session import Segment
 from query_pipeline.models.turn import Session
@@ -23,7 +24,14 @@ from query_pipeline.session.segment import segment_session
 def session_content_key(session: Session) -> str:
     parts = [session.thread_id, session.candidate_mode]
     for t in session.turns:
-        parts.append(f"{t.trace_id}|{t.question}|{t.answer}|{t.request_time}")
+        # status/outcome drive is_eligible; tool_count drives chain_tool_calls/
+        # chain_steps when chain is absent; tool_names/chain drive the step1
+        # AND-gates — the key must change when any of them change, or stale
+        # discover results replay.
+        parts.append(
+            f"{t.trace_id}|{t.question}|{t.answer}|{t.request_time}|{t.status}|{t.outcome}|{t.tool_names}|{t.tool_count}|"
+            + json.dumps(t.chain, ensure_ascii=False, sort_keys=True, default=str)
+        )
     return content_key(*parts)
 
 
@@ -35,6 +43,7 @@ async def run_discover_stage(
 ) -> PipelineContext:
     """Adapt input → segment/step1/step2 → assemble OutputRows."""
     cfg = ctx.config
+    ctx.prune_debug_artifacts("segments.jsonl", "candidates.jsonl", "judged.jsonl")
     raw_records, bad_count = read_jsonl_with_bad_lines(cfg.input.path, ctx.path("bad_lines.jsonl"))
     if bad_count:
         logging.getLogger(__name__).warning(
@@ -43,11 +52,25 @@ async def run_discover_stage(
 
     sessions: list[Session] = []
     adapt_skipped = 0
+    logger = logging.getLogger(__name__)
+    bad_path = ctx.path("bad_lines.jsonl")
     for record in raw_records:
         try:
             sessions.append(adapt_record(record, cfg.input.format))
-        except ValueError:
+        except ValueError as exc:
             adapt_skipped += 1
+            logger.warning(
+                "adapt: skipped record line %s: %s", record.get("_line_number", "?"), str(exc)[:200]
+            )
+            append_jsonl(
+                bad_path,
+                {
+                    "reason": "adapt_failed",
+                    "detail": str(exc)[:200],
+                    "line_number": record.get("_line_number"),
+                    "record": {k: v for k, v in record.items() if not k.startswith("_")},
+                },
+            )
     skipped = bad_count + adapt_skipped
     ctx.stats["total_sessions"] = len(sessions)
     ctx.stats["input_bad_lines"] = skipped
@@ -170,11 +193,10 @@ async def _process_session(
         return [], {"empty_sessions": 1}, [], [], []
 
     if session.candidate_mode == "last_only":
+        # Chat semantics: the trailing turn is the candidate by definition, gated only on
+        # eligibility. Step1's chain/tool AND-gates do not apply (prior turns carry no chain).
         segments = [Segment(0, len(turns) - 1, "whole_session")]
         candidates = select_last_only(turns)
-        if cfg.step1.enabled and candidates:
-            step1_ok = set(select_candidates(turns, cfg.step1))
-            candidates = [i for i in candidates if i in step1_ok]
     else:
         if cfg.segmentation.enabled and client is not None:
             segments = await segment_session(

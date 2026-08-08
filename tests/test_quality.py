@@ -287,12 +287,13 @@ class AggregateTest(unittest.TestCase):
             _row(trace_id="err"),
             _row(trace_id="ok"),
         ]
-        per_record = {r["trace_id"]: check_record(r) for r in records}
-        sample_set = {"low", "err", "ok"}
+        k = {r["trace_id"]: aggregate.record_key(r) for r in records}
+        per_record = {aggregate.record_key(r): check_record(r) for r in records}
+        sample_set = {k[t] for t in ("low", "err", "ok")}
         judge_results = {
-            "low": {"trace_id": "low", "question_quality": "low", "label_ok": False, "reason": "低质", "error": None},
-            "err": {"trace_id": "err", "question_quality": None, "label_ok": None, "reason": "", "error": "boom"},
-            "ok": {"trace_id": "ok", "question_quality": "high", "label_ok": True, "reason": "好", "error": None},
+            k["low"]: {"trace_id": k["low"], "question_quality": "low", "label_ok": False, "reason": "低质", "error": None},
+            k["err"]: {"trace_id": k["err"], "question_quality": None, "label_ok": None, "reason": "", "error": "boom"},
+            k["ok"]: {"trace_id": k["ok"], "question_quality": "high", "label_ok": True, "reason": "好", "error": None},
         }
         results = aggregate.build_results(records, per_record, sample_set, judge_results)
         by_status = {r["trace_id"]: r["status"] for r in results}
@@ -302,9 +303,15 @@ class AggregateTest(unittest.TestCase):
         self.assertEqual(by_status["err"], "needs_review")  # judge error
         self.assertEqual(by_status["ok"], "pass")            # LLM clean
 
+    def test_record_key_includes_source_case_id(self) -> None:
+        a = _row(trace_id="t1", source_case_id="case_a")
+        b = _row(trace_id="t1", source_case_id="case_b")
+        self.assertNotEqual(aggregate.record_key(a), aggregate.record_key(b))
+        self.assertEqual(aggregate.record_key(a), "case_a|t1")
+
     def test_overview_counts_and_flagged(self) -> None:
         records = [_row(trace_id="t1"), _row(trace_id="t2", category="99-bad")]
-        per_record = {r["trace_id"]: check_record(r) for r in records}
+        per_record = {aggregate.record_key(r): check_record(r) for r in records}
         results = aggregate.build_results(records, per_record, set(), {})
         dataset_rules = run_dataset_rules(records)
         overview = aggregate.build_overview(

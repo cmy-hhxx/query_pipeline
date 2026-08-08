@@ -20,8 +20,11 @@ async def run_verify_stage(
     cache: dict[str, dict[str, Any]],
     cache_lock: asyncio.Lock,
 ) -> PipelineContext:
-    """Standalone multi-round re-check; LLM failures keep the row (fail-open, sticky)."""
+    """Standalone multi-round re-check; LLM failures keep the row (fail-open) and are
+    checkpointed too, so a resumed run replays the failure (deterministic fail-open).
+    discover, by contrast, stays fail-closed: errored sessions are not checkpointed."""
     cfg = ctx.config
+    ctx.prune_debug_artifacts("verified.jsonl")
     if not cfg.verify.enabled or client is None or not ctx.rows:
         return ctx
 
@@ -85,6 +88,8 @@ async def run_verify_stage(
             if not parsed.is_complex:
                 break
         keep = error is not None or (bool(rounds) and all(r["is_complex"] for r in rounds))
+        # Fail-open: errored rows are kept in output AND checkpointed, so a resumed run
+        # replays the failure instead of re-verifying (deterministic across resumes).
         await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
         return {"keep": keep, "reason": reason, "error": error, "rounds": rounds}
 

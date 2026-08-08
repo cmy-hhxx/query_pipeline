@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 from query_pipeline.config.models import PipelineConfig
 from query_pipeline.io.jsonl import write_jsonl
@@ -11,6 +12,24 @@ from query_pipeline.pipeline.context import PipelineContext, RunSummary, merge_s
 from query_pipeline.steps.discover_stage import run_discover_stage
 from query_pipeline.steps.post_stage import run_post_stage
 from query_pipeline.steps.verify_stage import run_verify_stage
+
+
+def _run_success(stats: dict[str, Any]) -> bool:
+    """A run fails when discover-level work errored or nothing was adapted.
+
+    verify_failed / translate_failed are fail-open by design (kept, retried next run)
+    and empty complex_rows on a clean run (e.g. llm.enabled=false) is legitimate —
+    neither makes the run a failure.
+    """
+    if stats.get("session_errors", 0) > 0:
+        return False
+    if stats.get("llm_failed", 0) > 0:
+        return False
+    if stats.get("total_sessions", 0) == 0:
+        return False
+    if stats.get("input_bad_lines", 0) == stats.get("total_sessions", 0):
+        return False
+    return True
 
 
 def run_pipeline(config: PipelineConfig) -> RunSummary:
@@ -39,13 +58,20 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
 
     complex_path = ctx.output_dir / config.output.complex_queries
     summary_path = ctx.output_dir / config.output.summary
-    write_jsonl(complex_path, ctx.rows)
 
     stats = merge_stats(ctx)
-    summary_path.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+    success = _run_success(stats)
+    # Write output unless the run failed AND produced nothing — avoid clobbering a
+    # previous good output with an empty file. Partial rows are still inspectable;
+    # the exit code and summary flag the failure.
+    if success or ctx.rows:
+        write_jsonl(complex_path, ctx.rows)
+    summary_path.write_text(
+        json.dumps({**stats, "success": success}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     return RunSummary(
-        success=True,
+        success=success,
         name=config.name,
         stats=stats,
         output_files={

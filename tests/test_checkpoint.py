@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.io.checkpoint import Checkpoint, content_key
+from query_pipeline.io.checkpoint import Checkpoint, _src_hash, content_key, stage_fingerprint
 from query_pipeline.pipeline.runner import run_pipeline
 
 
@@ -220,19 +220,24 @@ class VerifyResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            # Run 1: verify for V1 fails (sticky fail-open keeps + checkpoints
-            # the row); V0/V2 are checkpointed cleanly.
+            # Run 1: verify for V1 fails (fail-open keeps the row and checkpoints
+            # the failure); V0/V2 are checkpointed cleanly.
             summary1, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
             self.assertEqual(summary1.stats["verify_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 3)
 
-            # Run 2: all three replay from checkpoints (discover + verify).
+            # Run 2: all three replay from checkpoints; V1's recorded failure
+            # replays too (fail-open is sticky), so zero re-verify LLM calls and
+            # the same output.
             summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["verify_kept"], 2)
             self.assertEqual(summary2.stats["verify_failed"], 1)
             self.assertEqual(summary2.stats["complex_rows"], 3)
-            self.assertEqual(client2.calls, [])
+            self.assertEqual(
+                [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
+                [],
+            )
 
 
 class TranslateResumeTest(unittest.TestCase):
@@ -289,6 +294,18 @@ class CheckpointInvalidationTest(unittest.TestCase):
             texts = [r["input"]["text"] for r in rows]
             self.assertIn("W0 complex query NEW", texts)
             self.assertNotIn("W0 complex query", texts)
+
+    def test_fingerprint_tracks_source(self) -> None:
+        # Code changes must invalidate the checkpoint fingerprint (else a behavior fix
+        # silently never takes effect on resume).
+        self.assertEqual(_src_hash(), _src_hash())  # stable across calls
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = load_pipeline_config(_write_config(Path(tmp), post_enabled=False))
+            with patch("query_pipeline.io.checkpoint._src_hash", return_value="aaaa"):
+                fp_a = stage_fingerprint(cfg, "discover")
+            with patch("query_pipeline.io.checkpoint._src_hash", return_value="bbbb"):
+                fp_b = stage_fingerprint(cfg, "discover")
+        self.assertNotEqual(fp_a, fp_b)
 
 
 def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:

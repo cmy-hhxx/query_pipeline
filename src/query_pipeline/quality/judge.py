@@ -9,6 +9,7 @@ from pydantic import BaseModel, field_validator
 from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.runner import run_concurrent
 from query_pipeline.models.session import parse_json_object
+from query_pipeline.quality.aggregate import record_key
 from query_pipeline.quality.prompts import QC_STEP, build_judge_system_prompt, build_judge_user_prompt
 
 
@@ -45,6 +46,8 @@ async def judge_one(
     model: str,
 ) -> dict[str, Any]:
     """One LLM call for a sampled record; never raises for LLM/parse failures."""
+    # join key must match aggregate.record_key so verdicts fold onto the right rows
+    key = record_key(row)
     trace_id = str(row.get("trace_id") or "")
     user_prompt = build_judge_user_prompt(row)
     cache_key = make_cache_key(user_prompt, step=QC_STEP, model=model, prompt=system_prompt)
@@ -67,7 +70,7 @@ async def judge_one(
                 lock=cache_lock,
             )
         return {
-            "trace_id": trace_id,
+            "trace_id": key,
             "question_quality": parsed.question_quality,
             "label_ok": parsed.label_ok,
             "reason": parsed.reason,
@@ -75,7 +78,7 @@ async def judge_one(
         }
     except (ValueError, RuntimeError) as exc:
         return {
-            "trace_id": trace_id,
+            "trace_id": key,
             "question_quality": None,
             "label_ok": None,
             "reason": "",

@@ -132,7 +132,7 @@ def run_quality(args: argparse.Namespace) -> int:
             question = inp.get("text") if isinstance(inp, dict) else ""
             sampled_rows.append(
                 {
-                    "trace_id": key,
+                    "trace_id": str(row.get("trace_id") or "") or key,
                     "source_case_id": row.get("source_case_id", ""),
                     "category": row.get("category", ""),
                     "question": str(question)[:80],

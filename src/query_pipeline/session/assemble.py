@@ -13,7 +13,12 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _request_time_ms(request_time: str) -> int | None:
-    """Parse a Beijing-local time string like ``2026-08-07 17:49:42`` to epoch ms."""
+    """Parse a Beijing-local time string like ``2026-08-07 17:49:42`` to epoch ms.
+
+    Naive (tz-naive) strings are interpreted as Asia/Shanghai — the upstream sources
+    emit Beijing-local naive strings and must never be read as UTC. TZ-aware strings
+    are honored as-is.
+    """
     if not request_time or not request_time.strip():
         return None
     try:

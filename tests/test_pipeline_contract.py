@@ -21,10 +21,12 @@ from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
 from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
 from query_pipeline.session.assemble import assemble_row
-from query_pipeline.session.candidates import select_candidates
+from query_pipeline.session.candidates import chain_steps, chain_tool_calls, select_candidates
 from query_pipeline.adapters.chat import adapt_chat
 from query_pipeline.adapters.session import adapt_turn, adapt_session
 from query_pipeline.session.judge import build_judge_payload
+from query_pipeline.session.segment import _segments_from_cache
+from query_pipeline.steps.discover_stage import session_content_key
 
 
 def _make_turn(
@@ -102,6 +104,74 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(InputConfig(path=Path("x.jsonl"), format="chat").format, "chat")
         with self.assertRaises(ValueError):
             InputConfig(path=Path("x.jsonl"), format="bogus")
+
+    def test_segment_cache_partial_coverage_rejected(self) -> None:
+        # A locally-contiguous but partial cache must be rejected as a miss (re-call LLM)
+        # rather than pass and later IndexError inside segment_of.
+        partial = {"segments": [{"start": 0, "end": 2, "topic": "t"}]}
+        with self.assertRaises(ValueError):
+            _segments_from_cache(partial, num_turns=5)
+        # Full coverage still accepted.
+        full = {"segments": [{"start": 0, "end": 2, "topic": "a"}, {"start": 3, "end": 4, "topic": "b"}]}
+        self.assertEqual(len(_segments_from_cache(full, num_turns=5)), 2)
+
+    def test_chainless_turn_passes_via_tool_count(self) -> None:
+        cfg = Step1Config()  # defaults: min_chain_tool_calls=7, min_chain_steps=1, min_unique_tools=2
+        turns = [
+            adapt_turn(
+                _make_turn(0, "复杂多步取数计算预测", tool_count=8, tool_names="web_search,finquery,compute")
+            )
+        ]
+        # chain-less but tool_count/tool_names are present: fallback keeps the AND-gates satisfiable.
+        self.assertEqual(chain_tool_calls(turns[0]), 8)
+        self.assertEqual(chain_steps(turns[0]), 1)
+        self.assertIn(0, select_candidates(turns, cfg))
+
+    def test_session_content_key_sensitive_to_chain_status_tool_count(self) -> None:
+        base = {
+            "thread_id": "t1",
+            "context": [_make_turn(0, "Q1 复杂查询", tool_names="web_search", tool_count=1)],
+        }
+        s1 = adapt_session(base)
+        # Same Q/A/time but different status must produce a different checkpoint key.
+        failed_status = dict(base)
+        failed_status["context"] = [
+            {**_make_turn(0, "Q1 复杂查询", tool_names="web_search", tool_count=1), "status": "failed"}
+        ]
+        s2 = adapt_session(failed_status)
+        self.assertNotEqual(session_content_key(s1), session_content_key(s2))
+        # Chain change alone also changes the key (drives step1 gates).
+        chained = dict(base)
+        chained["context"] = [
+            _make_turn(0, "Q1 复杂查询", tool_names="web_search", tool_count=3, chain=_chain_with_tool_calls(3))
+        ]
+        s3 = adapt_session(chained)
+        self.assertNotEqual(session_content_key(s1), session_content_key(s3))
+        # Tool-count change alone (chain absent → step1 falls back to tool_count) also changes the key.
+        retooled = dict(base)
+        retooled["context"] = [_make_turn(0, "Q1 复杂查询", tool_names="web_search", tool_count=2)]
+        s4 = adapt_session(retooled)
+        self.assertNotEqual(session_content_key(s1), session_content_key(s4))
+        # Identical input replays the same key.
+        self.assertEqual(session_content_key(s1), session_content_key(adapt_session(base)))
+
+    def test_run_success_predicate(self) -> None:
+        from query_pipeline.pipeline.runner import _run_success
+
+        clean = {
+            "total_sessions": 10,
+            "input_bad_lines": 0,
+            "llm_failed": 0,
+            "session_errors": 0,
+            "complex_rows": 0,
+        }
+        self.assertTrue(_run_success(clean))
+        self.assertFalse(_run_success({**clean, "llm_failed": 1}))
+        self.assertFalse(_run_success({**clean, "session_errors": 1}))
+        self.assertFalse(_run_success({**clean, "total_sessions": 0}))
+        self.assertFalse(_run_success({**clean, "input_bad_lines": 10}))
+        # fail-open stages and empty-but-clean output do not fail the run.
+        self.assertTrue(_run_success({**clean, "verify_failed": 1, "translate_failed": 1}))
 
     def test_adapt_chat(self) -> None:
         record = {
@@ -378,7 +448,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeFailingSessionLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertTrue(summary.success)
+            self.assertFalse(summary.success)  # llm_failed=1 makes the run a failure (exit 1)
             # segmentation failure -> whole session is one segment; judge failure on turn1 dropped.
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
@@ -498,8 +568,8 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_verify_multi_round_error_mid_round_fail_open(self) -> None:
         # Round 2 of the "flaky" question raises: fail-open keeps the row
-        # (verify_failed=1) and checkpoints the partial cascade so a re-run
-        # makes zero LLM calls.
+        # (verify_failed=1) and checkpoints the failure, so a re-run replays
+        # both rows from the checkpoint with zero LLM calls.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             names = ("web_search", "finquery", "compute")
@@ -544,7 +614,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary2 = run_pipeline(cfg)
             self.assertEqual(summary2.stats["verify_kept"], 1)
             self.assertEqual(summary2.stats["verify_failed"], 1)
-            self.assertEqual(clients2[0].calls, [])
+            # both rows replay from the checkpoint (errored rows are sticky fail-open)
+            self.assertEqual(len(clients2[0].calls), 0)
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(
@@ -629,6 +700,64 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["raw_answer"], "text_answer")
             self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "", "translation": ""})
 
+    def test_end_to_end_chat_with_step1_enabled(self) -> None:
+        # last_only must ignore step1 chain/tool AND-gates: a single-tool-call trailing
+        # turn still becomes a candidate (previously filtered by min_chain_tool_calls=7).
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            case = {
+                "trace_id": "t1",
+                "question": "Q2 复杂取数",
+                "judge_data": {
+                    "case_id": "c1",
+                    "trace_id": "t1",
+                    "input": {"text": "Q2 复杂取数", "image": None, "file": None},
+                    "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
+                    "chain": [{"plan": "", "tools": [{"name": "web_search", "input": {}, "output": "x"}]}],
+                    "raw_answer": "raw_answer",
+                    "text_answer": "text_answer",
+                    "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
+                },
+            }
+            _write_jsonl(tmp_path / "input.jsonl", [case])
+            cfg = load_pipeline_config(
+                _write_config(tmp_path, llm_enabled=True, input_format="chat", step1_enabled=True)
+            )
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["candidates"], 1)
+            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["verify_kept"], 1)
+
+    def test_end_to_end_chat_empty_answer_no_row(self) -> None:
+        # Empty trailing answer (text_answer/raw_answer both empty) is ineligible: no row.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            case = {
+                "trace_id": "t1",
+                "question": "Q2 复杂取数",
+                "judge_data": {
+                    "case_id": "c1",
+                    "trace_id": "t1",
+                    "input": {"text": "Q2 复杂取数", "image": None, "file": None},
+                    "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
+                    "chain": [{"plan": "", "tools": [{"name": "web_search", "input": {}, "output": "x"}]}],
+                    "raw_answer": "",
+                    "text_answer": "",
+                    "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
+                },
+            }
+            _write_jsonl(tmp_path / "input.jsonl", [case])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, input_format="chat"))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["candidates"], 0)
+            self.assertEqual(summary.stats["complex_rows"], 0)
+
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -642,6 +771,23 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["candidates"], 2)
             self.assertEqual(summary.stats["complex_rows"], 0)
             self.assertEqual(len(_read_jsonl(Path(summary.output_files["complex_queries"]))), 0)
+
+    def test_adapt_failure_lands_in_bad_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            records = [
+                {"thread_id": "good", "context": _sample_turns()},
+                {"thread_id": "bad", "context": "not-a-list"},  # adapt_session raises ValueError
+            ]
+            _write_jsonl(tmp_path / "input.jsonl", records)
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=False))
+
+            summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["total_sessions"], 1)
+            self.assertEqual(summary.stats["input_bad_lines"], 1)
+            bad_lines = _read_jsonl(tmp_path / "work" / "bad_lines.jsonl")
+            self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
 
 
 class FakeSessionLLMClient:
@@ -831,11 +977,20 @@ class FakeVerifyMidRoundErrorLLMClient:
         return None
 
 
-def _write_config(tmp_path: Path, *, llm_enabled: bool, post_enabled: bool = False, input_format: str = "session") -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    llm_enabled: bool,
+    post_enabled: bool = False,
+    input_format: str = "session",
+    step1_enabled: bool | None = None,
+) -> Path:
     config_path = tmp_path / "config.yaml"
     is_chat = input_format == "chat"
     seg_on = "false" if is_chat else "true"
     step1_on = "false" if is_chat else "true"
+    if step1_enabled is not None:
+        step1_on = "true" if step1_enabled else "false"
     post_block = ""
     if post_enabled:
         post_block = """

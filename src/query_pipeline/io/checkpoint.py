@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +20,22 @@ def _hash_material(material: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+@lru_cache(maxsize=1)
+def _src_hash() -> str:
+    """Hash of all pipeline source code; behavior fixes must invalidate checkpoints.
+
+    Hashes the whole src/query_pipeline tree (not a per-stage list) so the fingerprint
+    can never silently forget the modules a stage depends on.
+    """
+    root = Path(__file__).resolve().parents[1]
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        h.update(path.read_bytes())
+    return h.hexdigest()
+
+
 def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
-    """Hash of knobs that can change this stage's outputs."""
+    """Hash of knobs that can change this stage's outputs (config, prompts, source)."""
     llm = {
         "model": cfg.llm.model,
         "enabled": cfg.llm.enabled,
@@ -34,6 +49,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
                 "step1": cfg.step1.model_dump(mode="json"),
                 "step2": cfg.step2.model_dump(mode="json"),
                 "llm": llm,
+                "src": _src_hash(),
                 "prompts": {
                     "segment": resolve_prompt("segment"),
                     cfg.step2.prompt_id: resolve_prompt(cfg.step2.prompt_id),
@@ -48,6 +64,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
             {
                 "verify": cfg.verify.model_dump(mode="json"),
                 "llm": llm,
+                "src": _src_hash(),
                 "prompts": prompts,
             }
         )
@@ -56,6 +73,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
             {
                 "translate": cfg.post.translate.model_dump(mode="json"),
                 "llm": llm,
+                "src": _src_hash(),
                 "prompts": {"translate": resolve_prompt("translate")},
             }
         )

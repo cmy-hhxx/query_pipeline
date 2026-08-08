@@ -199,6 +199,23 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(len(kept), 2)
         self.assertEqual(dropped, [])
 
+    def test_chained_pair_merged_transitively(self) -> None:
+        # A~B (8/9) and B~C (0.8) both >= threshold; A~C (0.7) below it.
+        # Transitive union-find merges all three into one cluster, so the directly
+        # >= threshold pair B~C does NOT both survive. One representative stays
+        # (longest text: C, 19 chars vs B's 18); the other two are dropped.
+        a = "w1 w2 w3 w4 w5 w6 w7 w8"
+        b = "w1 w2 w3 w4 w5 w6 w7 w8 w9"
+        c = "w1 w2 w3 w4 w5 w6 w7 w9 w10"
+        rows = [_row(a, "rA"), _row(b, "rB"), _row(c, "rC")]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+
+        self.assertEqual([r["trace_id"] for r in kept], ["rC"])
+        self.assertEqual([d["trace_id"] for d in dropped], ["rA", "rB"])
+        self.assertEqual({d["dedup_of_trace_id"] for d in dropped}, {"rC"})
+        # dropped[1] is B, a direct >= threshold near-dup of representative C.
+        self.assertGreaterEqual(dropped[1]["similarity"], 0.8)
+
 
 class TranslateTest(unittest.TestCase):
     def test_adds_translation_to_meta(self) -> None:
@@ -221,6 +238,33 @@ class TranslateTest(unittest.TestCase):
 
         self.assertEqual(rows[0]["meta"]["translation"], "如何对冲通胀")
         self.assertEqual(counters, {"translated": 1, "translate_skipped": 0, "translate_failed": 0})
+
+    def test_adds_translation_with_null_meta(self) -> None:
+        rows = [
+            {
+                "trace_id": "r1",
+                "source_case_id": "t1",
+                "input": {"text": "how to hedge against inflation", "image": "", "file": ""},
+                "meta": None,  # input rows may carry meta: null
+            }
+        ]
+
+        async def handler(system_prompt: str, user_prompt: str) -> str:
+            del system_prompt, user_prompt
+            return json.dumps({"translation": "如何对冲通胀"}, ensure_ascii=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(
+                translate_rows(
+                    rows,
+                    client=FakeLLMClient(handler),
+                    llm_cfg=_llm_cfg(tmp),
+                    cache={},
+                    cache_path=Path(tmp) / "cache.jsonl",
+                )
+            )
+
+        self.assertEqual(rows[0]["meta"]["translation"], "如何对冲通胀")
 
     def test_chinese_text_skipped_no_llm_call(self) -> None:
         rows = [_row("如何对冲通胀风险", "r1")]

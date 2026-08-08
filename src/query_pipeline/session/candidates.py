@@ -10,22 +10,30 @@ def is_eligible(turn: Turn) -> bool:
         return False
     if turn.outcome not in (None, "success"):
         return False
+    if not (turn.question and turn.question.strip()):
+        return False
     return bool(turn.answer and turn.answer.strip())
 
 
 def chain_tool_calls(turn: Turn) -> int:
-    total = 0
-    for step in turn.chain:
-        if not isinstance(step, dict):
-            continue
-        tools = step.get("tools")
-        if isinstance(tools, list):
-            total += len(tools)
-    return total
+    if turn.chain:
+        total = 0
+        for step in turn.chain:
+            if not isinstance(step, dict):
+                continue
+            tools = step.get("tools")
+            if isinstance(tools, list):
+                total += len(tools)
+        return total
+    # chain absent: fall back to the raw tool_count (authoritative call count).
+    return turn.tool_count or 0
 
 
 def chain_steps(turn: Turn) -> int:
-    return len(turn.chain)
+    if turn.chain:
+        return len(turn.chain)
+    # a toolful but chain-less turn performed at least one step by definition.
+    return 1 if (turn.tool_count or 0) > 0 else 0
 
 
 def extract_tool_names(turn: Turn) -> list[str]:
@@ -79,7 +87,7 @@ def select_candidates(turns: list[Turn], cfg: Step1Config) -> list[int]:
 
 
 def select_last_only(turns: list[Turn]) -> list[int]:
-    """Chat semantics: only the trailing turn is a candidate."""
+    """Chat semantics: only the trailing turn is a candidate, gated on eligibility."""
     if not turns:
         return []
-    return [len(turns) - 1] if turns[-1].question.strip() else []
+    return [len(turns) - 1] if is_eligible(turns[-1]) else []

@@ -44,6 +44,7 @@ def adapt_turn(raw: dict[str, Any]) -> Turn:
         status=raw.get("status", "completed"),
         outcome=raw.get("outcome", "success"),
         tool_names=_tool_names_fallback(raw),
+        tool_count=raw.get("tool_count"),
     )
 
 
