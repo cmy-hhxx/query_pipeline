@@ -44,20 +44,6 @@ def parse_json_object(raw: str) -> dict[str, Any]:
     return data
 
 
-def parse_json_object(raw: str) -> dict[str, Any]:
-    """Parse a JSON object from an LLM response, tolerating markdown fences."""
-    text = raw.strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if not match:
-            raise ValueError(f"cannot parse JSON response: {text[:200]}")
-        data = json.loads(match.group(1))
-    if not isinstance(data, dict):
-        raise ValueError("response must be a JSON object")
-    return data
-
 
 class VerifyResult(BaseModel):
     """Standalone second-pass verdict: is the question complex on its own.
