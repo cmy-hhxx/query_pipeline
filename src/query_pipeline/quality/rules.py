@@ -45,8 +45,16 @@ class DatasetRule:
     check: Callable[[list[dict[str, Any]]], tuple[bool, str, list[str]]]  # -> (ok, detail, evidence)
 
 
+def _cjk_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    return sum(1 for ch in text if "一" <= ch <= "鿿") / len(text)
+
+
 def _has_cjk(text: str) -> bool:
-    return any("一" <= ch <= "鿿" for ch in text)
+    # 与 post.translate.needs_translation 口径一致：CJK 占比 >= 30% 视为中文，
+    # 否则视为需要翻译（避免日文/韩文/混合语言行误报）。
+    return _cjk_ratio(text) >= 0.3
 
 
 def _field_value(row: dict[str, Any], dotted: str) -> Any:

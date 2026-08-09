@@ -13,7 +13,8 @@ def project_root(start: Path | None = None) -> Path:
 
 
 def source_path(dataset: str, date: str, root: Path | None = None) -> Path:
-    return (root or project_root()) / "outputs" / dataset / f"complex_queries_{date}.jsonl"
+    # 管线新默认输出名（含 hard + normal 两类样本）；date 用于 QC 产物目录。
+    return (root or project_root()) / "outputs" / dataset / "cleaned_queries.jsonl"
 
 
 def qc_dir(dataset: str, date: str, root: Path | None = None) -> Path:

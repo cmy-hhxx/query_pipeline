@@ -74,13 +74,12 @@ def run(
     Returns:
         summary dict: per-stage counts, output files, success flag.
     """
-    if verbose:
-        import logging
+    import logging
 
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     load_dotenv(_find_env_file(), override=False)
 
     src = Path(input_path).expanduser().resolve()

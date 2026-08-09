@@ -124,28 +124,31 @@ async def run_judge_stage(
         debug_judged.extend(judged)
 
     ctx.rows = rows
-    logger.info(
-        "[judge] candidates=%d valuable=%d complex=%d normal=%d value_rejected=%d llm_failed=%d",
-        ctx.stats.get("candidates", 0),
-        ctx.stats.get("candidates", 0) - ctx.stats.get("value_rejected", 0) - ctx.stats.get("llm_failed", 0),
-        counters.get("complex_rows", 0),
-        counters.get("normal_rows", 0),
-        counters.get("value_rejected", 0),
-        counters.get("llm_failed", 0),
-    )
+    candidates = counters.get("candidates", 0)
+    value_rejected = counters.get("value_rejected", 0)
+    llm_failed = counters.get("llm_failed", 0)
     ctx.stats.update(
         {
             "segments": sum(len(v) for v in ctx.segments.values()),
-            "candidates": counters.get("candidates", 0),
+            "candidates": candidates,
             "complex_rows": counters.get("complex_rows", 0),
             "normal_rows": counters.get("normal_rows", 0),
-            "value_rejected": counters.get("value_rejected", 0),
+            "value_rejected": value_rejected,
             "non_complex": counters.get("non_complex", 0),
-            "llm_failed": counters.get("llm_failed", 0),
+            "llm_failed": llm_failed,
             "session_errors": counters.get("session_errors", 0),
             "category_counts": {cid: complex_categories[cid] for cid in sorted(complex_categories)},
             "category_counts_normal": {cid: normal_categories[cid] for cid in sorted(normal_categories)},
         }
+    )
+    logger.info(
+        "[judge] candidates=%d valuable=%d complex=%d normal=%d value_rejected=%d llm_failed=%d",
+        candidates,
+        candidates - value_rejected - llm_failed,
+        counters.get("complex_rows", 0),
+        counters.get("normal_rows", 0),
+        value_rejected,
+        llm_failed,
     )
     if cfg.debug.dump_intermediates:
         _write_debug_files(ctx, debug_judged)
