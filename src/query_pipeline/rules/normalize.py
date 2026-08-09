@@ -4,11 +4,46 @@ import re
 import unicodedata
 from typing import Any
 
-# 实体槽位占位符:把 ticker/数字/日期抽象成统一槽,使"同模板不同实体"的查询骨架一致。
-# 占位符用尖括号包裹并与周围以空格隔离,避免与真实词冲突,tokenize 时原样保留。
-SLOT_PLACEHOLDERS = frozenset({"<ticker>", "<num>", "<date>"})
+from query_pipeline.taxonomy import templates_dir
 
-# 按序应用:先 ticker 后货币(让 $AAPL 归 ticker、$100 归 num);
+# 实体槽位占位符:把 ticker/数字/日期/股票名抽象成统一槽,使"同模板不同实体"的查询骨架一致。
+# 占位符用尖括号包裹并与周围以空格隔离,避免与真实词冲突,tokenize 时原样保留。
+SLOT_PLACEHOLDERS = frozenset({"<ticker>", "<num>", "<date>", "<stock>"})
+
+# 股票名称词典(最长匹配优先):中文/英文标的名称 → <stock>。
+# 词典维护于 templates/stock_names.txt;仅含明确标的名称,避免通用行业词。
+_STOCK_NAMES: tuple[str, ...] = ()
+
+
+def _load_stock_names() -> tuple[str, ...]:
+    global _STOCK_NAMES
+    if not _STOCK_NAMES:
+        path = templates_dir() / "stock_names.txt"
+        names: list[str] = []
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                name = line.strip()
+                if name and not name.startswith("#"):
+                    names.append(name)
+        # 最长匹配优先:完整名先于简称被替换
+        _STOCK_NAMES = tuple(sorted(set(names), key=len, reverse=True))
+    return _STOCK_NAMES
+
+
+_STOCK_PATTERN: re.Pattern[str] | None = None
+
+
+def _stock_pattern() -> re.Pattern[str]:
+    global _STOCK_PATTERN
+    if _STOCK_PATTERN is None:
+        names = _load_stock_names()
+        _STOCK_PATTERN = (
+            re.compile("|".join(re.escape(n) for n in names)) if names else re.compile(r"(?!)")
+        )
+    return _STOCK_PATTERN
+
+
+# 按序应用:先词典(股票名,可能含数字)后 ticker 后货币(让 $AAPL 归 ticker、$100 归 num);
 # 先日期后裸数字(让 2026-08-03 归 date,而不是拆成 <num>-<num>-<num>)。
 _SLOT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\$[a-z][a-z0-9.\-]*", re.IGNORECASE), "<ticker>"),
@@ -30,8 +65,9 @@ def normalize_question(value: Any) -> str:
 
 
 def slot_entities(text: str) -> str:
-    """把 ticker/数字/百分比/日期替换为槽位占位符,并折叠空白。"""
+    """把股票名/ticker/数字/百分比/日期替换为槽位占位符,并折叠空白。"""
     text = normalize_question(text)
+    text = _stock_pattern().sub(lambda _m: " <stock> ", text)
     for pattern, replacement in _SLOT_PATTERNS:
         text = pattern.sub(lambda _m, repl=replacement: f" {repl} ", text)
     return re.sub(r"\s+", " ", text).strip()

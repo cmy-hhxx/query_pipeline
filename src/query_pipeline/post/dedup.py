@@ -10,18 +10,23 @@ from query_pipeline.rules.normalize import (
     tokenize_question,
 )
 
+# 模板合并门槛:非槽 token 集合完全一致(措辞骨架相同)且实体不同 → 同模板。
+# 非槽 token 过少(如 <4 个词)时骨架太弱,不启用,避免短句误并。
+_MIN_TEMPLATE_TOKENS = 4
+
 
 def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Drop near-duplicate rows by exact token-set Jaccard on the slotted text.
+    """Drop near-duplicate rows by two rule layers:
 
-    实体槽化使"同模板不同实体"的查询骨架一致(按意图/模板合并);token 集合次序
-    无关,能抓住同句改写。分组用并查集(传递):任意相似度 >= 阈值的行对都会并进同一
-    簇,保证输出里不再有直接 >= 阈值的近重复对(与 QC near_duplicate 规则一致);
-    每组保留文本最长最完整的代表,簇内其余成员全部剔除。
-    注意:链式并入(A~B、B~C 过线而 A≁C)时,簇成员对代表可能低于阈值,
-    provenance 里的 similarity 仅作参考,不作"恒 >= 阈值"承诺。
-    Dropped rows carry provenance (representative trace_id + similarity + method)
-    for the debug file. Returns (kept, dropped).
+    1. Template layer (equivalence classes): identical non-slot token skeleton
+       with differing entity slots — "帮我分析一下<stock>的走势" vs
+       "...<stock2>..." — merge directly. This is an equivalence relation, so
+       it is clustered in O(n) without pairwise comparison.
+    2. Jaccard layer: exact token-set Jaccard >= threshold on the slotted
+       text, compared between template-group representatives and singleton
+       rows through an inverted index (blocking), so ~100k rows stay fast.
+
+    Union-find clustering and longest-representative selection are unchanged.
     """
     def _text(row: dict[str, Any]) -> str:
         inp = row.get("input")
@@ -29,8 +34,8 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
 
     n = len(rows)
     token_sets = [tokenize_question(_text(r), entity_slot=cfg.entity_slot) for r in rows]
-    # 仅含槽位 token 的退化查询(如纯数字)不参与比较,避免 "1234" vs "5678" 都变 {<num>} 而误并。
-    comparable = [bool(s and (s - SLOT_PLACEHOLDERS)) for s in token_sets]
+    non_slot = [s - SLOT_PLACEHOLDERS for s in token_sets]
+    comparable = [bool(s) for s in non_slot]
 
     parent = list(range(n))
 
@@ -40,21 +45,65 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
             x = parent[x]
         return x
 
-    for i in range(n):
-        if not comparable[i]:
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # ---- layer 1: template equivalence classes (non-slot skeleton) ----
+    template_groups: dict[frozenset[str], list[int]] = {}
+    for i, ns in enumerate(non_slot):
+        if comparable[i] and len(ns) >= _MIN_TEMPLATE_TOKENS:
+            template_groups.setdefault(frozenset(ns), []).append(i)
+
+    template_members: set[int] = set()
+    group_of: dict[int, frozenset[str]] = {}
+    for key, members in template_groups.items():
+        if len(members) < 2:
             continue
-        for j in range(i + 1, n):
-            if not comparable[j]:
+        # 同一骨架的行:实体槽不同 → 模板合并;槽也相同 → 完全同句,同样合并。
+        # 组内全部并入最长代表(代表由最终聚簇阶段统一选择,这里只并查集)。
+        for i in members[1:]:
+            _union(members[0], i)
+        template_members.update(members)
+        for i in members:
+            group_of[i] = key
+
+    # ---- layer 2: Jaccard between representatives and singletons ----
+    # 组内行已合并;组与组之间、组与单例行之间仍需近重复比较。
+    # 代表 = 每组文本最长的行(与最终代表选择一致,保证并簇稳定)。
+    group_reps: list[int] = []
+    rep_of: dict[int, int] = {}
+    for members in template_groups.values():
+        if len(members) < 2:
+            continue
+        rep = max(members, key=lambda idx: (question_length_without_punctuation(_text(rows[idx])), -idx))
+        group_reps.append(rep)
+        rep_of[rep] = rep
+    singletons = [i for i in range(n) if comparable[i] and i not in template_members]
+    compare_items = group_reps + singletons
+
+    inverted: dict[str, list[int]] = {}
+    for i in compare_items:
+        for tok in non_slot[i]:
+            inverted.setdefault(tok, []).append(i)
+
+    for i in compare_items:
+        # selective blocking: anchor on the rarest non-slot token, so dense
+        # shared vocabulary does not explode the candidate graph
+        anchor = min(non_slot[i], key=lambda tok: len(inverted[tok]))
+        candidates = inverted[anchor]
+        for j in candidates:
+            if j <= i:
                 continue
             a, b = len(token_sets[i]), len(token_sets[j])
             # 尺寸界预过滤:J >= t 要求交集 >= t(a+b)/(1+t),而交集 <= min(a,b)。
             if min(a, b) * (1 + cfg.threshold) < cfg.threshold * (a + b):
                 continue
             if exact_token_jaccard(token_sets[i], token_sets[j]) >= cfg.threshold:
-                ri, rj = _find(i), _find(j)
-                if ri != rj:
-                    parent[rj] = ri
+                _union(i, j)
 
+    # ---- cluster -> drop non-representatives ----
     groups: dict[int, list[int]] = {}
     for i in range(n):
         if comparable[i]:
@@ -70,6 +119,12 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
             if idx == rep:
                 continue
             dropped_indices.add(idx)
+            sim = exact_token_jaccard(token_sets[idx], token_sets[rep])
+            method = (
+                "template_merge"
+                if group_of.get(idx) is not None and group_of.get(idx) == group_of.get(rep)
+                else "token_jaccard"
+            )
             dropped.append(
                 (
                     idx,
@@ -78,8 +133,8 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
                         "trace_id": rows[idx].get("trace_id", ""),
                         "text": (rows[idx].get("input") or {}).get("text", "")[:200],
                         "dedup_of_trace_id": rows[rep].get("trace_id", ""),
-                        "similarity": exact_token_jaccard(token_sets[idx], token_sets[rep]),
-                        "method": f"token_jaccard_threshold_{cfg.threshold}",
+                        "similarity": sim,
+                        "method": method,
                     },
                 )
             )
