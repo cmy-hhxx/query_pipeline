@@ -104,10 +104,8 @@ def templates_dir() -> Path:
     env = os.environ.get("QUERY_PIPELINE_TEMPLATES")
     if env:
         return Path(env)
-    # 仓库根 templates/ 优先（用户维护的数据源）；打包安装后回退包内副本。
-    repo = Path(__file__).resolve().parents[2] / "templates"
-    if repo.is_dir():
-        return repo
+    # templates 是包内数据（src/query_pipeline/templates/），随 wheel 自动发布，
+    # 源码树与安装后的定位一致。
     return Path(__file__).resolve().parent / "templates"
 
 
