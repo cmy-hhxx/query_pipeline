@@ -31,7 +31,9 @@ build-backend = "hatchling.build"
 # hatch 打包时自动剥离 src/ 前缀（wheel 内为 query_pipeline/），
 # editable 安装时 finder 正确映射 src/query_pipeline。
 packages = ["src/query_pipeline"]
-# templates/ 是包内数据（src/query_pipeline/templates/），随 wheel 自动发布。
+# templates/（分类体系、few-shot、坏例、股票名词典）随 wheel 发布：
+# 安装后位于 site-packages/templates（仓库根 templates/ 的副本，供模板数据化）。
+force-include = { "templates" = "templates" }
 
 
 [tool.pytest.ini_options]
