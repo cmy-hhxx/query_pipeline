@@ -26,7 +26,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "source_case_id": "thread_a",
         "answer_key": "",
         "trace_id": "trace_001",
-        "category": "03-analysis-research",
+        "category": "complex-topic/03-analysis-research",
         "input": {
             "text": "今天8月3日，分析金安国际这只股票，从k线、市盈率、换手率等指标分析明天是否可以重仓？",
             "image": "",
@@ -407,7 +407,7 @@ class PromptTest(unittest.TestCase):
         payload = build_judge_payload(_row())
         self.assertIn("question", payload)
         self.assertIn("label", payload)
-        self.assertEqual(payload["label_definition"], "03 分析研究（analysis-research）")
+        self.assertEqual(payload["label_definition"], "03 分析研究（complex-topic/03-analysis-research）")
         self.assertEqual(payload["chain_hops"], 1)
 
 

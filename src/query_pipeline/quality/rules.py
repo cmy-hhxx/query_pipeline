@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from query_pipeline.models.output import OutputRow
-from query_pipeline.models.records import CATEGORIES, ENGLISH_CATEGORIES
+from query_pipeline.taxonomy import COMPLEX_PREFIX, load_taxonomy
 from query_pipeline.post.dedup import dedup_rows
 from query_pipeline.config.models import DedupConfig
 
@@ -94,11 +94,9 @@ def _check_category(row: dict[str, Any]) -> tuple[bool, str]:
     category = row.get("category")
     if not isinstance(category, str) or not category:
         return False, "category 缺失或非字符串"
-    category_id, _, slug = category.partition("-")
-    if category_id not in CATEGORIES:
-        return False, f"未知分类 id：{category_id!r}"
-    if slug != ENGLISH_CATEGORIES[category_id]:
-        return False, f"slug 与 id 不匹配：{category!r}（期望 {category_id}-{ENGLISH_CATEGORIES[category_id]}）"
+    cat = next((c for c in load_taxonomy().all() if c.path == category), None)
+    if cat is None:
+        return False, f"未知 category：{category!r}"
     return True, "ok"
 
 
@@ -277,7 +275,7 @@ def _dataset_category_skew(records: list[dict[str, Any]]) -> tuple[bool, str, li
     top_share = top_count / n
     evidence = [f"{cat}: {cnt}（{cnt / n:.0%}）" for cat, cnt in sorted(counts.items(), key=lambda kv: -kv[1])]
     zero_ids = [
-        cid for cid in CATEGORIES if cid not in {str(cat).split("-")[0] for cat in counts}
+        cid for cid in load_taxonomy().complex if cid not in {str(cat).split("-")[0] for cat in counts}
     ]
     detail = f"最高类别占 {top_share:.0%}"
     if zero_ids:

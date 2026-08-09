@@ -15,7 +15,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.config.models import Step1Config, VerifyConfig
 from query_pipeline.llm.cache import make_cache_key
-from query_pipeline.models.records import ENGLISH_CATEGORIES
 from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
@@ -217,10 +216,10 @@ class SessionPipelineContractTest(unittest.TestCase):
 
         judge_prompt = resolve_prompt("complex_judge")
         for category_id, name in {
-            "01": "数据与指标计算",
+            "01": "复杂取数计算",
             "05": "资产配置",
-            "07": "策略触发与设置",
-            "09": "动作输出",
+            "07": "策略触发任务类",
+            "09": "动作类",
         }.items():
             self.assertIn(f"{category_id} {name}", judge_prompt)
         self.assertIn("is_complex", judge_prompt)
@@ -388,7 +387,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["user_cohort"], "regular")
         self.assertEqual(row["source_case_id"], "t1")
         self.assertEqual(row["trace_id"], "trace2")  # original input turn's trace_id
-        self.assertEqual(row["category"], "03-analysis-research")
+        self.assertEqual(row["category"], "complex-topic/03-analysis-research")
         self.assertEqual(row["input"]["text"], "Q3 复杂预测")
         self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}])
         self.assertEqual(row["tools"], ["web_search", "finquery", "compute"])
@@ -436,7 +435,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             row = rows[0]
             self.assertEqual(row["source_case_id"], "t1")
             self.assertEqual(row["trace_id"], "trace1")
-            self.assertEqual(row["category"], "01-data-metrics-calculation")
+            self.assertEqual(row["category"], "complex-topic/01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
@@ -465,7 +464,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["trace_id"], "trace2")
-            self.assertEqual(rows[0]["category"], "02-forecasting-and-projection")
+            self.assertEqual(rows[0]["category"], "complex-topic/02-forecasting-and-projection")
             self.assertEqual(len(rows[0]["context"]), 2)
 
     def test_end_to_end_verify_filters_context_only_rows(self) -> None:
@@ -696,7 +695,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             row = rows[0]
             self.assertEqual(row["source_case_id"], "c1")
             self.assertEqual(row["trace_id"], "t1")
-            self.assertEqual(row["category"], "01-data-metrics-calculation")
+            self.assertEqual(row["category"], "complex-topic/01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["tools"], ["web_search"])

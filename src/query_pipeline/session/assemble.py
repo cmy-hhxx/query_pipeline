@@ -4,7 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from query_pipeline.models.output import ContextTurn, OutputInput, OutputMeta, OutputRow
-from query_pipeline.models.records import ENGLISH_CATEGORIES
+from query_pipeline.taxonomy import load_taxonomy
 from query_pipeline.models.session import Segment, prior_indices
 from query_pipeline.models.turn import Session
 from query_pipeline.session.candidates import extract_tool_names
@@ -36,6 +36,7 @@ def assemble_row(
     idx: int,
     category_id: str,
     reason: str | None = None,
+    difficulty: str = "hard",
 ) -> dict:
     """Build one filter_out.jsonc row for a turn; returns a plain dict for stages."""
     turns = session.turns
@@ -48,7 +49,7 @@ def assemble_row(
         source_case_id=session.thread_id,
         capture_mode="full_link" if turn.chain else "end2end",
         trace_id=turn.trace_id,
-        category=f"{category_id}-{ENGLISH_CATEGORIES[category_id]}",
+        category=load_taxonomy().get(difficulty, category_id).path,
         input=OutputInput(text=turn.question),
         context=prior,
         chain=turn.chain,
@@ -61,6 +62,7 @@ def assemble_row(
         input_tokens=turn.input_tokens,
         output_tokens=turn.output_tokens,
         request_time_ms=_request_time_ms(turn.request_time),
+        difficulty_level=difficulty,
         meta=OutputMeta(reason=reason, request_time=turn.request_time, run_id=turn.run_id),
     )
     return row.model_dump(mode="python")

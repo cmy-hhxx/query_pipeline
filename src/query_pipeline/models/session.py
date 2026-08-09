@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from query_pipeline.models.records import CATEGORIES
+from query_pipeline.taxonomy import load_taxonomy
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class Step2Result(BaseModel):
     def validate_category_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        if value not in CATEGORIES:
+        if value not in load_taxonomy().complex:
             raise ValueError(f"invalid category_id: {value}")
         return value
 

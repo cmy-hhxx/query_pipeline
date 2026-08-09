@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from query_pipeline.models.records import CATEGORIES
+from query_pipeline.taxonomy import load_taxonomy
 
 # 9 类复杂金融问句的分类定义与示例。
 # - 类别定义融合 data/example/few_shot.md（特征/关键信号词/常见要素）与
@@ -146,14 +146,16 @@ _CATEGORY_EXAMPLES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-_CATEGORY_LINES = "\n".join(f"{cid} {CATEGORIES[cid]}：{_CATEGORY_DEFS[cid]}" for cid in CATEGORIES)
+_CATEGORY_LINES = "\n".join(
+    f"{cid} {cat.name}：{_CATEGORY_DEFS[cid]}" for cid, cat in load_taxonomy().complex.items()
+)
 _PRIORITY_LINES = "\n".join(_PRIORITY_RULES)
 
 
 def _format_examples() -> str:
     lines: list[str] = []
-    for cid in CATEGORIES:
-        lines.append(f"{cid} {CATEGORIES[cid]}：")
+    for cid, cat in load_taxonomy().complex.items():
+        lines.append(f"{cid} {cat.name}：")
         lines.extend(f"- 「{ex}」" for ex in _CATEGORY_EXAMPLES[cid])
     return "\n".join(lines)
 
