@@ -74,7 +74,7 @@
   "meta": {
     "reason": "judge 判复杂的理由",      // complex_judge 输出，必填（QC meta 规则要求非空）
     "request_time": "2026-08-05 04:01:00", // 原始问句时间字符串，与 request_time_ms 并存（ms 给机器、字符串给人/溯源）
-    "run_id": "run_id",               // session: turn.run_id（run UUID）；chat 源无此字段 → 空
+    "run_id": "run_id"               // session: turn.run_id（run UUID）；chat 源无此字段 → 空
     // 逃生字段示例（当前不填，按需扩展；注意 translation 是顶层字段，不放在 meta）：
     // "ground_truth": "真实答案", "citations": [], "agent_mode": "...", ...
   }
