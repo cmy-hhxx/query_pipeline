@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 from typing import Any
 
 from query_pipeline.config.models import DedupConfig
@@ -13,6 +14,7 @@ from query_pipeline.rules.normalize import (
 # 模板合并门槛:非槽 token 集合完全一致(措辞骨架相同)且实体不同 → 同模板。
 # 非槽 token 过少(如 <4 个词)时骨架太弱,不启用,避免短句误并。
 _MIN_TEMPLATE_TOKENS = 4
+_ANCHOR_K = 5
 
 
 def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -83,19 +85,28 @@ def dedup_rows(rows: list[dict[str, Any]], cfg: DedupConfig) -> tuple[list[dict[
     singletons = [i for i in range(n) if comparable[i] and i not in template_members]
     compare_items = group_reps + singletons
 
+    # Inverted index over ALL comparable rows (not just representatives):
+    # a token's candidate set must reflect every row that carries it, or the
+    # rarest-token anchor becomes a singleton and misses similar partners.
     inverted: dict[str, list[int]] = {}
-    for i in compare_items:
-        for tok in non_slot[i]:
-            inverted.setdefault(tok, []).append(i)
+    for i in range(n):
+        if comparable[i]:
+            for tok in non_slot[i]:
+                inverted.setdefault(tok, []).append(i)
 
     for i in compare_items:
-        # selective blocking: anchor on the rarest non-slot token, so dense
-        # shared vocabulary does not explode the candidate graph
-        anchor = min(non_slot[i], key=lambda tok: len(inverted[tok]))
-        candidates = inverted[anchor]
-        for j in candidates:
-            if j <= i:
-                continue
+        # selective blocking: union the k rarest shared-token candidate sets.
+        # A single rarest anchor can be a private token of i's own template
+        # group and would miss similar partners in other groups; a union of a
+        # few rare anchors covers them while staying small in practice.
+        anchors = heapq.nsmallest(
+            _ANCHOR_K,
+            (tok for tok in non_slot[i] if len(inverted[tok]) > 1),
+            key=lambda tok: len(inverted[tok]),
+        )
+        for j in {idx for tok in anchors for idx in inverted[tok]}:
+            if j <= i or _find(i) == _find(j):
+                continue  # same template group already merged in layer 1
             a, b = len(token_sets[i]), len(token_sets[j])
             # 尺寸界预过滤:J >= t 要求交集 >= t(a+b)/(1+t),而交集 <= min(a,b)。
             if min(a, b) * (1 + cfg.threshold) < cfg.threshold * (a + b):

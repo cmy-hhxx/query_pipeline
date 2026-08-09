@@ -70,7 +70,7 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(dropped[1]["dedup_of_trace_id"], "r1")
         self.assertEqual(dropped[0]["similarity"], 1.0)
         self.assertGreaterEqual(dropped[1]["similarity"], 0.8)
-        self.assertEqual(dropped[0]["method"], "token_jaccard_threshold_0.8")
+        self.assertEqual(dropped[0]["method"], "template_merge")  # identical skeleton group
 
     def test_near_duplicate_survives_high_threshold(self) -> None:
         kept, dropped = dedup_rows([_row(_BASE, "r1"), _row(_NEAR, "r2")], DedupConfig(threshold=0.99))
