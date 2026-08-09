@@ -20,7 +20,7 @@ from query_pipeline.pipeline.stages import DEFAULT_STAGES, REGISTRY, get_stage, 
 
 class RegistryTest(unittest.TestCase):
     def test_default_stages_registered(self) -> None:
-        self.assertEqual(set(DEFAULT_STAGES), {"discover", "verify", "post"})
+        self.assertEqual(set(DEFAULT_STAGES), {"preclean", "segment", "rule_gate", "judge", "verify", "post"})
         for name in DEFAULT_STAGES:
             self.assertIn(name, REGISTRY)
 
@@ -39,7 +39,7 @@ class RegistryTest(unittest.TestCase):
 
     def test_stage_names_validation(self) -> None:
         self.assertEqual(stage_names(None), list(DEFAULT_STAGES))
-        self.assertEqual(stage_names(["discover"]), ["discover"])
+        self.assertEqual(stage_names(["preclean"]), ["preclean"])
         with self.assertRaises(ValueError):
             stage_names(["bogus"])
 
@@ -86,13 +86,13 @@ class StageOrderTest(unittest.TestCase):
                     output:
                       dir: {tmp_path / "out"}
                     work_dir: {tmp_path / "work"}
-                    stages: [discover]
+                    stages: [preclean, rule_gate]
                     segmentation:
                       enabled: false
-                    step1:
+                    rule_gate:
                       enabled: true
                       min_chain_tool_calls: 7
-                    step2:
+                    judge:
                       enabled: true
                     llm:
                       enabled: false
@@ -109,8 +109,7 @@ class StageOrderTest(unittest.TestCase):
                 summary = run_pipeline(load_pipeline_config(config_path))
             self.assertTrue(summary.success)
             self.assertEqual(summary.stats["complex_rows"], 0)  # llm off -> no judge
-            out = tmp_path / "out" / "complex_queries.jsonl"
-            self.assertTrue(out.exists())
+            # preclean + rule_gate only: no output file (runner skips empty writes)
 
 
 if __name__ == "__main__":

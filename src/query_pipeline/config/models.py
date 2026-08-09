@@ -32,7 +32,7 @@ class SegmentationConfig(ConfigModel):
     enabled: bool = True
 
 
-class Step1Config(ConfigModel):
+class RuleGateConfig(ConfigModel):
     enabled: bool = True
     reject_rules: bool = True
     min_chain_tool_calls: int = 7
@@ -40,16 +40,19 @@ class Step1Config(ConfigModel):
     min_unique_tools: int = 2
 
 
-class Step2Config(ConfigModel):
+class JudgeConfig(ConfigModel):
     enabled: bool = True
-    prompt_id: str = "complex_judge"
+    value_prompt: str = "value_gate"
+    complexity_prompt: str = "complexity_gate"
+    classify_complex_prompt: str = "classify_complex"
+    classify_normal_prompt: str = "classify_normal"
 
-    @field_validator("prompt_id")
+    @field_validator("value_prompt", "complexity_prompt", "classify_complex_prompt", "classify_normal_prompt")
     @classmethod
-    def validate_prompt_id(cls, value: str) -> str:
+    def validate_prompt(cls, value: str) -> str:
         prompt_id = value.strip()
         if not prompt_id:
-            raise ValueError("prompt_id must be non-empty")
+            raise ValueError("prompt id must be non-empty")
         from query_pipeline.prompts import resolve_prompt
 
         resolve_prompt(prompt_id)
@@ -131,8 +134,8 @@ class PipelineConfig(ConfigModel):
     work_dir: Path = Path("work")
     stages: list[str] | None = None  # None -> pipeline default stage order
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
-    step1: Step1Config = Field(default_factory=Step1Config)
-    step2: Step2Config = Field(default_factory=Step2Config)
+    rule_gate: RuleGateConfig = Field(default_factory=RuleGateConfig)
+    judge: JudgeConfig = Field(default_factory=JudgeConfig)
     verify: VerifyConfig = Field(default_factory=VerifyConfig)
     llm: LLMConfig
     post: PostConfig = Field(default_factory=PostConfig)

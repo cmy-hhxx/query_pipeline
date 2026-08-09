@@ -10,6 +10,7 @@ unrecognizable files are an error (dirty data must not be silently handled).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +49,6 @@ def sniff_format(path: Path, *, sample_lines: int = _SAMPLE_LINES) -> str:
             if scanned > sample_lines:
                 break
             try:
-                import json
-
                 record = json.loads(stripped)
             except json.JSONDecodeError:
                 continue  # bad lines are handled by the pre-clean stage

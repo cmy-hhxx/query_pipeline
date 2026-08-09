@@ -8,6 +8,7 @@ from query_pipeline.config.models import PipelineConfig
 from query_pipeline.io.jsonl import write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
+import query_pipeline.steps  # noqa: F401  (stage registration side effect)
 from query_pipeline.pipeline.context import PipelineContext, RunSummary, merge_stats
 from query_pipeline.pipeline.stages import get_stage, stage_names
 

@@ -7,7 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from query_pipeline.taxonomy import load_taxonomy
 
 
 @dataclass(frozen=True)
@@ -30,47 +29,6 @@ def prior_indices(segment: Segment, idx: int) -> range:
     return range(start, idx)
 
 
-class Step2Result(BaseModel):
-    is_complex: bool
-    category_id: str | None = None
-    reason: str | None = None
-
-    @field_validator("category_id")
-    @classmethod
-    def validate_category_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value not in load_taxonomy().complex:
-            raise ValueError(f"invalid category_id: {value}")
-        return value
-
-    @field_validator("reason")
-    @classmethod
-    def validate_reason(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        text = value.strip()
-        if not text:
-            raise ValueError("reason must be non-empty when present")
-        return text
-
-    @model_validator(mode="after")
-    def validate_complex_contract(self) -> Step2Result:
-        if not self.is_complex:
-            self.category_id = None
-            return self
-        if self.category_id is None:
-            raise ValueError("category_id is required when is_complex is true")
-        return self
-
-    def to_cache_label(self) -> dict[str, Any]:
-        return {
-            "is_complex": self.is_complex,
-            "category_id": self.category_id,
-            "reason": self.reason,
-        }
-
-
 def parse_json_object(raw: str) -> dict[str, Any]:
     """Parse a JSON object from an LLM response, tolerating markdown fences."""
     text = raw.strip()
@@ -86,13 +44,19 @@ def parse_json_object(raw: str) -> dict[str, Any]:
     return data
 
 
-def parse_step2_response(raw: str) -> Step2Result:
-    data = parse_json_object(raw)
-    return Step2Result.model_validate(data)
-
-
-def parse_step2_payload(data: dict[str, Any]) -> Step2Result:
-    return Step2Result.model_validate(data)
+def parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse a JSON object from an LLM response, tolerating markdown fences."""
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if not match:
+            raise ValueError(f"cannot parse JSON response: {text[:200]}")
+        data = json.loads(match.group(1))
+    if not isinstance(data, dict):
+        raise ValueError("response must be a JSON object")
+    return data
 
 
 class VerifyResult(BaseModel):

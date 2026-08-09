@@ -100,6 +100,7 @@ def parse_normal_few_shot(text: str) -> dict[str, NormalCategorySpec]:
 
     def save() -> None:
         flush()
+        assert current is not None
         specs[current] = NormalCategorySpec(current, current_slug, current_name, dict(sections))
 
     for raw in text.splitlines():

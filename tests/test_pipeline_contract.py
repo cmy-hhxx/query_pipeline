@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.config.models import Step1Config, VerifyConfig
+from query_pipeline.config.models import RuleGateConfig, VerifyConfig
 from query_pipeline.llm.cache import make_cache_key
-from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
+from query_pipeline.models.session import Segment, parse_segment_response
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
 from query_pipeline.prompts import resolve_prompt as _resolve
@@ -25,7 +25,7 @@ from query_pipeline.adapters.chat import adapt_chat
 from query_pipeline.adapters.session import adapt_turn, adapt_session
 from query_pipeline.session.judge import build_judge_payload
 from query_pipeline.session.segment import _segments_from_cache
-from query_pipeline.steps.discover_stage import session_content_key
+from query_pipeline.steps.judge_stage import session_content_key
 
 
 def _make_turn(
@@ -87,14 +87,14 @@ class SessionPipelineContractTest(unittest.TestCase):
 
         self.assertEqual(cfg.name, "session_pipeline")
         self.assertEqual(cfg.input.path, (ROOT / "data/aime/0807.jsonl").resolve())
-        self.assertEqual(cfg.input.format, "session")
+        self.assertEqual(cfg.input.format, "auto")
         self.assertEqual(cfg.output.complex_queries, "complex_queries_0807.jsonl")
         self.assertEqual(cfg.llm.base_url_env, "OPENAI_BASE_URL")
         self.assertEqual(cfg.llm.api_key_env, "OPENAI_API_KEY")
-        self.assertEqual(cfg.step1.min_chain_tool_calls, 7)
-        self.assertEqual(cfg.step1.min_chain_steps, 1)
-        self.assertEqual(cfg.step1.min_unique_tools, 2)
-        self.assertEqual(cfg.step2.prompt_id, "complex_judge")
+        self.assertEqual(cfg.rule_gate.min_chain_tool_calls, 7)
+        self.assertEqual(cfg.rule_gate.min_chain_steps, 1)
+        self.assertEqual(cfg.rule_gate.min_unique_tools, 2)
+        self.assertEqual(cfg.judge.complexity_prompt, "complexity_gate")
 
     def test_input_format_validation(self) -> None:
         from query_pipeline.config.models import InputConfig
@@ -116,7 +116,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(len(_segments_from_cache(full, num_turns=5)), 2)
 
     def test_chainless_turn_passes_via_tool_count(self) -> None:
-        cfg = Step1Config()  # defaults: min_chain_tool_calls=7, min_chain_steps=1, min_unique_tools=2
+        cfg = RuleGateConfig()  # defaults: min_chain_tool_calls=7, min_chain_steps=1, min_unique_tools=2
         turns = [
             adapt_turn(
                 _make_turn(0, "复杂多步取数计算预测", tool_count=8, tool_names="web_search,finquery,compute")
@@ -311,24 +311,29 @@ class SessionPipelineContractTest(unittest.TestCase):
                 num_turns=5,
             )
 
-    def test_step2_parser(self) -> None:
-        complex_result = parse_step2_response(
-            json.dumps({"is_complex": True, "category_id": "03", "reason": "需要多步分析"}, ensure_ascii=False)
+    def test_funnel_parsers(self) -> None:
+        from query_pipeline.session.funnel import (
+            parse_classify_response,
+            parse_complexity_response,
+            parse_value_response,
+        )
+
+        valuable = parse_value_response(json.dumps({"is_valuable": True, "reason": "金融相关"}))
+        self.assertTrue(valuable.is_valuable)
+
+        complex_result = parse_complexity_response(
+            json.dumps({"is_complex": True, "reason": "需要多步分析"}, ensure_ascii=False)
         )
         self.assertTrue(complex_result.is_complex)
-        self.assertEqual(complex_result.category_id, "03")
 
-        non_complex = parse_step2_response(
-            json.dumps({"is_complex": False, "category_id": "03", "reason": "简单查询"}, ensure_ascii=False)
-        )
-        self.assertFalse(non_complex.is_complex)
-        self.assertIsNone(non_complex.category_id)
+        classified = parse_classify_response(json.dumps({"category_id": "03", "reason": "需要多步分析"}, ensure_ascii=False))
+        self.assertEqual(classified.category_id, "03")
 
         with self.assertRaises(ValueError):
-            parse_step2_response(json.dumps({"is_complex": True, "category_id": "99", "reason": "x"}))
+            parse_classify_response(json.dumps({"category_id": "99", "reason": "x"}))
 
     def test_step1_select_candidates(self) -> None:
-        cfg = Step1Config()
+        cfg = RuleGateConfig()
         candidates = select_candidates([adapt_turn(t) for t in _sample_turns()], cfg)
 
         # turn1 and turn2 clear all three AND thresholds (8 tool calls / 8 chain
@@ -336,7 +341,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(candidates, [1, 2])
 
     def test_step1_funnel_requires_all_signals(self) -> None:
-        cfg = Step1Config()  # AND: tool_calls>=7 AND steps>=1 AND unique>=2
+        cfg = RuleGateConfig()  # AND: tool_calls>=7 AND steps>=1 AND unique>=2
         turns = [
             _make_turn(0, "八次调用四种工具", chain=_chain(("a", "b"), ("a", "b"), ("c", "d"), ("e", "f"))),
             _make_turn(1, "四次调用两种工具", chain=_chain(("a", "b"), ("a", "b"))),
@@ -377,7 +382,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             _make_turn(1, "失败状态", tool_names="web_search,finquery,compute", tool_count=8, status="failed", chain=_chain_with_steps(8, names)),
             _make_turn(2, "正常复杂问题", tool_names="web_search,finquery,compute", tool_count=8, chain=_chain_with_steps(8, names)),
         ]
-        self.assertEqual(select_candidates([adapt_turn(t) for t in turns], Step1Config()), [2])
+        self.assertEqual(select_candidates([adapt_turn(t) for t in turns], RuleGateConfig()), [2])
 
     def test_assemble_row_field_mapping(self) -> None:
         turns = _sample_turns()
@@ -424,15 +429,17 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["segments"], 2)
             self.assertEqual(summary.stats["candidates"], 2)
             self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["normal_rows"], 1)
             self.assertEqual(summary.stats["non_complex"], 1)
             self.assertEqual(summary.stats["llm_failed"], 0)
-            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_kept"], 2)  # hard keep + normal keep
             self.assertEqual(summary.stats["verify_rejected"], 0)
             self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(summary.stats["category_counts"], {"01": 1})
+            self.assertEqual(summary.stats["category_counts_normal"], {"03": 1})
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), 2)
             row = rows[0]
             self.assertEqual(row["source_case_id"], "t1")
             self.assertEqual(row["trace_id"], "trace1")
@@ -442,6 +449,10 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["difficulty_level"], "hard")
             self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1"})
             self.assertIsNone(row["translation"])  # 中文原文 → null
+            normal = rows[1]
+            self.assertEqual(normal["trace_id"], "trace2")
+            self.assertEqual(normal["category"], "03-stock-diagnosis-and-data-lookup")
+            self.assertEqual(normal["difficulty_level"], "normal")
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -468,9 +479,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(rows[0]["category"], "complex-topic/02-forecasting-and-projection")
             self.assertEqual(len(rows[0]["context"]), 2)
 
-    def test_end_to_end_verify_filters_context_only_rows(self) -> None:
-        # Pass 1 (with context) judges Q3 complex; pass 2 (standalone) does
-        # not, so the row must be dropped with verify_rejected=1.
+    def test_end_to_end_value_gate_rejects_context_only_followups(self) -> None:
+        # The value gate (first semantic layer) rejects the context-only
+        # follow-up "Q3 再看下"; only Q2 reaches complexity/classify/verify.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             names = ("web_search", "finquery", "compute")
@@ -487,8 +498,9 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["candidates"], 2)
+            self.assertEqual(summary.stats["value_rejected"], 1)
             self.assertEqual(summary.stats["verify_kept"], 1)
-            self.assertEqual(summary.stats["verify_rejected"], 1)
+            self.assertEqual(summary.stats["verify_rejected"], 0)
             self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(summary.stats["complex_rows"], 1)
 
@@ -496,8 +508,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual([r["trace_id"] for r in rows], ["trace1"])
 
             verified = _read_jsonl(tmp_path / "work/verified.jsonl")
-            self.assertEqual([v["trace_id"] for v in verified], ["trace1", "trace2"])
-            self.assertEqual(verified[1]["is_complex"], False)
+            self.assertEqual([v["trace_id"] for v in verified], ["trace1"])
+            self.assertEqual(verified[0]["is_complex"], True)
 
     def test_verify_config_max_rounds(self) -> None:
         self.assertEqual(VerifyConfig().max_rounds, 3)
@@ -651,7 +663,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["translated"], 1)
             self.assertEqual(summary.stats["translate_skipped"], 0)
             self.assertEqual(summary.stats["translate_failed"], 0)
-            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["complex_rows"], 2)  # both candidates judged hard
+            self.assertEqual(summary.stats["output_rows"], 1)  # after dedup
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
@@ -704,12 +717,13 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["text_answer"], "text_answer")
             self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": ""})
 
-    def test_end_to_end_chat_with_step1_enabled(self) -> None:
-        # last_only must ignore step1 chain/tool AND-gates: a single-tool-call trailing
-        # turn still becomes a candidate (previously filtered by min_chain_tool_calls=7).
+    def test_end_to_end_chat_respects_tool_gates(self) -> None:
+        # Chat records always carry judge_data.chain, so the chain/tool AND-gates
+        # apply to chat too: a single-tool-call trailing turn is filtered.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            case = {
+            names = ("web_search", "finquery", "compute")
+            single = {
                 "trace_id": "t1",
                 "question": "Q2 复杂取数",
                 "judge_data": {
@@ -723,7 +737,21 @@ class SessionPipelineContractTest(unittest.TestCase):
                     "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
                 },
             }
-            _write_jsonl(tmp_path / "input.jsonl", [case])
+            toolful = {
+                "trace_id": "t2",
+                "question": "Q2 复杂取数",
+                "judge_data": {
+                    "case_id": "c2",
+                    "trace_id": "t2",
+                    "input": {"text": "Q2 复杂取数", "image": None, "file": None},
+                    "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
+                    "chain": _chain_with_steps(8, names),
+                    "raw_answer": "raw_answer",
+                    "text_answer": "text_answer",
+                    "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
+                },
+            }
+            _write_jsonl(tmp_path / "input.jsonl", [single, toolful])
             cfg = load_pipeline_config(
                 _write_config(tmp_path, llm_enabled=True, input_format="chat", step1_enabled=True)
             )
@@ -731,7 +759,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertEqual(summary.stats["candidates"], 1)
+            self.assertEqual(summary.stats["candidates"], 1)  # only the toolful case
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["verify_kept"], 1)
 
@@ -794,6 +822,27 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
 
 
+def _funnel_response(system_prompt: str, payload: dict[str, Any]) -> str | None:
+    """Shared fake for the decoupled funnel; returns None when not a funnel call."""
+    if "价值判官" in system_prompt:
+        return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+    if "已判定为复杂金融问句" in system_prompt:
+        q = payload["current_question"]
+        cid = "01" if q == "Q2 复杂取数" else "02"
+        reason = "多步工具调用取数" if q == "Q2 复杂取数" else "复杂归类"
+        return json.dumps({"category_id": cid, "reason": reason}, ensure_ascii=False)
+    if "有价值但非复杂" in system_prompt:
+        return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+    if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" in system_prompt:
+        return None  # verify prompt, not complexity gate
+    if "复杂金融问句必须同时满足" in system_prompt:
+        q = payload["current_question"]
+        return json.dumps(
+            {"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False
+        )
+    return None
+
+
 class FakeSessionLLMClient:
     def __init__(self, config: object) -> None:
         self.config = config
@@ -814,12 +863,10 @@ class FakeSessionLLMClient:
                 },
                 ensure_ascii=False,
             )
-        if "current_question" in payload:
-            current = payload["current_question"]
-            if current == "Q2 复杂取数":
-                return json.dumps({"is_complex": True, "category_id": "01", "reason": "多步工具调用取数"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单查询"}, ensure_ascii=False)
-        # second-pass verify (standalone question): keep Q2 only
+        funnel = _funnel_response(system_prompt, payload)
+        if funnel is not None:
+            return funnel
+        # verify (standalone question): keep Q2 complex, others non-complex
         if payload["question"] == "Q2 复杂取数":
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         return json.dumps({"is_complex": False, "reason": "单独看不复杂"}, ensure_ascii=False)
@@ -847,11 +894,14 @@ class FakePostStageLLMClient:
         if "questions" in payload:
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
-        if "current_question" in payload:
-            q = payload["current_question"]
-            if q.startswith("complex calc"):
-                return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单"}, ensure_ascii=False)
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
         if "question" in payload:  # verify: standalone question
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         if "text" in payload:  # translate
@@ -865,7 +915,7 @@ class FakePostStageLLMClient:
 
 
 class FakeJudgeThenVerifyClient:
-    """Judge marks Q2/Q3 complex with context; verify keeps only Q2 standalone."""
+    """Value gate rejects the context-only follow-up (Q3); Q2 survives to hard."""
 
     def __init__(self, config: object) -> None:
         self.config = config
@@ -875,11 +925,19 @@ class FakeJudgeThenVerifyClient:
         if "questions" in payload:
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
-        if "current_question" in payload:
+        if "价值判官" in system_prompt:  # value gate: reject "Q3 再看下"
             q = payload["current_question"]
-            if q.startswith("Q2") or q.startswith("Q3"):
-                return json.dumps({"is_complex": True, "category_id": "03", "reason": "上下文看着复杂"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单"}, ensure_ascii=False)
+            return json.dumps(
+                {"is_valuable": not q.startswith("Q3"), "reason": "承接短指令无独立任务" if q.startswith("Q3") else "金融相关"},
+                ensure_ascii=False,
+            )
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:  # complexity gate
+            q = payload["current_question"]
+            return json.dumps({"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False)
         if payload["question"] == "Q2 复杂取数":
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         return json.dumps({"is_complex": False, "reason": "单独看是承接句"}, ensure_ascii=False)
@@ -896,10 +954,16 @@ class FakeFailingSessionLLMClient:
         payload = json.loads(user_prompt.split("\n", 1)[1])
         if "questions" in payload:
             raise RuntimeError("simulated segmentation failure")
-        if "current_question" in payload:
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:  # complexity gate
             if payload["current_question"] == "Q2 复杂取数":
                 raise RuntimeError("simulated judge failure")
-            return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
+            return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
         raise RuntimeError("simulated verify failure")
 
     async def close(self) -> None:
@@ -930,8 +994,14 @@ class FakeVerifyCascadeLLMClient:
         if "questions" in payload:  # segmentation
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
-        if "current_question" in payload:  # step2 judge
-            return json.dumps({"is_complex": True, "category_id": "03", "reason": "上下文复杂"}, ensure_ascii=False)
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
         question = payload["question"]
         if system_prompt == _resolve("verify_complex"):
             round_no = 1
@@ -963,8 +1033,14 @@ class FakeVerifyMidRoundErrorLLMClient:
         if "questions" in payload:  # segmentation
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
-        if "current_question" in payload:  # step2 judge
-            return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
         question = payload["question"]
         if system_prompt == _resolve("verify_complex"):
             round_no = 1
@@ -1020,15 +1096,14 @@ def _write_config(
             work_dir: work
             segmentation:
               enabled: {seg_on}
-            step1:
+            rule_gate:
               enabled: {step1_on}
               reject_rules: true
               min_chain_tool_calls: 7
               min_chain_steps: 1
               min_unique_tools: 2
-            step2:
+            judge:
               enabled: true
-              prompt_id: complex_judge
             verify:
               enabled: true
               prompt_id: verify_complex

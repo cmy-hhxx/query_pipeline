@@ -12,6 +12,9 @@ class PipelineContext:
     config: PipelineConfig
     rows: list[dict[str, Any]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
+    sessions: list[Any] = field(default_factory=list)
+    segments: dict[str, list[Any]] = field(default_factory=dict)
+    candidates: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def work_dir(self) -> Path:
@@ -55,5 +58,32 @@ class RunSummary:
         )
 
 
+_STATS_DEFAULTS: dict[str, Any] = {
+    "total_sessions": 0,
+    "input_bad_lines": 0,
+    "input_duplicates": 0,
+    "input_empty_sessions": 0,
+    "segments": 0,
+    "candidates": 0,
+    "complex_rows": 0,
+    "normal_rows": 0,
+    "value_rejected": 0,
+    "non_complex": 0,
+    "llm_failed": 0,
+    "session_errors": 0,
+    "category_counts": {},
+    "category_counts_normal": {},
+    "verify_kept": 0,
+    "verify_rejected": 0,
+    "verify_failed": 0,
+    "dedup_removed": 0,
+    "translated": 0,
+    "translate_skipped": 0,
+    "translate_failed": 0,
+}
+
+
 def merge_stats(ctx: PipelineContext) -> dict[str, Any]:
-    return {**ctx.stats, "complex_rows": len(ctx.rows)}
+    # Stage subsets (custom stage lists) must not produce summary dicts with
+    # missing keys — downstream consumers read the same fields regardless.
+    return {**_STATS_DEFAULTS, **ctx.stats, "output_rows": len(ctx.rows)}

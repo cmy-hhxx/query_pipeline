@@ -2,7 +2,7 @@ name: session_pipeline
 
 input:
   path: data/aime/0807.jsonl
-  format: session
+  format: auto
 
 output:
   dir: outputs/aime
@@ -14,16 +14,19 @@ work_dir: work/aime/0807
 segmentation:
   enabled: true
 
-step1:
+rule_gate:
   enabled: true
   reject_rules: true
   min_chain_tool_calls: 7
   min_chain_steps: 1
   min_unique_tools: 2
 
-step2:
+judge:
   enabled: true
-  prompt_id: complex_judge
+  value_prompt: value_gate
+  complexity_prompt: complexity_gate
+  classify_complex_prompt: classify_complex
+  classify_normal_prompt: classify_normal
 
 verify:
   enabled: true

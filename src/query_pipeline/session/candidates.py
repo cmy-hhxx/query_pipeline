@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from query_pipeline.config.models import Step1Config
+from query_pipeline.config.models import RuleGateConfig
 from query_pipeline.models.turn import Turn
 from query_pipeline.rules.reject import generic_reject_reason
 
@@ -67,7 +67,7 @@ def unique_tools(turn: Turn) -> int:
     return len(extract_tool_names(turn))
 
 
-def select_candidates(turns: list[Turn], cfg: Step1Config) -> list[int]:
+def select_candidates(turns: list[Turn], cfg: RuleGateConfig) -> list[int]:
     """Indices that pass reject rules + chain/tool AND-gates."""
     candidates: list[int] = []
     for idx, turn in enumerate(turns):
@@ -86,8 +86,25 @@ def select_candidates(turns: list[Turn], cfg: Step1Config) -> list[int]:
     return candidates
 
 
-def select_last_only(turns: list[Turn]) -> list[int]:
-    """Chat semantics: only the trailing turn is a candidate, gated on eligibility."""
+def select_last_only(turns: list[Turn], cfg: RuleGateConfig | None = None) -> list[int]:
+    """Chat semantics: only the trailing turn is a candidate, gated on eligibility
+    plus (when cfg given) reject rules and chain/tool AND-gates — chat records
+    always carry judge_data.chain, so the tool gates apply there too."""
     if not turns:
         return []
-    return [len(turns) - 1] if is_eligible(turns[-1]) else []
+    idx = len(turns) - 1
+    turn = turns[idx]
+    if not is_eligible(turn):
+        return []
+    if cfg is not None:
+        if cfg.reject_rules:
+            reason = generic_reject_reason(turn.question)
+            if reason:
+                return []
+        if not (
+            chain_tool_calls(turn) >= cfg.min_chain_tool_calls
+            and chain_steps(turn) >= cfg.min_chain_steps
+            and unique_tools(turn) >= cfg.min_unique_tools
+        ):
+            return []
+    return [idx]

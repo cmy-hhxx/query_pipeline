@@ -6,6 +6,8 @@ from query_pipeline.prompts.assemble import (
     build_verify_prompt,
 )
 from query_pipeline.prompts.complex_judge import COMPLEX_JUDGE
+from query_pipeline.prompts.complexity_gate import COMPLEXITY_GATE
+from query_pipeline.prompts.value_gate import VALUE_GATE
 from query_pipeline.prompts.segment import SEGMENT
 from query_pipeline.prompts.translate import TRANSLATE
 from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
@@ -15,6 +17,8 @@ PROMPTS: dict[str, str] = {
     "complex_judge": COMPLEX_JUDGE,
     "classify_complex": build_complex_classify_prompt(),
     "classify_normal": build_normal_classify_prompt(),
+    "value_gate": VALUE_GATE,
+    "complexity_gate": COMPLEXITY_GATE,
     "verify_complex": build_verify_prompt(VERIFY_COMPLEX),
     "verify_recheck": build_verify_prompt(VERIFY_RECHECK),
     "translate": TRANSLATE,

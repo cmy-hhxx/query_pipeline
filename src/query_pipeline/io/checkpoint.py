@@ -41,18 +41,21 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
         "enabled": cfg.llm.enabled,
         "response_format": cfg.llm.response_format,
     }
-    if stage == "discover":
+    if stage == "judge":
         return _hash_material(
             {
                 "input_format": cfg.input.format,
                 "segmentation": cfg.segmentation.model_dump(mode="json"),
-                "step1": cfg.step1.model_dump(mode="json"),
-                "step2": cfg.step2.model_dump(mode="json"),
+                "rule_gate": cfg.rule_gate.model_dump(mode="json"),
+                "judge": cfg.judge.model_dump(mode="json"),
                 "llm": llm,
                 "src": _src_hash(),
                 "prompts": {
                     "segment": resolve_prompt("segment"),
-                    cfg.step2.prompt_id: resolve_prompt(cfg.step2.prompt_id),
+                    cfg.judge.value_prompt: resolve_prompt(cfg.judge.value_prompt),
+                    cfg.judge.complexity_prompt: resolve_prompt(cfg.judge.complexity_prompt),
+                    cfg.judge.classify_complex_prompt: resolve_prompt(cfg.judge.classify_complex_prompt),
+                    cfg.judge.classify_normal_prompt: resolve_prompt(cfg.judge.classify_normal_prompt),
                 },
             }
         )
@@ -82,7 +85,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
 
 def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"stage_hash": stage_fingerprint(cfg, stage)}
-    if stage == "discover":
+    if stage == "judge":
         stat = cfg.input.path.stat()
         meta.update(
             {"input_path": str(cfg.input.path), "input_size": stat.st_size, "input_mtime_ns": stat.st_mtime_ns}

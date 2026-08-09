@@ -9,17 +9,18 @@ built-in funnel order; unknown stage names fail loudly.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.llm.client import LLMClient
 
 Stage = Callable[
     [PipelineContext, LLMClient | None, dict[str, dict[str, Any]], asyncio.Lock],
-    "asyncio.coroutines.Coroutine[Any, Any, PipelineContext]",
+    Awaitable[PipelineContext],
 ]
 
-DEFAULT_STAGES: tuple[str, ...] = ("discover", "verify", "post")
+DEFAULT_STAGES: tuple[str, ...] = ("preclean", "segment", "rule_gate", "judge", "verify", "post")
 
 REGISTRY: dict[str, Stage] = {}
 

@@ -78,10 +78,16 @@ class ScriptedClient:
         if "questions" in payload:  # segmentation
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
-        if "current_question" in payload:  # step2 judge
+        if "价值判官" in system_prompt:  # value gate
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:  # classify complex
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:  # classify normal
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "current_question" in payload:  # complexity gate
             if payload["current_question"] in self.session_fail:
                 raise RuntimeError("simulated network failure")
-            return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
+            return json.dumps({"is_complex": True, "reason": "复杂"}, ensure_ascii=False)
         if "question" in payload:  # verify
             if payload["question"] in self.verify_fail:
                 raise RuntimeError("simulated network failure")
@@ -190,7 +196,7 @@ class SessionResumeTest(unittest.TestCase):
             summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
-            cp_path = tmp_path / "work/checkpoints/discover.jsonl"
+            cp_path = tmp_path / "work/checkpoints/judge.jsonl"
             self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
             # Run 2: only t1's judge re-runs; t0/t2 replay from checkpoint.
@@ -198,9 +204,11 @@ class SessionResumeTest(unittest.TestCase):
             self.assertEqual(summary2.stats["llm_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
             self.assertEqual(summary2.stats["verify_kept"], 3)
+            # t1 re-runs through the funnel: complexity + classify calls
+            # (value_gate replays from the LLM cache written in run 1).
             self.assertEqual(
                 [c["current_question"] for c in client2.calls if "current_question" in c],
-                ["S1 complex query"],
+                ["S1 complex query", "S1 complex query"],
             )
             self.assertEqual(
                 [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
@@ -281,9 +289,11 @@ class CheckpointInvalidationTest(unittest.TestCase):
             summary, client2 = run_pipeline_with_fakes(cfg)
 
             self.assertEqual(summary.stats["complex_rows"], 2)
+            # W0 re-runs through the full funnel (value+complexity+classify all
+            # miss the cache because the question text changed).
             self.assertEqual(
                 [c["current_question"] for c in client2.calls if "current_question" in c],
-                ["W0 complex query NEW"],
+                ["W0 complex query NEW", "W0 complex query NEW", "W0 complex query NEW"],
             )
             self.assertEqual(
                 [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
@@ -302,9 +312,9 @@ class CheckpointInvalidationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = load_pipeline_config(_write_config(Path(tmp), post_enabled=False))
             with patch("query_pipeline.io.checkpoint._src_hash", return_value="aaaa"):
-                fp_a = stage_fingerprint(cfg, "discover")
+                fp_a = stage_fingerprint(cfg, "judge")
             with patch("query_pipeline.io.checkpoint._src_hash", return_value="bbbb"):
-                fp_b = stage_fingerprint(cfg, "discover")
+                fp_b = stage_fingerprint(cfg, "judge")
         self.assertNotEqual(fp_a, fp_b)
 
 
@@ -335,15 +345,14 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
             work_dir: work
             segmentation:
               enabled: true
-            step1:
+            rule_gate:
               enabled: true
               reject_rules: true
               min_chain_tool_calls: 7
               min_chain_steps: 1
               min_unique_tools: 2
-            step2:
+            judge:
               enabled: true
-              prompt_id: complex_judge
             verify:
               enabled: true
               prompt_id: verify_complex

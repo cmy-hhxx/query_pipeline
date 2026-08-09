@@ -35,6 +35,7 @@ async def run_verify_stage(
     async def worker(row: dict[str, Any]) -> dict[str, Any]:
         inp = row.get("input")
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
+        difficulty = row.get("difficulty_level", "hard")
         key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
         record = checkpoint.get(key)
         if record is not None:
@@ -87,7 +88,9 @@ async def run_verify_stage(
             rounds.append({"round": round_no, "is_complex": parsed.is_complex, "reason": parsed.reason})
             if not parsed.is_complex:
                 break
-        keep = error is not None or (bool(rounds) and all(r["is_complex"] for r in rounds))
+        # hard rows must stay complex in every round; normal rows must stay non-complex.
+        expected = difficulty == "hard"
+        keep = error is not None or (bool(rounds) and all(r["is_complex"] == expected for r in rounds))
         # Fail-open: errored rows are kept in output AND checkpointed, so a resumed run
         # replays the failure instead of re-verifying (deterministic across resumes).
         await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
@@ -110,6 +113,7 @@ async def run_verify_stage(
             {
                 "source_case_id": row.get("source_case_id", ""),
                 "trace_id": row.get("trace_id", ""),
+                "difficulty": row.get("difficulty_level", ""),
                 "category": row.get("category", ""),
                 "question": question[:200],
                 "is_complex": keep,

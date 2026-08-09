@@ -386,7 +386,8 @@ class PostStagePipelineTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertEqual(summary.stats["complex_rows"], 1)  # post-dedup
+            self.assertEqual(summary.stats["complex_rows"], 2)  # judged hard rows
+            self.assertEqual(summary.stats["output_rows"], 1)  # post-dedup
             self.assertEqual(summary.stats["verify_kept"], 2)
             self.assertEqual(summary.stats["dedup_removed"], 1)
             self.assertEqual(summary.stats["translated"], 1)
@@ -415,7 +416,7 @@ class PostStagePipelineTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["complex_rows"], 1)
-            self.assertNotIn("dedup_removed", summary.stats)
+            self.assertEqual(summary.stats["dedup_removed"], 0)  # post disabled
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
                 rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1"}
@@ -487,10 +488,16 @@ class FakePipelineLLMClient:
         if "questions" in payload:
             n = len(payload["questions"])
             return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "topic"}]}, ensure_ascii=False)
-        if "current_question" in payload:  # pass-1 judge (with context)
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "current_question" in payload:  # complexity gate
             if payload["current_question"] == self.COMPLEX:
-                return json.dumps({"is_complex": True, "category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "category_id": None, "reason": "简单查询"}, ensure_ascii=False)
+                return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
+            return json.dumps({"is_complex": False, "reason": "简单查询"}, ensure_ascii=False)
         if "question" in payload:  # pass-2 verify (standalone)
             if payload["question"] == self.COMPLEX:
                 return json.dumps({"is_complex": True, "reason": "独立成立"}, ensure_ascii=False)
@@ -517,15 +524,14 @@ def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
             work_dir: work
             segmentation:
               enabled: true
-            step1:
+            rule_gate:
               enabled: true
               reject_rules: true
               min_chain_tool_calls: 7
               min_chain_steps: 1
               min_unique_tools: 2
-            step2:
+            judge:
               enabled: true
-              prompt_id: complex_judge
             verify:
               enabled: true
               prompt_id: verify_complex
