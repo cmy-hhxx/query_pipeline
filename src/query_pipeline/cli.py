@@ -4,8 +4,10 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 
 from query_pipeline import api
+from query_pipeline.api import _find_env_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
     suggest_parser.add_argument("input", help="输入 jsonl（格式自动识别）")
     suggest_parser.add_argument("--format", default="auto", choices=("auto", "session", "chat"))
     suggest_parser.add_argument("--top", type=int, default=10, help="返回组合数（默认 10）")
+
+    audit_parser = sub.add_parser(
+        "audit", help="对 complex_queries 输出做严格复核（独立 LLM），报告非复杂占比"
+    )
+    audit_parser.add_argument("input", help="complex_queries.jsonl 路径")
+    audit_parser.add_argument("--max-ratio", type=float, default=0.05, help="非复杂率阈值（默认 5%，超出则退出码 1）")
+    audit_parser.add_argument("--model", default="gpt-5.4-mini")
+    audit_parser.add_argument("--concurrency", type=int, default=64)
     return parser
 
 
@@ -64,6 +74,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0 if summary["success"] else 1
+    if args.command == "audit":
+        import asyncio
+        from pathlib import Path as _Path
+
+        from dotenv import load_dotenv
+
+        load_dotenv(_find_env_file(), override=False)
+        from query_pipeline.audit import _load_rows, audit_rows, render
+
+        rows = _load_rows(Path(args.input))
+        if not rows:
+            print("输入为空")
+            return 1
+        results = asyncio.run(
+            audit_rows(rows, model=args.model, concurrency=args.concurrency)
+        )
+        print(render(results, max_ratio=args.max_ratio))
+        non_complex = sum(1 for r in results if not r["is_complex"])
+        return 0 if non_complex / len(results) <= args.max_ratio else 1
     if args.command == "suggest":
         from query_pipeline.suggest import render_suggestions, suggest_gates
 

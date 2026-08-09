@@ -57,7 +57,7 @@ async def run_verify_stage(
                 "error": record.get("error"),
                 "rounds": record.get("rounds", []),
             }
-        user_prompt = "请复核以下问句是否属于复杂金融问句，只输出严格 JSON：\n" + json.dumps(
+        user_prompt = "请复核以下问句，只输出严格 JSON：\n" + json.dumps(
             {"prior_questions": _prior_questions(row), "question": question},
             ensure_ascii=False,
             separators=(",", ":"),
@@ -68,6 +68,9 @@ async def run_verify_stage(
         expected = difficulty == "hard"
         keep = False
         for round_no in range(1, max_rounds + 1):
+            # 单视角级联从严：round 1 主判定，round >= 2 逐轮从严复核。
+            # 实测：双视角制衡（复杂度判定 + 简单识别器）对灰色地带的表现
+            # 不如单一"宁缺毋滥"从严判定，故不引入第二视角。
             if round_no == 1:
                 prompt_id = cfg.verify.prompt_id
                 system_prompt = resolve_prompt(prompt_id)
@@ -101,7 +104,14 @@ async def run_verify_stage(
                 error = str(exc)[:200]
                 break
             reason = parsed.reason
-            rounds.append({"round": round_no, "is_complex": parsed.is_complex, "reason": parsed.reason})
+            rounds.append(
+                {
+                    "round": round_no,
+                    "prompt_id": prompt_id,
+                    "is_complex": parsed.is_complex,
+                    "reason": parsed.reason,
+                }
+            )
             if parsed.is_complex != expected:
                 break
             keep = round_no == max_rounds

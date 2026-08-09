@@ -494,6 +494,8 @@ class FakeSessionLLMClient:
         funnel = _funnel_response(system_prompt, payload)
         if funnel is not None:
             return funnel
+        if "简单问句识别器" in system_prompt:  # simple_finder 视角
+            return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         # verify (standalone question): keep Q2 complex, others non-complex
         if payload["question"] == "Q2 复杂取数":
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
@@ -529,6 +531,8 @@ class FakePostStageLLMClient:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:
             return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
+        if "简单问句识别器" in system_prompt:  # simple_finder 视角
+            return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # verify
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         if "text" in payload:  # translate
@@ -564,6 +568,8 @@ class FakeJudgeThenVerifyClient:
         if "current_question" in payload:  # complexity gate
             q = payload["current_question"]
             return json.dumps({"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False)
+        if "简单问句识别器" in system_prompt:  # simple_finder 视角
+            return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if payload["question"] == "Q2 复杂取数":
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         return json.dumps({"is_complex": False, "reason": "单独看是承接句"}, ensure_ascii=False)

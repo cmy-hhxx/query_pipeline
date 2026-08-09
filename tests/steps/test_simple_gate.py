@@ -24,21 +24,18 @@ class SimpleGateTest(unittest.TestCase):
         ):
             self.assertEqual(simple_gate_reason(q), "short_decision", q)
 
-    def test_single_step_lookup_rejected(self) -> None:
+    def test_single_step_lookup_left_to_verify(self) -> None:
+        # 单步查数是语义类型，交给 verify 的 simple_finder 视角；
+        # simple_gate 作为安全网不再用正则拦截（避免误杀）。
         for q in (
             "贵州茅台今天的股价是多少",
             "what is the stock price of NVDA",
-            "宁德时代今天涨了吗",
         ):
-            self.assertEqual(simple_gate_reason(q), "single_step_lookup", q)
+            self.assertIsNone(simple_gate_reason(q), q)
 
-    def test_pure_screen_rejected(self) -> None:
-        for q in (
-            "帮我筛选出5只中药龙头股",
-            "找出市盈率低于10的股票",
-            "给我推荐3只低估值个股",
-        ):
-            self.assertEqual(simple_gate_reason(q), "pure_condition_screen", q)
+    def test_pure_screen_left_to_verify(self) -> None:
+        for q in ("帮我筛选出5只中药龙头股", "找出市盈率低于10的股票"):
+            self.assertIsNone(simple_gate_reason(q), q)
 
     def test_followup_rejected(self) -> None:
         for q in (

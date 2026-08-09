@@ -35,22 +35,6 @@ _SHORT_DECISION: tuple[re.Pattern[str], ...] = (
     re.compile(r"^.{0,50}(buy or sell|buy or hold|sell or hold|sell or keep|hold or sell)", re.I),
 )
 
-# 单步查数：单一标的 + 一个数值问题，且句长短（无分析要求）
-_SINGLE_LOOKUP: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^(summarize|what is the (wall street |analyst )?(view|consensus|rating|target)|汇总|总结).{0,50}(评级|目标价|观点|consensus|rating|target)", re.I),
-    re.compile(r"^.{0,40}(股价|价格|市值|涨跌幅|收益率|市盈率|最新价|收盘价|开盘价|换手率|成交量).{0,24}(是多少|是几|多少|是什么|什么价)$"),
-    re.compile(r"^what('s| is) (the )?(price|stock price|market cap|pe|eps) (of|for) .{0,30}\??$", re.I),
-    re.compile(r"^.{0,40}(涨了|跌了|涨没涨|跌没跌|涨吗|跌吗|涨到|跌到).{0,12}(吗|呢|\?|？)?$"),
-)
-
-# 纯条件筛选：找/筛/选/推 股票名单，无 计算/统计/回测/分析/预测/比较/组合 等任务词
-_PURE_SCREEN = re.compile(
-    # 整句无任务词（负向前瞻在匹配起点检查全文），再匹配"找/筛/选...+名单"骨架
-    r"^(?!.*(回测|统计|计算|分析|预测|比较|组合|策略|评估|排名|资金|筹码|基本面|技术面|风险|机会|走势|支撑|压力))"
-    r"(找|选|筛|推|挑|整理|给我|帮我|列出|抓取).{0,60}(只|支|个|批|名单|龙头|个股|股票|标的|etf|etfs)",
-    re.I,
-)
-
 # 承接前文：承接词开头 + 短句（任务对象大概率来自前文）
 _FOLLOWUP_START = re.compile(
     r"^(again|once more|revisa|de nuevo|repite|otra vez|yep|yes|no|okay|ok,|so,|and,|then|also|"
@@ -62,7 +46,12 @@ _FOLLOWUP_START = re.compile(
 
 def simple_gate_reason(question: str) -> str | None:
     """Return the rejection reason when the question is a high-confidence
-    simple pattern, else None."""
+    simple pattern, else None.
+
+    安全网定位：只保留确定无疑、几乎零误杀的模式（短决策、纯承接）。
+    单步查数/纯筛选等语义类型交给 verify 的 simple_finder 视角（LLM）判定，
+    正则不做——模式匹配覆盖不全且易误杀。
+    """
     text = question.strip()
     if not text:
         return "blank"
@@ -70,10 +59,6 @@ def simple_gate_reason(question: str) -> str | None:
         return "context_dependent_followup"
     if any(p.search(text) for p in _SHORT_DECISION):
         return "short_decision"
-    if any(p.search(text) for p in _SINGLE_LOOKUP):
-        return "single_step_lookup"
-    if _PURE_SCREEN.search(text):
-        return "pure_condition_screen"
     return None
 
 

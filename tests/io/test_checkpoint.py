@@ -81,6 +81,8 @@ class ScriptedClient:
             if payload["current_question"] in self.session_fail:
                 raise RuntimeError("simulated network failure")
             return json.dumps({"is_complex": True, "reason": "复杂"}, ensure_ascii=False)
+        if "简单问句识别器" in system_prompt:  # simple_finder 视角
+            return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # verify
             if payload["question"] in self.verify_fail:
                 raise RuntimeError("simulated network failure")

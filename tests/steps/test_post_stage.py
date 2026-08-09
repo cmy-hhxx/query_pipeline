@@ -94,6 +94,8 @@ class FakePipelineLLMClient:
             if payload["current_question"] == self.COMPLEX:
                 return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
             return json.dumps({"is_complex": False, "reason": "简单查询"}, ensure_ascii=False)
+        if "简单问句识别器" in system_prompt:  # simple_finder 视角
+            return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # pass-2 verify (standalone)
             if payload["question"] == self.COMPLEX:
                 return json.dumps({"is_complex": True, "reason": "独立成立"}, ensure_ascii=False)
