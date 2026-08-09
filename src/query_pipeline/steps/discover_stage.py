@@ -11,6 +11,7 @@ from rich.progress import Progress
 from query_pipeline.adapters import adapt_record
 from query_pipeline.io.checkpoint import content_key, stage_checkpoint
 from query_pipeline.io.jsonl import append_jsonl, read_jsonl_with_bad_lines, write_jsonl
+from query_pipeline.io.sniff import preclean_records, sniff_format
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.models.session import Segment
 from query_pipeline.models.turn import Session
@@ -44,10 +45,19 @@ async def run_discover_stage(
     """Adapt input → segment/step1/step2 → assemble OutputRows."""
     cfg = ctx.config
     ctx.prune_debug_artifacts("segments.jsonl", "candidates.jsonl", "judged.jsonl")
+    fmt = cfg.input.format
+    if fmt == "auto":
+        fmt = sniff_format(cfg.input.path)
+        logging.getLogger(__name__).info("input format auto-detected: %s", fmt)
     raw_records, bad_count = read_jsonl_with_bad_lines(cfg.input.path, ctx.path("bad_lines.jsonl"))
     if bad_count:
         logging.getLogger(__name__).warning(
             "input: skipped %d bad line(s) → %s", bad_count, ctx.path("bad_lines.jsonl")
+        )
+    raw_records, dup_count, empty_count = preclean_records(raw_records, fmt)
+    if dup_count or empty_count:
+        logging.getLogger(__name__).info(
+            "input pre-clean: %d duplicate(s), %d empty-context session(s)", dup_count, empty_count
         )
 
     sessions: list[Session] = []
@@ -56,7 +66,7 @@ async def run_discover_stage(
     bad_path = ctx.path("bad_lines.jsonl")
     for record in raw_records:
         try:
-            sessions.append(adapt_record(record, cfg.input.format))
+            sessions.append(adapt_record(record, fmt))
         except ValueError as exc:
             adapt_skipped += 1
             logger.warning(
@@ -74,6 +84,9 @@ async def run_discover_stage(
     skipped = bad_count + adapt_skipped
     ctx.stats["total_sessions"] = len(sessions)
     ctx.stats["input_bad_lines"] = skipped
+    ctx.stats["input_duplicates"] = dup_count
+    ctx.stats["input_empty_sessions"] = empty_count
+    ctx.stats["input_format"] = fmt
 
     if not sessions:
         _zero_stats(ctx.stats)

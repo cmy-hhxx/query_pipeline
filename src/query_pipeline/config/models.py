@@ -11,14 +11,14 @@ class ConfigModel(BaseModel):
 
 class InputConfig(ConfigModel):
     path: Path
-    format: str = "session"  # "session" | "chat"
+    format: str = "auto"  # "auto" | "session" | "chat"
 
     @field_validator("format")
     @classmethod
     def validate_format(cls, value: str) -> str:
         fmt = value.strip().lower()
-        if fmt not in {"session", "chat"}:
-            raise ValueError(f"invalid input.format: {value!r} (expected 'session' or 'chat')")
+        if fmt not in {"auto", "session", "chat"}:
+            raise ValueError(f"invalid input.format: {value!r} (expected 'auto', 'session' or 'chat')")
         return fmt
 
 

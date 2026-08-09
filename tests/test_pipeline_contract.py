@@ -99,8 +99,9 @@ class SessionPipelineContractTest(unittest.TestCase):
     def test_input_format_validation(self) -> None:
         from query_pipeline.config.models import InputConfig
 
-        self.assertEqual(InputConfig(path=Path("x.jsonl")).format, "session")
+        self.assertEqual(InputConfig(path=Path("x.jsonl")).format, "auto")
         self.assertEqual(InputConfig(path=Path("x.jsonl"), format="chat").format, "chat")
+        self.assertEqual(InputConfig(path=Path("x.jsonl"), format="auto").format, "auto")
         with self.assertRaises(ValueError):
             InputConfig(path=Path("x.jsonl"), format="bogus")
 
