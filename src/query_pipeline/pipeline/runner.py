@@ -9,9 +9,7 @@ from query_pipeline.io.jsonl import write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.pipeline.context import PipelineContext, RunSummary, merge_stats
-from query_pipeline.steps.discover_stage import run_discover_stage
-from query_pipeline.steps.post_stage import run_post_stage
-from query_pipeline.steps.verify_stage import run_verify_stage
+from query_pipeline.pipeline.stages import get_stage, stage_names
 
 
 def _run_success(stats: dict[str, Any]) -> bool:
@@ -49,9 +47,9 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
         cache = load_cache(config.llm.cache)
 
     try:
-        ctx = await run_discover_stage(ctx, client, cache, cache_lock)
-        ctx = await run_verify_stage(ctx, client, cache, cache_lock)
-        ctx = await run_post_stage(ctx, client, cache, cache_lock)
+        for name in stage_names(ctx.config.stages):
+            stage = get_stage(name)
+            ctx = await stage(ctx, client, cache, cache_lock)
     finally:
         if client is not None:
             await client.close()

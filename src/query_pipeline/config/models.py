@@ -129,6 +129,7 @@ class PipelineConfig(ConfigModel):
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path = Path("work")
+    stages: list[str] | None = None  # None -> pipeline default stage order
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     step1: Step1Config = Field(default_factory=Step1Config)
     step2: Step2Config = Field(default_factory=Step2Config)
