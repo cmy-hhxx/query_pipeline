@@ -73,7 +73,7 @@ class TaxonomyTest(unittest.TestCase):
         self.assertEqual(tax.get("hard", "01").slug, "data-metrics-calculation")
         self.assertEqual(tax.get("normal", "14").slug, "complex-stock-selection")
         with self.assertRaises(KeyError):
-            tax.get("normal", "01")  # id exists only in complex set
+            tax.get("normal", "02")  # id exists only in complex set
 
 
 if __name__ == "__main__":
