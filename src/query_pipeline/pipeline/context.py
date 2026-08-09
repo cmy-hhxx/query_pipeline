@@ -79,6 +79,7 @@ _STATS_DEFAULTS: dict[str, Any] = {
     "verify_rejected": 0,
     "verify_failed": 0,
     "answer_gate_rejected": 0,
+    "simple_gate_rejected": 0,
     "dedup_removed": 0,
     "translated": 0,
     "translate_skipped": 0,
