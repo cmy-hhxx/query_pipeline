@@ -3,28 +3,17 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from query_pipeline.io.sniff import (
-    CHAT,
-    SESSION,
-    classify_record,
-    preclean_records,
-    sniff_format,
-)
-
+from query_pipeline.adapters import CHAT, SESSION, match_adapter
+from query_pipeline.io.sniff import preclean_records, sniff_format
 
 def _session_line(thread_id: str = "t1", n_turns: int = 1) -> str:
     return json.dumps(
         {"thread_id": thread_id, "context": [{"question": "q", "answer": "a"}] * n_turns}
     )
-
 
 def _chat_line(case_id: str = "c1", trace_id: str = "tr1") -> str:
     return json.dumps(
@@ -40,32 +29,29 @@ def _chat_line(case_id: str = "c1", trace_id: str = "tr1") -> str:
         }
     )
 
-
 def _write(lines: list[str]) -> Path:
     tmp = tempfile.mkdtemp()
     path = Path(tmp) / "input.jsonl"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
-
 class ClassifyRecordTest(unittest.TestCase):
     def test_session(self) -> None:
-        self.assertEqual(classify_record({"thread_id": "t", "context": []}), SESSION)
+        self.assertEqual(match_adapter({"thread_id": "t", "context": []}), SESSION)
 
     def test_chat(self) -> None:
-        self.assertEqual(classify_record({"judge_data": {"input": {}}}), CHAT)
+        self.assertEqual(match_adapter({"judge_data": {"input": {}}}), CHAT)
 
     def test_partial_markers_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            classify_record({"thread_id": "t"})  # context missing
+            match_adapter({"thread_id": "t"})  # context missing
         with self.assertRaises(ValueError):
-            classify_record({"context": []})  # thread_id missing
+            match_adapter({"context": []})  # thread_id missing
         with self.assertRaises(ValueError):
-            classify_record({"judge_data": "not-a-dict"})  # wrong type
+            match_adapter({"judge_data": "not-a-dict"})  # wrong type
 
     def test_unrecognizable(self) -> None:
-        self.assertIsNone(classify_record({"foo": "bar"}))
-
+        self.assertIsNone(match_adapter({"foo": "bar"}))
 
 class SniffFormatTest(unittest.TestCase):
     def test_session_file(self) -> None:
@@ -88,7 +74,6 @@ class SniffFormatTest(unittest.TestCase):
 
     def test_bad_lines_skipped(self) -> None:
         self.assertEqual(sniff_format(_write(["not json", _session_line()])), SESSION)
-
 
 class PrecleanTest(unittest.TestCase):
     def test_session_dedup_and_empty_filter(self) -> None:
@@ -120,7 +105,6 @@ class PrecleanTest(unittest.TestCase):
         self.assertEqual(len(kept), 2)
         self.assertEqual(dup, 0)
         self.assertEqual(empty, 0)
-
 
 if __name__ == "__main__":
     unittest.main()

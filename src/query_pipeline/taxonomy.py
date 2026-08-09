@@ -92,10 +92,21 @@ def parse_categories(text: str) -> Taxonomy:
 
 
 def templates_dir() -> Path:
+    """Locate the templates/ directory.
+
+    Search order:
+    1. QUERY_PIPELINE_TEMPLATES env override;
+    2. <repo-or-site-packages>/templates — source tree layout and wheel
+       artifacts (hatch `artifacts = ["../templates"]`) both land here;
+    3. package-data fallback via importlib.resources (templates shipped
+       inside the wheel package).
+    """
     env = os.environ.get("QUERY_PIPELINE_TEMPLATES")
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[2] / "templates"
+    # templates 随包发布（src/query_pipeline/templates → wheel 内同名目录），
+    # 源码树与安装后都通过包内路径定位。
+    return Path(__file__).resolve().parent / "templates"
 
 
 _TAXONOMY: Taxonomy | None = None

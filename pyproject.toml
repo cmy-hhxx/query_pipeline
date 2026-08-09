@@ -27,7 +27,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
+# 不设 sources（默认项目根），packages 按 src 布局写全路径：
+# hatch 打包时自动剥离 src/ 前缀（wheel 内为 query_pipeline/），
+# editable 安装时 finder 正确映射 src/query_pipeline。
 packages = ["src/query_pipeline"]
+# templates/ 是包内数据（src/query_pipeline/templates/），随 wheel 自动发布。
 
-[tool.hatch.build]
-sources = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--import-mode=importlib"

@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.steps.answer_gate_stage import answer_gate_reason
 
 LONG = "这是一段足够长的正常回答。" * 20  # > 50 chars, no dangling end
-
 
 def _row(**overrides) -> dict:
     row = {
@@ -25,7 +19,6 @@ def _row(**overrides) -> dict:
     }
     row.update(overrides)
     return row
-
 
 class AnswerGateTest(unittest.TestCase):
     def test_pass(self) -> None:
@@ -65,7 +58,6 @@ class AnswerGateTest(unittest.TestCase):
 
     def test_empty_answer(self) -> None:
         self.assertEqual(answer_gate_reason(_row(text_answer="")), "empty_answer")
-
 
 if __name__ == "__main__":
     unittest.main()

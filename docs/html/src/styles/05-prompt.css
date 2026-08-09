@@ -1,0 +1,71 @@
+/* PROMPT — 提示词面板、复制按钮 */
+.prompt-panel {
+  order: 4;
+  margin-top: 26px;
+  overflow: hidden;
+  border: 1px dashed var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.taxonomy + .prompt-panel {
+  margin-top: 42px;
+}
+.prompt-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.prompt-panel summary::-webkit-details-marker {
+  display: none;
+}
+.summary-title strong {
+  display: block;
+  margin-bottom: 0;
+  font-size: 15px;
+}
+.summary-title code {
+  font-size: 12px;
+  font-weight: 600;
+}
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.copy-button {
+  min-height: 32px;
+  border: 1px solid var(--red);
+  border-radius: 2px;
+  background: var(--red);
+  color: var(--bg);
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.copy-button:hover {
+  background: #741414;
+}
+.copy-status {
+  min-width: 52px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.prompt-code {
+  margin: 0;
+  overflow: auto;
+  max-height: 520px;
+  border-top: 1px dashed var(--line-strong);
+  background: var(--surface-soft);
+  padding: 18px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

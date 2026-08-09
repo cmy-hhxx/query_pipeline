@@ -4,1494 +4,1223 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>复杂金融问句清洗 pipline</title>
+    <title>复杂金融问句清洗与标注管线</title>
     <style>
-      :root {
-        --bg: #fff;
-        --surface: #fff;
-        --surface-soft: #fff;
-        --ink: #111;
-        --ink-soft: #333;
-        --muted: #737373;
-        --line: #dedede;
-        --line-strong: #999;
-        --red: #9c1d1d;
-        --red-soft: #fff;
-        --red-line: #9c1d1d;
-        --amber: #737373;
-        --amber-soft: #fff;
-        --green: #111;
-        --green-soft: #fff;
-        --focus: #9c1d1d;
-        --max: 1120px;
-        --mono-ink: #111;
-        --mono-paper: #fff;
-        --mono-muted: #737373;
-        --mono-grid: #dedede;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--ink);
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-          sans-serif;
-        font-size: 15px;
-        line-height: 1.55;
-      }
-
-      button,
-      pre,
-      code,
-      .mono {
-        font-family:
-          "SF Mono", "Roboto Mono", "Cascadia Code", Consolas, monospace;
-      }
-
-      button {
-        font: inherit;
-      }
-
-      button:focus-visible,
-      summary:focus-visible {
-        outline: 3px solid color-mix(in oklch, var(--focus), transparent 72%);
-        outline-offset: 2px;
-      }
-
-      main {
-        width: min(var(--max), calc(100% - 32px));
-        margin: 0 auto;
-        padding: 30px 0 52px;
-      }
-
-      .topline {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 24px;
-        padding-bottom: 18px;
-        border-bottom: 1px solid var(--line-strong);
-      }
-
-      h1,
-      h2,
-      h3,
-      p {
-        margin-top: 0;
-      }
-
-      h1 {
-        margin-bottom: 0;
-        font-size: 28px;
-        line-height: 1.2;
-        letter-spacing: 0;
-      }
-
-      .legend {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-
-      .badge {
-        display: inline-flex;
-        min-height: 30px;
-        align-items: center;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: var(--surface);
-        color: var(--ink-soft);
-        padding: 5px 10px;
-        font-size: 12px;
-        font-weight: 700;
-        white-space: nowrap;
-      }
-
-      .badge.reject {
-        border-color: var(--red-line);
-        background: var(--red-soft);
-        color: var(--red);
-      }
-
-      .badge.skip {
-        border-color: var(--line-strong);
-        background: var(--amber-soft);
-        color: var(--amber);
-      }
-
-      .badge.accept {
-        border-color: var(--line-strong);
-        background: var(--green-soft);
-        color: var(--green);
-      }
-
-      .badge.non-complex {
-        border-color: var(--line-strong);
-        background: var(--surface-soft);
-        color: var(--ink-soft);
-      }
-
-      .pipeline {
-        margin-top: 28px;
-      }
-
-      .pipeline > h2 {
-        margin: 0 0 4px;
-        font-size: 19px;
-      }
-
-      .pipeline > .pipe-sub {
-        margin: 0 0 18px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-
-      /* —— 流程图 —— */
-      .flow-chart {
-        position: relative;
-        padding: 18px 22px 20px;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--mono-paper);
-        overflow-x: auto;
-      }
-      .flow-chart svg {
-        display: block;
-        width: 100%;
-        height: auto;
-        min-width: 880px;
-      }
-
-      /* —— 6 步卡片 —— */
-      .step-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 16px;
-      }
-      .step-card {
-        display: grid;
-        grid-template-rows: auto auto auto auto;
-        gap: 8px;
-        padding: 14px 16px 16px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: var(--surface);
-      }
-      .step-card-head {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .step-num {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: var(--ink);
-        color: var(--bg);
-        font-weight: 800;
-        font-size: 13px;
-        font-family: "SF Mono", "Roboto Mono", Consolas, monospace;
-      }
-      .step-name {
-        font-size: 15px;
-        font-weight: 700;
-        color: var(--ink);
-      }
-      .step-tags {
-        display: inline-flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .stage-tag {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 6px;
-        padding: 2px 7px;
-        font-size: 10.5px;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-      }
-      .stage-tag.code {
-        background: var(--surface-soft);
-        color: var(--ink-soft);
-        border: 1px solid var(--line);
-      }
-      .stage-tag.llm {
-        background: var(--red-soft);
-        color: var(--red);
-        border: 1px solid var(--red-line);
-      }
-      .step-rule {
-        font-size: 12.5px;
-        color: var(--ink-soft);
-        line-height: 1.5;
-      }
-      .step-artifact {
-        display: grid;
-        gap: 2px;
-      }
-      .step-artifact-label {
-        font-size: 10.5px;
-        font-weight: 700;
-        color: var(--muted);
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      .step-artifact-value {
-        font-family: "SF Mono", "Roboto Mono", Consolas, monospace;
-        font-size: 12px;
-        color: var(--ink-soft);
-        word-break: break-all;
-      }
-      .step-outcomes {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-
-      .threshold {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 6px;
-        background: var(--surface-soft);
-        color: var(--ink);
-        padding: 2px 6px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
-
-      @keyframes mono-fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      .mono-fade {
-        animation: mono-fade-in 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .mono-fade { animation: none; }
-      }
-      @media (max-width: 900px) {
-        .step-grid { grid-template-columns: 1fr; }
-        .flow-chart svg { min-width: 720px; }
-      }
-      @media (min-width: 901px) and (max-width: 1100px) {
-        .step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      }
-
-      .prompt-panel {
-        margin-top: 22px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: var(--surface);
-        overflow: hidden;
-      }
-
-      /* —— 9 类分类体系 —— */
-      .taxonomy {
-        margin-top: 32px;
-        padding: 24px 26px 28px;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--surface);
-      }
-      .taxonomy > h2 {
-        font-size: 19px;
-        margin: 0 0 4px;
-      }
-      .taxonomy > .tax-sub {
-        margin: 0 0 18px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-      .tax-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-      }
-      .tax-card {
-        display: grid;
-        grid-template-rows: auto auto 1fr auto;
-        gap: 6px;
-        padding: 14px 16px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: var(--bg);
-      }
-      .tax-head {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        min-height: 26px;
-      }
-      .tax-id {
-        font-family: "SF Mono", "Roboto Mono", Consolas, monospace;
-        font-weight: 800;
-        font-size: 14px;
-        color: var(--ink);
-        letter-spacing: 0.02em;
-      }
-      .tax-slug {
-        font-family: "SF Mono", "Roboto Mono", Consolas, monospace;
-        font-weight: 600;
-        font-size: 11.5px;
-        color: var(--muted);
-        letter-spacing: 0.02em;
-      }
-      .tax-name {
-        font-size: 15.5px;
-        font-weight: 700;
-        color: var(--ink);
-        line-height: 1.25;
-      }
-      .tax-key {
-        font-size: 13px;
-        color: var(--ink-soft);
-        line-height: 1.55;
-      }
-      .tax-key b {
-        color: var(--muted);
-        font-weight: 700;
-        font-size: 11px;
-        letter-spacing: 0.04em;
-        display: inline-block;
-        margin-right: 4px;
-      }
-      .tax-example {
-        margin-top: 6px;
-        padding: 8px 10px;
-        background: var(--surface-soft);
-        border-radius: 6px;
-        font-size: 12.5px;
-        color: var(--ink-soft);
-        line-height: 1.55;
-      }
-      .tax-example b {
-        color: var(--muted);
-        font-weight: 700;
-        font-size: 10.5px;
-        letter-spacing: 0.06em;
-        display: inline-block;
-        margin-right: 4px;
-      }
-      @keyframes mono-fade-in {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
-      }
-      .mono-fade {
-        animation: mono-fade-in 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .mono-fade {
-          animation: none;
-        }
-      }
-      @media (max-width: 820px) {
-        .tax-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      @media (min-width: 821px) and (max-width: 1100px) {
-        .tax-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      details {
-        display: block;
-      }
-
-      .prompt-panel summary {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        min-height: 60px;
-        padding: 16px 18px;
-        cursor: pointer;
-        list-style: none;
-      }
-
-      .prompt-panel summary::-webkit-details-marker {
-        display: none;
-      }
-
-      .summary-title strong {
-        display: block;
-        margin-bottom: 0;
-        font-size: 17px;
-      }
-
-      .prompt-actions {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .copy-button {
-        min-height: 34px;
-        border: 1px solid var(--red);
-        border-radius: 7px;
-        background: var(--red);
-        color: white;
-        padding: 7px 12px;
-        font-size: 13px;
-        font-weight: 700;
-        cursor: pointer;
-      }
-
-      .copy-button:hover {
-        background: #741414;
-      }
-
-      .copy-status {
-        min-width: 52px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .prompt-code {
-        max-height: 470px;
-        margin: 0;
-        overflow: auto;
-        border-top: 1px solid var(--line);
-        background: var(--surface-soft);
-        color: var(--ink);
-        padding: 18px;
-        font-size: 13px;
-        line-height: 1.7;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      @media (max-width: 820px) {
-        .topline,
-        .prompt-panel summary {
-          display: grid;
-          justify-content: stretch;
-        }
-
-        .legend {
-          justify-content: flex-start;
-        }
-
-        .step-summary {
-          display: grid;
-          grid-template-columns: 32px 1fr;
-          align-items: start;
-          gap: 5px 12px;
-          min-height: 0;
-          padding: 14px 44px 14px 14px;
-        }
-
-        .step-number {
-          align-self: start;
-          grid-row: 1 / 4;
-          justify-content: center;
-          padding-right: 0;
-        }
-
-        .step-title {
-          grid-column: 2;
-          justify-items: start;
-          text-align: left;
-        }
-
-        .step-rules,
-        .step-outcome {
-          grid-column: 2;
-        }
-
-        .step-rules {
-          justify-self: start;
-          text-align: left;
-        }
-
-        .step-outcome {
-          justify-self: start;
-          margin-top: 4px;
-        }
-
-        .step-summary::after {
-          top: 18px;
-          right: 12px;
-          transform: none;
-        }
-
-        .step-detail {
-          padding: 14px 14px 16px 58px;
-        }
-
-        .detail-grid {
-          grid-template-columns: 1fr;
-          gap: 12px;
-          max-width: none;
-          margin: 0;
-        }
-
-        .detail-item {
-          text-align: left;
-        }
-
-        .prompt-actions {
-          justify-content: space-between;
-        }
-      }
-
-      /* Minimal report layout, aligned with the reference document. */
-      :root {
-        --bg: #fff;
-        --surface: #fff;
-        --surface-soft: #fff;
-        --ink: #111;
-        --ink-soft: #333;
-        --muted: #737373;
-        --line: #dedede;
-        --line-strong: #999;
-        --red: #9c1d1d;
-        --red-soft: #fff;
-        --red-line: #9c1d1d;
-        --amber: #737373;
-        --amber-soft: #fff;
-        --green: #111;
-        --green-soft: #fff;
-        --focus: #9c1d1d;
-        --max: 1120px;
-      }
-
-      html {
-        scroll-behavior: smooth;
-        background: #fff;
-      }
-
-      body {
-        background: var(--bg);
-        color: var(--ink);
-        font-family:
-          "Helvetica Neue", Helvetica, "Segoe UI", "PingFang SC",
-          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-        font-size: 16px;
-        line-height: 1.6;
-      }
-
-      main {
-        display: flex;
-        width: min(var(--max), calc(100% - 48px));
-        margin: 0 auto;
-        padding: clamp(36px, 6vw, 72px) 0 72px;
-        flex-direction: column;
-      }
-
-      h1,
-      h2,
-      h3 {
-        color: var(--ink);
-        font-weight: 700;
-        letter-spacing: -0.025em;
-      }
-
-      code,
-      pre,
-      .mono,
-      .step-artifact-value,
-      .tax-id,
-      .tax-slug {
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-      }
-
-      code {
-        color: var(--ink);
-        background: transparent;
-      }
-
-      .topline {
-        order: 1;
-        display: block;
-        padding: 0;
-        border: 0;
-      }
-
-      h1 {
-        margin: 0 0 28px;
-        font-size: clamp(32px, 4.3vw, 48px);
-        line-height: 1.08;
-      }
-
-      .legend {
-        display: grid;
-        grid-template-columns: 112px repeat(4, minmax(0, 1fr));
-        gap: 0;
-        width: 100%;
-        border-top: 1px dashed var(--ink);
-        border-bottom: 1px dashed var(--ink);
-        background: #fff;
-      }
-
-      .legend-title {
-        display: flex;
-        align-items: center;
-        padding: 14px 12px 14px 0;
-        color: var(--ink);
-        font-size: 13px;
-        font-weight: 700;
-      }
-
-      .badge {
-        display: grid;
-        min-height: 0;
-        align-content: center;
-        gap: 1px;
-        border: 0;
-        border-left: 0;
-        border-radius: 0;
-        background: #fff;
-        padding: 12px 14px;
-        white-space: normal;
-      }
-
-      .badge b {
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-        font-size: 11px;
-        line-height: 1.25;
-      }
-
-      .badge span {
-        color: var(--ink-soft);
-        font-size: 12px;
-        font-weight: 500;
-      }
-
-      .badge.reject,
-      .badge.skip,
-      .badge.non-complex,
-      .badge.accept {
-        background: transparent;
-      }
-
-      .badge.reject b {
-        color: var(--red);
-      }
-
-      .badge.skip b {
-        color: var(--amber);
-      }
-
-      .badge.non-complex b {
-        color: var(--muted);
-      }
-
-      .badge.accept b {
-        color: var(--green);
-      }
-
-      .pipeline {
-        order: 2;
-        margin-top: clamp(44px, 7vw, 72px);
-      }
-
-      .pipeline > h2,
-      .taxonomy > h2 {
-        margin: 0;
-        padding: 0 0 10px;
-        border-bottom: 2px solid var(--ink);
-        font-size: 24px;
-        line-height: 1.2;
-      }
-
-      .pipe-sub,
-      .tax-sub {
-        display: none;
-      }
-
-      .flow-chart {
-        position: relative;
-        margin: 0;
-        padding: 24px 0 20px;
-        overflow-x: auto;
-        border: 0;
-        border-bottom: 1px solid var(--line);
-        border-radius: 0;
-        background: transparent;
-        scrollbar-color: var(--line-strong) transparent;
-      }
-
-      .flow-io,
-      .flow-main,
-      .flow-drops {
-        min-width: 1010px;
-      }
-
-      .flow-io {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 14px;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .flow-io span {
-        display: inline-flex;
-        align-items: baseline;
-        gap: 8px;
-      }
-
-      .flow-io b {
-        color: var(--ink);
-        font-size: 11px;
-      }
-
-      .flow-io code {
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .flow-main {
-        --flow-gap: 24px;
-        display: grid;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
-        gap: var(--flow-gap);
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .flow-node {
-        position: relative;
-        display: grid;
-        min-height: 92px;
-        align-content: center;
-        justify-items: center;
-        gap: 2px;
-        border: 1px solid var(--line-strong);
-        border-radius: 2px;
-        background: var(--surface);
-        padding: 12px 8px;
-        text-align: center;
-      }
-
-      .flow-node.llm {
-        border-color: var(--red-line);
-      }
-
-      .flow-node.accepted {
-        border-color: var(--green);
-        background: var(--green-soft);
-      }
-
-      .flow-node:not(:last-child)::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        left: 100%;
-        width: var(--flow-gap);
-        border-top: 1px solid var(--ink);
-      }
-
-      .flow-node:not(:last-child)::before {
-        content: "";
-        position: absolute;
-        z-index: 1;
-        top: calc(50% - 3px);
-        left: calc(100% + var(--flow-gap) - 5px);
-        width: 0;
-        height: 0;
-        border-top: 3px solid transparent;
-        border-bottom: 3px solid transparent;
-        border-left: 5px solid var(--ink);
-      }
-
-      .flow-index {
-        color: var(--muted);
-        font-family: inherit;
-        font-size: 10px;
-        font-weight: 700;
-      }
-
-      .flow-node.llm .flow-index {
-        color: var(--red);
-      }
-
-      .flow-node.accepted .flow-index {
-        color: var(--green);
-      }
-
-      .flow-node strong {
-        color: var(--ink);
-        font-size: 14px;
-        line-height: 1.25;
-      }
-
-      .flow-node small {
-        color: var(--muted);
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-        font-size: 9px;
-        line-height: 1.35;
-      }
-
-      .flow-drops {
-        display: grid;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
-        gap: 24px;
-        min-height: 74px;
-        margin-top: 28px;
-      }
-
-      .flow-branch {
-        position: relative;
-        align-self: start;
-        border-top: 1px dashed var(--line-strong);
-        padding: 8px 3px 0;
-        color: var(--muted);
-        font-size: 10px;
-        line-height: 1.55;
-        text-align: center;
-      }
-
-      .flow-branch::before {
-        content: "";
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        height: 28px;
-        border-left: 1px dashed var(--line-strong);
-      }
-
-      .flow-branch b {
-        color: var(--red);
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-        font-size: 9px;
-      }
-
-      .branch-step3 {
-        grid-column: 3;
-      }
-
-      .branch-step3 b:first-child,
-      .branch-step5 b {
-        color: var(--muted);
-      }
-
-      .branch-step3 b:last-of-type {
-        color: var(--amber);
-      }
-
-      .branch-step5 {
-        grid-column: 5;
-      }
-
-      .branch-step6 {
-        grid-column: 6;
-      }
-
-      .step-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 300px;
-        gap: 24px;
-        align-items: start;
-        margin-top: 28px;
-      }
-
-      .step-grid {
-        display: block;
-        margin-top: 0;
-      }
-
-      .step-table-head,
-      .step-card {
-        display: grid;
-        grid-template-columns:
-          minmax(180px, 1.1fr)
+/* BASE — 设计变量、全局重置、基础排版 */
+:root {
+  --bg: #fff;
+  --surface: #fff;
+  --surface-soft: #fff;
+  --ink: #111;
+  --ink-soft: #333;
+  --muted: #737373;
+  --line: #dedede;
+  --line-strong: #999;
+  --red: #9c1d1d;
+  --red-soft: #fff;
+  --red-line: #9c1d1d;
+  --amber: #737373;
+  --amber-soft: #fff;
+  --green: #111;
+  --green-soft: #fff;
+  --focus: #9c1d1d;
+  --max: 1120px;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+  background: #fff;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+main {
+  display: flex;
+  width: min(var(--max), calc(100% - 48px));
+  margin: 0 auto;
+  padding: clamp(36px, 6vw, 72px) 0 72px;
+  flex-direction: column;
+}
+h1,
+h2,
+h3 {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+code,
+pre,
+.tax-id,
+.tax-slug {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+code {
+  color: var(--ink);
+  background: transparent;
+}
+button {
+  font: inherit;
+}
+button:focus-visible,
+summary:focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--focus), transparent 72%);
+  outline-offset: 2px;
+}
+
+/* HEADER — 页面标题区与输出去向图例 */
+.topline {
+  order: 1;
+  display: block;
+  padding: 0;
+  border: 0;
+}
+h1 {
+  margin: 0 0 28px;
+  font-size: clamp(32px, 4.3vw, 48px);
+  line-height: 1.08;
+}
+.legend {
+  display: grid;
+  grid-template-columns: 112px repeat(4, minmax(0, 1fr));
+  gap: 0;
+  width: 100%;
+  border-top: 1px dashed var(--ink);
+  border-bottom: 1px dashed var(--ink);
+  background: #fff;
+}
+.legend-title {
+  display: flex;
+  align-items: center;
+  padding: 14px 12px 14px 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.badge {
+  display: grid;
+  min-height: 0;
+  align-content: center;
+  align-items: center;
+  gap: 1px;
+  border: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: #fff;
+  padding: 12px 14px;
+  white-space: normal;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge b {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.badge span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge.reject,
+.badge.non-complex,
+.badge.failed,
+.badge.accept {
+  background: transparent;
+}
+.badge.reject b {
+  color: var(--red);
+}
+.badge.non-complex b {
+  color: var(--muted);
+}
+.badge.failed b {
+  color: var(--amber);
+}
+.badge.accept b {
+  color: var(--green);
+}
+
+/* PIPELINE — 清洗流程图、7 阶段决策表、产物栏、数据漏斗 */
+.pipeline {
+  order: 2;
+  margin-top: clamp(44px, 7vw, 72px);
+}
+.pipeline > h2 {
+  margin: 0;
+  padding: 0 0 10px;
+  border-bottom: 2px solid var(--ink);
+  font-size: 24px;
+  line-height: 1.2;
+}
+.flow-chart {
+  position: relative;
+  margin: 0;
+  padding: 24px 0 20px;
+  overflow-x: auto;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.flow-io,
+.flow-main,
+.flow-drops {
+  min-width: 1080px;
+}
+.flow-io {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.flow-io span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.flow-io b {
+  color: var(--ink);
+  font-size: 11px;
+}
+.flow-io code {
+  color: var(--muted);
+  font-size: 11px;
+}
+.flow-main {
+  --flow-gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--flow-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-node {
+  position: relative;
+  display: grid;
+  min-height: 92px;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface);
+  padding: 12px 6px;
+  text-align: center;
+}
+.flow-node.llm {
+  border-color: var(--red-line);
+}
+.flow-node.accepted {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.flow-node:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: var(--flow-gap);
+  border-top: 1px solid var(--ink);
+}
+.flow-node:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 3px);
+  left: calc(100% + var(--flow-gap) - 5px);
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 5px solid var(--ink);
+}
+.flow-index {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.flow-node.llm .flow-index {
+  color: var(--red);
+}
+.flow-node.accepted .flow-index {
+  color: var(--green);
+}
+.flow-node strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+.flow-node small {
+  color: var(--muted);
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 8.5px;
+  line-height: 1.35;
+}
+.flow-drops {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 18px;
+  min-height: 74px;
+  margin-top: 28px;
+}
+.flow-branch {
+  position: relative;
+  align-self: start;
+  border-top: 1px dashed var(--line-strong);
+  padding: 8px 3px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+  text-align: center;
+}
+.flow-branch::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  height: 28px;
+  border-left: 1px dashed var(--line-strong);
+}
+.flow-branch b {
+  color: var(--red);
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 9px;
+}
+.branch-judge {
+  grid-column: 4;
+}
+.branch-judge b:first-child {
+  color: var(--muted);
+}
+.branch-judge b:last-of-type {
+  color: var(--amber);
+}
+.branch-verify {
+  grid-column: 5;
+}
+.branch-answer {
+  grid-column: 6;
+}
+.branch-post {
+  grid-column: 7;
+}
+.step-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+  margin-top: 28px;
+}
+.step-grid {
+  display: block;
+  margin-top: 0;
+}
+.step-table-head,
+.step-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr)
           110px
           minmax(280px, 2fr);
-        gap: 0;
-        align-items: center;
-      }
-
-      .step-table-head {
-        border-top: 2px solid var(--ink);
-        border-bottom: 1px solid var(--line-strong);
-        background: var(--surface-soft);
-      }
-
-      .step-table-head span {
-        padding: 8px 12px;
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 700;
-      }
-
-      .step-card {
-        grid-template-rows: none;
-        gap: 0;
-        padding: 0;
-        border: 0;
-        border-bottom: 1px solid var(--line);
-        border-radius: 0;
-        background: transparent;
-      }
-
-      .step-card > * {
-        min-width: 0;
-        padding: 15px 12px;
-      }
-
-      .step-card-head {
-        display: grid;
-        grid-template-columns: 52px 1fr;
-        gap: 8px;
-      }
-
-      .step-num {
-        display: block;
-        width: auto;
-        height: auto;
-        border-radius: 0;
-        background: transparent;
-        color: var(--muted);
-        font-family: inherit;
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      .step-name {
-        font-size: 14px;
-        font-weight: 700;
-      }
-
-      .step-tags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 8px;
-      }
-
-      .stage-tag,
-      .stage-tag.code,
-      .stage-tag.llm {
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        padding: 0;
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-        font-size: 10px;
-      }
-
-      .stage-tag.code {
-        color: var(--muted);
-      }
-
-      .stage-tag.llm {
-        color: var(--red);
-      }
-
-      .step-rule {
-        color: var(--ink-soft);
-        font-size: 12.5px;
-        line-height: 1.55;
-      }
-
-      .threshold {
-        display: inline;
-        border-radius: 2px;
-        background: var(--surface-soft);
-        padding: 2px 4px;
-        color: var(--ink);
-        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-        font-size: 11px;
-        white-space: normal;
-      }
-
-      .artifact-box {
-        border: 1px solid var(--ink);
-        background: #fff;
-      }
-
-      .artifact-box h3 {
-        margin: 0;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--ink);
-        font-size: 13px;
-        letter-spacing: 0;
-      }
-
-      .artifact-box ol {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .artifact-box li {
-        display: grid;
-        grid-template-columns: 48px minmax(0, 1fr);
-        gap: 8px;
-        align-items: start;
-        min-height: 51px;
-        padding: 12px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .artifact-box li:last-child {
-        border-bottom: 0;
-      }
-
-      .artifact-box li > span {
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 700;
-      }
-
-      .artifact-box code {
-        color: var(--ink-soft);
-        font-size: 10.5px;
-        line-height: 1.5;
-        overflow-wrap: anywhere;
-      }
-
-      .taxonomy {
-        order: 3;
-        margin-top: clamp(52px, 8vw, 88px);
-        padding: 0;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-      }
-
-      .tax-table-head,
-      .tax-card {
-        display: grid;
-        grid-template-columns:
-          minmax(210px, 1.25fr)
-          minmax(110px, 0.75fr)
-          minmax(220px, 1.4fr)
-          minmax(300px, 2fr);
-        gap: 0;
-        align-items: stretch;
-      }
-
-      .tax-table-head {
-        border-bottom: 1px solid var(--line-strong);
-        background: var(--surface-soft);
-      }
-
-      .tax-table-head span {
-        padding: 8px 12px;
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 700;
-      }
-
-      .tax-grid {
-        display: block;
-        margin: 0;
-      }
-
-      .tax-card {
-        grid-template-rows: none;
-        padding: 0;
-        border: 0;
-        border-bottom: 1px solid var(--line);
-        border-radius: 0;
-        background: transparent;
-      }
-
-      .tax-card > * {
-        min-width: 0;
-        padding: 14px 12px;
-      }
-
-      .tax-head {
-        display: grid;
-        min-height: 0;
-        align-content: center;
-        gap: 2px;
-      }
-
-      .tax-id {
-        color: var(--ink);
-        font-size: 12px;
-      }
-
-      .tax-slug {
-        color: var(--muted);
-        font-size: 10px;
-        line-height: 1.35;
-        overflow-wrap: anywhere;
-      }
-
-      .tax-name {
-        align-content: center;
-        color: var(--ink);
-        font-size: 14px;
-        line-height: 1.4;
-      }
-
-      .tax-key,
-      .tax-example {
-        align-content: center;
-        margin: 0;
-        border-radius: 0;
-        background: transparent;
-        color: var(--ink-soft);
-        font-size: 12px;
-        line-height: 1.55;
-      }
-
-      .tax-key b,
-      .tax-example b {
-        display: none;
-      }
-
-      .prompt-panel {
-        order: 4;
-        margin-top: 26px;
-        overflow: hidden;
-        border: 1px dashed var(--ink);
-        border-radius: 0;
-        background: #fff;
-      }
-
-      .taxonomy + .prompt-panel {
-        margin-top: 26px;
-      }
-
-      .prompt-panel[aria-label="会话分段提示词"] {
-        margin-top: 42px;
-      }
-
-      .prompt-panel summary {
-        min-height: 58px;
-        padding: 14px 16px;
-      }
-
-      .summary-title strong {
-        font-size: 15px;
-      }
-
-      .copy-button {
-        min-height: 32px;
-        border: 1px solid var(--red);
-        border-radius: 2px;
-        background: var(--red);
-        color: var(--bg);
-        padding: 6px 11px;
-        font-size: 12px;
-      }
-
-      .copy-button:hover {
-        background: #741414;
-      }
-
-      .prompt-code {
-        max-height: 520px;
-        border-top: 1px dashed var(--line-strong);
-        background: var(--surface-soft);
-        padding: 18px;
-        color: var(--ink);
-        font-size: 12px;
-        line-height: 1.75;
-      }
-
-      @media (max-width: 860px) {
-        main {
-          width: min(100% - 28px, var(--max));
-          padding-top: 28px;
-        }
-
-        h1 {
-          margin-bottom: 22px;
-          font-size: clamp(30px, 9vw, 42px);
-        }
-
-        .legend {
-          grid-template-columns: 1fr;
-        }
-
-        .legend-title {
-          padding: 10px 0 8px;
-        }
-
-        .badge {
-          grid-template-columns: 118px 1fr;
-          gap: 12px;
-          border-top: 1px dashed var(--line-strong);
-          border-left: 0;
-          padding: 10px 0;
-        }
-
-        .pipeline {
-          margin-top: 48px;
-        }
-
-        .step-layout {
-          grid-template-columns: 1fr;
-          gap: 24px;
-        }
-
-        .step-table-head,
-        .tax-table-head {
-          display: none;
-        }
-
-        .step-card {
-          display: grid;
-          grid-template-columns: 1fr;
-          padding: 16px 0;
-        }
-
-        .step-card > * {
-          padding: 4px 0;
-        }
-
-        .step-card-head {
-          margin-bottom: 5px;
-        }
-
-        .step-tags,
-        .step-rule {
-          display: grid;
-          grid-template-columns: 70px 1fr;
-          gap: 8px;
-        }
-
-        .step-tags::before,
-        .step-rule::before {
-          color: var(--muted);
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .step-tags::before {
-          content: "方式";
-        }
-
-        .step-rule::before {
-          content: "动作";
-        }
-
-        .tax-card {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 2px;
-          padding: 15px 0;
-        }
-
-        .tax-card > * {
-          padding: 2px 0;
-        }
-
-        .tax-head {
-          grid-template-columns: 34px 1fr;
-          align-items: baseline;
-        }
-
-        .tax-name {
-          font-size: 15px;
-        }
-
-        .tax-key b,
-        .tax-example b {
-          display: inline;
-          margin-right: 6px;
-        }
-
-        .prompt-panel summary {
-          display: grid;
-          gap: 10px;
-        }
-
-        .prompt-actions {
-          justify-content: start;
-        }
-      }
-
-      @media print {
-        body {
-          background: var(--surface);
-        }
-
-        main {
-          width: 100%;
-          padding: 0;
-        }
-
-        .flow-chart {
-          overflow: visible;
-        }
-
-        .flow-io,
-        .flow-main,
-        .flow-drops {
-          min-width: 0;
-        }
-
-        .copy-button,
-        .copy-status {
-          display: none;
-        }
-      }
+  gap: 0;
+  align-items: center;
+}
+.step-table-head {
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+}
+.step-table-head span {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.step-card {
+  grid-template-rows: none;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.step-card > * {
+  min-width: 0;
+  padding: 15px 12px;
+}
+.step-card-head {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.step-num {
+  display: block;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.step-name {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.step-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.stage-tag,
+.stage-tag.code,
+.stage-tag.llm {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 10px;
+}
+.stage-tag {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.stage-tag.code {
+  color: var(--muted);
+}
+.stage-tag.llm {
+  color: var(--red);
+}
+.step-rule {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.threshold {
+  display: inline;
+  border-radius: 2px;
+  background: var(--surface-soft);
+  padding: 2px 4px;
+  color: var(--ink);
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  white-space: normal;
+}
+.artifact-box {
+  border: 1px solid var(--ink);
+  background: #fff;
+}
+.artifact-box h3 {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ink);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.artifact-box ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.artifact-box li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 51px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.artifact-box li:last-child {
+  border-bottom: 0;
+}
+.artifact-box li > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.artifact-box code {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* —— 真实运行数据漏斗 —— */
+.funnel-note {
+  margin-top: 26px;
+  border: 1px dashed var(--line-strong);
+  padding: 14px 18px;
+}
+.funnel-note h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.funnel-steps {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.funnel-steps li {
+  position: relative;
+  padding: 6px 4px;
+  text-align: center;
+  border-right: 1px solid var(--line);
+}
+.funnel-steps li:last-child {
+  border-right: 0;
+}
+.funnel-steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-top: 1px solid var(--line-strong);
+  border-right: 1px solid var(--line-strong);
+  transform: translateY(-50%) rotate(45deg);
+}
+.funnel-steps b {
+  display: block;
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.funnel-steps span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.funnel-sub {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类） */
+.taxonomy {
+  order: 3;
+  margin-top: clamp(52px, 8vw, 88px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.taxonomy > h2 {
+  margin: 0;
+  padding: 0 0 10px;
+  border-bottom: 2px solid var(--ink);
+  font-size: 24px;
+  line-height: 1.2;
+}
+.tax-intro {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tax-intro code {
+  font-size: 12px;
+}
+.tax-subhead {
+  margin: 30px 0 12px;
+  font-size: 16px;
+}
+.tax-table-head,
+.tax-card {
+  display: grid;
+  grid-template-columns:
+    minmax(210px, 1.25fr)
+    minmax(110px, 0.75fr)
+    minmax(220px, 1.4fr)
+    minmax(300px, 2fr);
+  gap: 0;
+  align-items: stretch;
+}
+.tax-table-head {
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+}
+.tax-table-head span {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.tax-grid {
+  display: block;
+  margin: 0;
+}
+.tax-grid + .tax-subhead {
+  margin-top: 44px;
+}
+.tax-card {
+  grid-template-rows: none;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.tax-card > * {
+  min-width: 0;
+  padding: 14px 12px;
+}
+.tax-head {
+  display: grid;
+  min-height: 0;
+  align-content: center;
+  align-items: baseline;
+  gap: 2px;
+}
+.tax-id {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.tax-slug {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.tax-name {
+  align-content: center;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+.tax-key,
+.tax-example {
+  align-content: center;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tax-key b,
+.tax-example b {
+  display: none;
+}
+
+/* PROMPT — 提示词面板、复制按钮 */
+.prompt-panel {
+  order: 4;
+  margin-top: 26px;
+  overflow: hidden;
+  border: 1px dashed var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.taxonomy + .prompt-panel {
+  margin-top: 42px;
+}
+.prompt-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.prompt-panel summary::-webkit-details-marker {
+  display: none;
+}
+.summary-title strong {
+  display: block;
+  margin-bottom: 0;
+  font-size: 15px;
+}
+.summary-title code {
+  font-size: 12px;
+  font-weight: 600;
+}
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.copy-button {
+  min-height: 32px;
+  border: 1px solid var(--red);
+  border-radius: 2px;
+  background: var(--red);
+  color: var(--bg);
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.copy-button:hover {
+  background: #741414;
+}
+.copy-status {
+  min-width: 52px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.prompt-code {
+  margin: 0;
+  overflow: auto;
+  max-height: 520px;
+  border-top: 1px dashed var(--line-strong);
+  background: var(--surface-soft);
+  padding: 18px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* RESPONSIVE — 响应式（≤860px）与打印样式 */
+@media (max-width: 860px) {
+  main {
+    width: min(100% - 28px, var(--max));
+    padding-top: 28px;
+  }
+  h1 {
+    margin-bottom: 22px;
+    font-size: clamp(30px, 9vw, 42px);
+  }
+  .legend {
+    grid-template-columns: 1fr;
+  }
+  .legend-title {
+    padding: 10px 0 8px;
+  }
+  .badge {
+    grid-template-columns: 118px 1fr;
+    gap: 12px;
+    border-top: 1px dashed var(--line-strong);
+    border-left: 0;
+    padding: 10px 0;
+  }
+  .pipeline {
+    margin-top: 48px;
+  }
+  .flow-io,
+  .flow-main,
+  .flow-drops {
+    min-width: 1010px;
+  }
+  .step-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .step-table-head,
+  .tax-table-head {
+    display: none;
+  }
+  .step-card {
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 16px 0;
+  }
+  .step-card > * {
+    padding: 4px 0;
+  }
+  .step-card-head {
+    margin-bottom: 5px;
+  }
+  .step-tags,
+  .step-rule {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 8px;
+  }
+  .step-tags::before,
+  .step-rule::before {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .step-tags::before {
+    content: "方式";
+  }
+  .step-rule::before {
+    content: "动作";
+  }
+  .tax-card {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 15px 0;
+  }
+  .tax-card > * {
+    padding: 2px 0;
+  }
+  .tax-head {
+    grid-template-columns: 34px 1fr;
+    align-items: baseline;
+  }
+  .tax-name {
+    font-size: 15px;
+  }
+  .tax-key b,
+  .tax-example b {
+    display: inline;
+    margin-right: 6px;
+  }
+  .funnel-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .funnel-steps li {
+    border: 1px solid var(--line);
+    border-radius: 2px;
+  }
+  .funnel-steps li::after {
+    display: none;
+  }
+  .prompt-panel summary {
+    display: grid;
+    gap: 10px;
+  }
+  .prompt-actions {
+    justify-content: start;
+  }
+}
+@media print {
+  body {
+    background: var(--surface);
+  }
+  main {
+    width: 100%;
+    padding: 0;
+  }
+  .flow-chart {
+    overflow: visible;
+  }
+  .flow-io,
+  .flow-main,
+  .flow-drops {
+    min-width: 0;
+  }
+  .copy-button,
+  .copy-status {
+    display: none;
+  }
+}
     </style>
   </head>
-
   <body>
     <main>
-      <div class="topline">
-        <h1>复杂金融问句清洗 pipline</h1>
-        <div class="legend" aria-label="输出去向">
-          <span class="legend-title">输出去向</span>
-          <span class="badge reject"><b>rejected</b><span>规则拒绝或重复</span></span>
-          <span class="badge skip"><b>skipped</b><span>标注或解析失败</span></span>
-          <span class="badge non-complex"><b>non_complex</b><span>判定非复杂</span></span>
-          <span class="badge accept"><b>accepted</b><span>进入最终样本</span></span>
-        </div>
+<div class="topline">
+  <h1>复杂金融问句清洗与标注管线</h1>
+  <div class="legend" aria-label="输出去向">
+    <span class="legend-title">输出去向</span>
+    <span class="badge reject"><b>rejected</b><span>规则拒绝 / 复判不符 / 回答质量</span></span>
+    <span class="badge non-complex"><b>normal</b><span>判定非复杂 · 有价值普通问句</span></span>
+    <span class="badge failed"><b>failed</b><span>LLM 失败丢弃（fail-closed）</span></span>
+    <span class="badge accept"><b>accepted</b><span>进入最终样本</span></span>
+  </div>
+</div>
+
+<section class="pipeline" aria-label="清洗标注流程">
+  <h2>清洗与标注流程</h2>
+
+  <div class="flow-chart" role="img" aria-label="复杂金融问句清洗标注流程图">
+    <div class="flow-io">
+      <span><b>输入</b><code>aime/input.jsonl · iwencai/chat.jsonl</code></span>
+      <span><b>最终产物</b><code>cleaned_queries.jsonl（hard + normal）</code></span>
+    </div>
+    <ol class="flow-main">
+      <li class="flow-node code">
+        <span class="flow-index">preclean</span>
+        <strong>输入清洗</strong>
+        <small>格式嗅探 · 坏行 · 去重</small>
+      </li>
+      <li class="flow-node llm">
+        <span class="flow-index">segment</span>
+        <strong>会话分段</strong>
+        <small>LLM · 主题切 2–4 段</small>
+      </li>
+      <li class="flow-node code">
+        <span class="flow-index">rule_gate</span>
+        <strong>候选筛选</strong>
+        <small>规则 · 噪声拒绝 + 工具门槛</small>
+      </li>
+      <li class="flow-node llm">
+        <span class="flow-index">judge</span>
+        <strong>语义判定</strong>
+        <small>LLM · value→complexity→classify</small>
+      </li>
+      <li class="flow-node llm">
+        <span class="flow-index">verify</span>
+        <strong>独立复判</strong>
+        <small>LLM · hard 5 轮 / normal 2 轮</small>
+      </li>
+      <li class="flow-node code">
+        <span class="flow-index">answer_gate</span>
+        <strong>回答质量门</strong>
+        <small>规则 · 完成态 / 非拒绝 / ≥50 字</small>
+      </li>
+      <li class="flow-node both">
+        <span class="flow-index">post</span>
+        <strong>去重与翻译</strong>
+        <small>规则 + LLM · 模板合并 + 译简中</small>
+      </li>
+      <li class="flow-node accepted">
+        <span class="flow-index">✓</span>
+        <strong>进入样本</strong>
+        <small>accepted</small>
+      </li>
+    </ol>
+    <div class="flow-drops" aria-label="流程分支结果">
+      <span class="flow-branch branch-judge"><b>value_rejected</b> 无保留价值<br><b>failed</b> LLM 失败丢弃</span>
+      <span class="flow-branch branch-verify"><b>rejected</b> 复判与难度相悖</span>
+      <span class="flow-branch branch-answer"><b>rejected</b> 回答不完整 / 拒绝话术</span>
+      <span class="flow-branch branch-post"><b>rejected</b> 重复样本合并</span>
+    </div>
+  </div>
+
+  <div class="funnel-note" aria-label="真实运行数据示例">
+    <h3>一次真实运行的数据漏斗（aime/0806，500 会话）</h3>
+    <ol class="funnel-steps">
+      <li><b>500</b><span>输入会话</span></li>
+      <li><b>674</b><span>分段</span></li>
+      <li><b>568</b><span>候选</span></li>
+      <li><b>457</b><span>有价值</span></li>
+      <li><b>274</b><span>复判通过</span></li>
+      <li><b>260</b><span>质量门通过</span></li>
+      <li><b>239</b><span>去重后输出</span></li>
+    </ol>
+    <p class="funnel-sub">其中 complex 257 行（hard）+ normal 200 行（judge 产出）→ verify 通过 274 → answer_gate 拒绝 14 → dedup 合并 21 → 最终 239 行；翻译 195 条（中文占比 &lt; 30% 才译）。</p>
+  </div>
+
+  <div class="step-layout">
+    <div class="step-grid">
+      <div class="step-table-head" aria-hidden="true">
+        <span>步骤</span>
+        <span>方式</span>
+        <span>判定 / 动作</span>
       </div>
 
-      <section class="pipeline" aria-label="复杂问句清洗流程">
-        <h2>清洗流程</h2>
-
-        <div class="flow-chart" role="img" aria-label="复杂金融问句清洗流程图">
-          <div class="flow-io">
-            <span><b>输入</b><code>aime/input.jsonl</code></span>
-            <span><b>最终产物</b><code>complex_queries.jsonl</code></span>
-          </div>
-          <ol class="flow-main">
-            <li class="flow-node llm">
-              <span class="flow-index">step1</span>
-              <strong>会话分段</strong>
-              <small>segment · LLM</small>
-            </li>
-            <li class="flow-node code">
-              <span class="flow-index">step2</span>
-              <strong>候选筛选</strong>
-              <small>step1 · 规则</small>
-            </li>
-            <li class="flow-node llm">
-              <span class="flow-index">step3</span>
-              <strong>语义判定</strong>
-              <small>complex_judge · LLM</small>
-            </li>
-            <li class="flow-node code">
-              <span class="flow-index">step4</span>
-              <strong>组装输出</strong>
-              <small>assemble · 规则</small>
-            </li>
-            <li class="flow-node llm">
-              <span class="flow-index">step5</span>
-              <strong>独立复判</strong>
-              <small>verify_complex · LLM</small>
-            </li>
-            <li class="flow-node llm">
-              <span class="flow-index">step6</span>
-              <strong>去重与翻译</strong>
-              <small>post_stage · 规则 + LLM</small>
-            </li>
-            <li class="flow-node accepted">
-              <span class="flow-index">✓</span>
-              <strong>进入样本</strong>
-              <small>accepted</small>
-            </li>
-          </ol>
-          <div class="flow-drops" aria-label="流程分支结果">
-            <span class="flow-branch branch-step3"><b>non_complex</b> 判定非复杂<br><b>skipped</b> LLM 失败</span>
-            <span class="flow-branch branch-step5"><b>non_complex</b> 复判非复杂</span>
-            <span class="flow-branch branch-step6"><b>rejected</b> 重复样本</span>
-          </div>
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">preclean</span>
+          <span class="step-name">输入清洗</span>
         </div>
+        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
+        <div class="step-rule">格式自动嗅探（session / chat）；坏行落盘；trace 去重；空会话过滤；适配统一 Session</div>
+      </div>
 
-        <div class="step-layout">
-          <div class="step-grid">
-            <div class="step-table-head" aria-hidden="true">
-              <span>步骤</span>
-              <span>方式</span>
-              <span>判定 / 动作</span>
-            </div>
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step1</span>
-                <span class="step-name">会话分段</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-              <div class="step-rule">按主题切 <span class="threshold">2–4</span> 段；失败回退整段</div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step2</span>
-                <span class="step-name">候选筛选</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-              <div class="step-rule">噪声拒绝 + 三信号 AND：工具 <span class="threshold">≥7</span>、步骤 <span class="threshold">≥1</span>、工具种 <span class="threshold">≥2</span></div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step3</span>
-                <span class="step-name">语义判定</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-              <div class="step-rule">同段前文 + 当前问句 → <span class="threshold">{is_complex, category_id, reason}</span></div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step4</span>
-                <span class="step-name">组装输出行</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-              <div class="step-rule">context 带同段前文；difficulty 固定 <span class="threshold">hard</span>；category 写 <span class="threshold">id-slug</span></div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step5</span>
-                <span class="step-name">独立复判</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-              <div class="step-rule">单句无上下文复判；失败 fail-open 保留并计 verify_failed</div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-card-head">
-                <span class="step-num">step6</span>
-                <span class="step-name">去重与翻译</span>
-              </div>
-              <div class="step-tags"><span class="stage-tag code">规则 · code</span><span class="stage-tag llm">语义 · LLM</span></div>
-              <div class="step-rule">MinHash <span class="threshold">Jaccard ≥ 0.85</span> 去重 + LLM 译简中</div>
-            </div>
-          </div>
-
-          <aside class="artifact-box" aria-label="各步骤产物">
-            <h3>产物</h3>
-            <ol>
-              <li><span>step1</span><code>work/segments.jsonl</code></li>
-              <li><span>step2</span><code>work/candidates.jsonl</code></li>
-              <li><span>step3</span><code>accepted / non_complex / skipped</code></li>
-              <li><span>step4</span><code>filter_out.jsonc schema 行</code></li>
-              <li><span>step5</span><code>work/verified.jsonl</code></li>
-              <li><span>step6</span><code>outputs/complex_queries.jsonl · summary.json</code></li>
-            </ol>
-          </aside>
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">segment</span>
+          <span class="step-name">会话分段</span>
         </div>
+        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
+        <div class="step-rule">按主题切 <span class="threshold">2–4</span> 段；chat / 单句会话回退整段 <span class="threshold">whole_session</span></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">rule_gate</span>
+          <span class="step-name">候选筛选</span>
+        </div>
+        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
+        <div class="step-rule">噪声拒绝（模板残留 / 低价值 / 超长）+ 三信号 AND：工具调用 <span class="threshold">≥7</span>、步骤 <span class="threshold">≥1</span>、工具种 <span class="threshold">≥2</span></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">judge</span>
+          <span class="step-name">语义判定</span>
+        </div>
+        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
+        <div class="step-rule">漏斗三步：<span class="threshold">value_gate</span> 有无价值 → <span class="threshold">complexity_gate</span> 是否复杂 → <span class="threshold">classify</span> 归 9 类复杂 / 16 类普通；任一失败丢弃（fail-closed）</div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">verify</span>
+          <span class="step-name">独立复判</span>
+        </div>
+        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
+        <div class="step-rule">带前文指代复核；hard <span class="threshold">5 轮</span> / normal <span class="threshold">2 轮</span> 级联从严，任一轮与难度相悖即弃；LLM 失败丢弃（fail-closed）</div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">answer_gate</span>
+          <span class="step-name">回答质量门</span>
+        </div>
+        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
+        <div class="step-rule">结构信号 <span class="threshold">last_event_type=runFinished</span> + 内容信号：拒绝话术 / 截断标点 / 回答过短 <span class="threshold">&lt;50 字</span></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-num">post</span>
+          <span class="step-name">去重与翻译</span>
+        </div>
+        <div class="step-tags"><span class="stage-tag code">规则 · code</span><span class="stage-tag llm">语义 · LLM</span></div>
+        <div class="step-rule">同模板合并（非槽骨架一致）+ token-Jaccard <span class="threshold">≥ 0.80</span> 去重；中文占比 <span class="threshold">&lt;30%</span> 才 LLM 译简中，原文保留</div>
+      </div>
+    </div>
+
+    <aside class="artifact-box" aria-label="各步骤产物">
+      <h3>产物</h3>
+      <ol>
+        <li><span>preclean</span><code>logs/bad_lines.jsonl</code></li>
+        <li><span>segment</span><code>logs/segments.jsonl</code></li>
+        <li><span>rule_gate</span><code>logs/candidates.jsonl</code></li>
+        <li><span>judge</span><code>logs/judged.jsonl · llm_cache.jsonl</code></li>
+        <li><span>verify</span><code>logs/verified.jsonl</code></li>
+        <li><span>answer_gate</span><code>logs/answer_gate_rejected.jsonl</code></li>
+        <li><span>post</span><code>logs/deduped.jsonl</code></li>
+        <li><span>输出</span><code>cleaned_queries.jsonl · complex_queries.jsonl · normal_queries.jsonl · summary.json</code></li>
+      </ol>
+    </aside>
+  </div>
+</section>
+
+<section class="taxonomy" aria-label="双分类体系">
+  <h2>双分类体系</h2>
+  <p class="tax-intro">复杂问句（hard）归 <b>9 类</b>，输出 <code>complex-topic/{id}-{slug}</code>；非复杂但有价值的问句（normal）归 <b>16 类</b>，输出 <code>{id}-{slug}</code>。两套 id 各自从 01 起编，靠 difficulty + 前缀区分。分类数据源：<code>templates/categories.md</code>（清单）+ <code>complex_few_shot.md / normal_few_shot.md</code>（定义与示例），改分类只动模板不动代码。</p>
+
+  <h3 class="tax-subhead">复杂 9 类 · difficulty=hard</h3>
+  <div class="tax-table-head" aria-hidden="true">
+    <span>编号 / slug</span>
+    <span>分类</span>
+    <span>特征</span>
+    <span>代表问句</span>
+  </div>
+  <div class="tax-grid">
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">complex-topic/01-data-metrics-calculation</span></div>
+            <div class="tax-name">复杂取数计算</div>
+            <div class="tax-key"><b>特征</b>需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述，或多步骤数据处理。核心是「算」——不是简单查一个数，而是通过计算框架得出结果。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。</div>
+            <div class="tax-example"><b>代表</b>「回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满…」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">complex-topic/02-forecasting-and-projection</span></div>
+            <div class="tax-name">预测类</div>
+            <div class="tax-key"><b>特征</b>以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果。关键信号词：「预测」「目标价」「能涨到多少」「什么时候」「概率」「极端场景」「剧本」。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。</div>
+            <div class="tax-example"><b>代表</b>「中际旭创未来1年股价能涨到多少？」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">complex-topic/03-analysis-research</span></div>
+            <div class="tax-name">分析研究</div>
+            <div class="tax-key"><b>特征</b>以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判。关键信号词：「分析」「研究」「为什么」「影响」「框架」「产业」「政策」。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。</div>
+            <div class="tax-example"><b>代表</b>「美伊何时能达成停火协议，结合历史战争事件分析市场走势。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">complex-topic/04-opportunity-discovery</span></div>
+            <div class="tax-name">机会挖掘</div>
+            <div class="tax-key"><b>特征</b>以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：「找出」「挖掘」「龙头」「翻倍」「涨停」「机会」「热点」「哪只」。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。</div>
+            <div class="tax-example"><b>代表</b>「从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">complex-topic/05-asset-allocation</span></div>
+            <div class="tax-name">资产配置</div>
+            <div class="tax-key"><b>特征</b>以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：「配置」「组合」「仓位」「分配」「多少比例」「分散」「资产」「规划」。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。</div>
+            <div class="tax-example"><b>代表</b>「我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">complex-topic/06-investment-decision</span></div>
+            <div class="tax-name">账户诊断优化类</div>
+            <div class="tax-key"><b>特征</b>以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化。关键信号词：「持有」「持仓」「账户」「补仓」「减仓」「止损」「优化」「怎么处理」「帮我看看」。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。</div>
+            <div class="tax-example"><b>代表</b>「搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">complex-topic/07-strategy-evaluation</span></div>
+            <div class="tax-name">策略触发任务类</div>
+            <div class="tax-key"><b>特征</b>以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行。关键信号词：「如果……就」「当……时」「触发」「提醒」「alert」「条件」「规则」「异动」「监控」。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。</div>
+            <div class="tax-example"><b>代表</b>「这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">complex-topic/08-goal-execution</span></div>
+            <div class="tax-name">目标跟踪执行</div>
+            <div class="tax-key"><b>特征</b>以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认。关键信号词：「长期」「年化」「跟踪」「持续」「动态」「季度」「定期」「目标收益」。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。</div>
+            <div class="tax-example"><b>代表</b>「—」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">complex-topic/09-action-output</span></div>
+            <div class="tax-name">动作类</div>
+            <div class="tax-key"><b>特征</b>以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等。关键信号词：「PPT」「Excel」「邮件」「dashboard」「报告」「导出」「生成」「建一个」「发」「写一个」。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。</div>
+            <div class="tax-example"><b>代表</b>「—」</div>
+          </div>
+  </div>
+
+  <h3 class="tax-subhead">普通 16 类 · difficulty=normal</h3>
+  <div class="tax-table-head" aria-hidden="true">
+    <span>编号 / slug</span>
+    <span>分类</span>
+    <span>定义</span>
+    <span>输出</span>
+  </div>
+  <div class="tax-grid">
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">01-event-and-concept-stock-selection</span></div>
+            <div class="tax-name">事件与概念选股</div>
+            <div class="tax-key"><b>定义</b>事件、政策、概念、主题或产业链驱动的选股、标的映射、受益排序和梯队划分任务。核心是从外部事件/主题出发，判断哪些股票或产业链环节受益。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">02-backtesting-data-extraction-and-calculation</span></div>
+            <div class="tax-name">回测取数计算</div>
+            <div class="tax-key"><b>定义</b>历史数据提取、指标计算、样本统计、概率估算或策略/事件表现回测任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">03-stock-diagnosis-and-data-lookup</span></div>
+            <div class="tax-name">诊股查数</div>
+            <div class="tax-key"><b>定义</b>个股、板块、市场、宏观金融数据的查询、提取、对比分析或轻量诊断任务。核心是查明数据、事实、指标、行情或局部诊断结论。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">04-analysis-evaluation-and-self-judgment</span></div>
+            <div class="tax-name">分析评价与自我判断</div>
+            <div class="tax-key"><b>定义</b>围绕股票、基金、ETF、指数、板块、宏观资产或投资观点，对某个聚焦问题进行分析评价、原因判断、价值判断、方法匹配或投资逻辑评估的任务。核心通常是回答一个明确的分析问题，不要求建立股票短期与长期、多视角的完整综合分析框架。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">05-kyc-recommendation-suggestions</span></div>
+            <div class="tax-name">KYC推荐建议</div>
+            <div class="tax-key"><b>定义</b>需要结合用户目标、风险、资金、持仓、投资期限或真实处境的投资推荐、配置建议和交易决策支持。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">06-compound-intent</span></div>
+            <div class="tax-name">复合意图</div>
+            <div class="tax-key"><b>定义</b>一句 query 中包含多个强子任务、跨多类信息源或需要复杂投研闭环的复合意图任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">07-interactive-clarification</span></div>
+            <div class="tax-name">交互澄清</div>
+            <div class="tax-key"><b>定义</b>金融投资对话中的交互澄清、多轮承接、规则/前提纠错、实体识别和模糊口径定义任务。用户问题往往不能被直接可靠回答，需要先识别缺失变量、错误前提、真实标的或应采用的金融口径，再给出分层方案或后续引导。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">08-information-and-knowledge-qa</span></div>
+            <div class="tax-name">资讯知识问答</div>
+            <div class="tax-key"><b>定义</b>金融资讯、政策、监管动态、产业事件、公司进展、市场异动、传闻、调研纪要和金融知识的直接解释、查询、比较或判断任务。答案重点是事实时效、证据质量、信息整合、影响链条和可信表达。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">09-financial-performance-interpretation</span></div>
+            <div class="tax-name">财报业绩解读</div>
+            <div class="tax-key"><b>定义</b>财报、业绩公告、经营指标、会计口径或财务影响的解释、归因和持续性判断。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">10</span><span class="tax-slug">10-financial-common-sense-and-semantic-understanding</span></div>
+            <div class="tax-name">金融常识与语义理解</div>
+            <div class="tax-key"><b>定义</b>金融常识、金融语义、指标口径、交易规则、实体识别、错别字/黑话纠错和用户真实意图补全类问题。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">11</span><span class="tax-slug">11-instruction-following-ability</span></div>
+            <div class="tax-name">指令跟随能力</div>
+            <div class="tax-key"><b>定义</b>用户给出明确任务、问题类型、对象范围、排除条件、输出焦点或格式约束，答案成败主要取决于是否严格遵守。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">12</span><span class="tax-slug">12-financial-logical-reasoning</span></div>
+            <div class="tax-name">金融逻辑推理</div>
+            <div class="tax-key"><b>定义</b>投资判断、走势预测、个股选择、强势股筛选、板块内比较和风险情景推演类金融推理任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">13</span><span class="tax-slug">13-time-awareness-ability</span></div>
+            <div class="tax-name">时间感知能力</div>
+            <div class="tax-key"><b>定义</b>答案正确性高度依赖相对日期、周几、交易日历、市场休市、披露期、历史区间、未来日期、最新数据口径或 过期数据 纠错的任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">14</span><span class="tax-slug">14-complex-stock-selection</span></div>
+            <div class="tax-name">复杂选股</div>
+            <div class="tax-key"><b>定义</b>多条件、多阶段、跨口径或带排序/字段/排除条件的股票筛选任务。核心是完整理解筛选条件、金融口径和先后依赖，产出符合要求的候选股票池或排序结果。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">15</span><span class="tax-slug">15-stock-comprehensive-analysis-and-selection</span></div>
+            <div class="tax-name">股票综合分析与选股决策</div>
+            <div class="tax-key"><b>定义</b>围绕个股、多标的组合或市场进行多维综合分析，并形成投资判断、趋势判断、强弱判断、买卖/持有建议、风险边界或操作策略的任务。核心是整合基本面、技术面、资金面、消息面和风险，给出可解释的决策结论。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">16</span><span class="tax-slug">16-macro-information-qa</span></div>
+            <div class="tax-name">宏观信息问答</div>
+            <div class="tax-key"><b>定义</b>查询、整理或比较人口、卫生、教育、贫困、就业及其他宏观或社会经济统计指标的任务。核心是按指定国家、地区、城市、年份、指标定义和统计口径给出权威、可追溯的数值，并妥善处理缺失、估算、修订和跨对象可比性。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+  </div>
+</section>
+
+      <section class="prompt-panel" aria-label="分类提示词组装说明">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>分类提示词 <code>classify_complex / classify_normal</code> · 动态组装</strong>
+            </span>
+            <span class="prompt-actions">
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">两个分类提示词不写死在代码里，构建时由模板动态组装（src/query_pipeline/prompts/assemble.py）：
+
+头部固定规则：
+你是一个金融问句分类器。给定一个**已判定为复杂金融问句**的问句（附前文问题列表，仅用于消解指代），从下列 9 类中选择**唯一**类别。
+- 只按问句意图归类，不按关键词机械匹配。
+- 若多个类别都沾边，选择最决定答案正确性的那一类。
+- 只输出严格 JSON，不要 Markdown：{"category_id": "01", "reason": "中文短句，说明归类理由"}
+- category_id 必须是下列 9 类之一。
+
+（normal 版头部同上，16 类；category_id 必须是下列 16 类之一）
+
+类别正文 = templates/categories.md（9 类清单）
+          + templates/complex_few_shot.md（每类特征 + 示例，最多 1000 条）
+          + templates/normal_few_shot.md（每类定义/适用场景/排除场景/边界规则/易混类别）
+
+改分类体系 = 改 templates/ 下的 md 文件，代码与提示词无需改动。</pre>
+        </details>
       </section>
 
       <section class="prompt-panel" aria-label="会话分段提示词">
         <details>
           <summary>
             <span class="summary-title">
-              <strong>会话分段提示词</strong>
+              <strong>会话分段提示词 <code>segment</code> · LLM</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
@@ -1518,255 +1247,64 @@ JSON 格式：
         </details>
       </section>
 
-      <section class="taxonomy" aria-label="9 类分类体系">
-        <h2>9 类分类体系</h2>
-        <div class="tax-table-head" aria-hidden="true">
-          <span>编号 / slug</span>
-          <span>分类</span>
-          <span>触发信号</span>
-          <span>代表问句</span>
-        </div>
-        <div class="tax-grid">
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">data-metrics-calculation</span></div>
-            <div class="tax-name">复杂取数计算</div>
-            <div class="tax-key"><b>触发词</b>回测、统计、筛选、量化、特征工程、阈值组合</div>
-            <div class="tax-example"><b>代表</b>「回测 5 周均线择时策略，比较其与沪深300超额收益」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">forecasting-and-projection</span></div>
-            <div class="tax-name">预测类</div>
-            <div class="tax-key"><b>触发词</b>预测、目标价、能涨到多少、概率、剧本、情景</div>
-            <div class="tax-example"><b>代表</b>「中际旭创未来 1 年股价能涨到多少？」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">analysis-research</span></div>
-            <div class="tax-name">分析研究</div>
-            <div class="tax-key"><b>触发词</b>分析、研究、为什么、影响、框架、产业、政策</div>
-            <div class="tax-example"><b>代表</b>「拆解机器人赛道上下游产业链并做投资价值分析」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">opportunity-discovery</span></div>
-            <div class="tax-name">机会挖掘</div>
-            <div class="tax-key"><b>触发词</b>找出、挖掘、龙头、翻倍、涨停、热点、哪只</div>
-            <div class="tax-example"><b>代表</b>「从热点中找出未来 1-3 月可能翻倍的标的，说明逻辑」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">asset-allocation</span></div>
-            <div class="tax-name">资产配置</div>
-            <div class="tax-key"><b>触发词</b>配置、组合、仓位、分散、资产、规划、比例</div>
-            <div class="tax-example"><b>代表</b>「100 万资金跨 A 股、港股、大宗商品 ETF 均衡布局」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">investment-decision</span></div>
-            <div class="tax-name">账户诊断优化类</div>
-            <div class="tax-key"><b>触发词</b>持有、持仓、买入、卖出、止损、补仓、减仓、选哪个</div>
-            <div class="tax-example"><b>代表</b>「满仓情况下调整个股仓位，给出买卖价位与数量」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">strategy-evaluation</span></div>
-            <div class="tax-name">策略触发任务类</div>
-            <div class="tax-key"><b>触发词</b>过拟合、归因、稳健、复现、回撤、实盘、能不能用</div>
-            <div class="tax-example"><b>代表</b>「审计一个多因子策略，检查过拟合、收益归因与实盘可用性」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">goal-execution</span></div>
-            <div class="tax-name">目标跟踪执行</div>
-            <div class="tax-key"><b>触发词</b>年化、跟踪、持续、动态、季度、复盘、确认</div>
-            <div class="tax-example"><b>代表</b>「目标年化 20%，每天根据市场数据动态调整持仓并确认」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">action-output</span></div>
-            <div class="tax-name">动作类</div>
-            <div class="tax-key"><b>触发词</b>提醒、alert、监控、PPT、Excel、邮件、dashboard、生成</div>
-            <div class="tax-example"><b>代表</b>「把分析结果转成 PPT 并发邮件；股票站上均线时提醒我」</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="prompt-panel" aria-label="复杂判定提示词">
+      <section class="prompt-panel" aria-label="价值门提示词">
         <details>
           <summary>
             <span class="summary-title">
-              <strong>复杂判定提示词</strong>
+              <strong>价值门提示词 <code>value_gate</code> · LLM</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
               <span class="copy-status" aria-live="polite"></span>
             </span>
           </summary>
-          <pre class="prompt-code">你是一个金融 AI 评测问句标注专家。给定一段会话中、目标问句之前的所有用户问句（同一主题的上下文），以及目标问句本身，判断该目标问句是否是一个“复杂金融问句”；若是，则归入唯一类别。
+          <pre class="prompt-code">你是一个金融问答数据的价值判官。给定一段会话中、目标问句之前的所有用户问句（前文，可能为空），以及目标问句本身，判断该问句**是否有保留价值**。
 
-复杂金融问句定义：
-- 有明确金融资产、行业、主题、市场、账户、组合、策略或投资目标。
-- 包含时间范围、指标阈值、比较对象、策略条件、收益目标、仓位要求、风险控制等。
-- 需要多步骤分析、计算、筛选、回测、组合构建、交易计划、框架化判断、归因解释、预测、比较、决策或执行。
-- 不是单纯查一个行情、日期、公司字段、代码、名称或事实。
-- 不是闲聊、纠错、无实质任务、非金融问题，或明显低价值模板。
-- 简单诊股查数和取数计算不应判为复杂问句（指仅通过联网查数即可回答的问句）。
-- 字数很短且缺少额外条件或分析要求的“能不能买”“会涨吗”“目标价多少”通常不应判为复杂问句。
+判为无价值（is_valuable=false）的情形：
+- 纯闲聊、寒暄、情绪表达、与金融无关的话题（天气、新闻闲聊、无关个人话题等）。
+- 无任务输出：纯陈述/状态播报/数据转述/计划告知（只汇报行情、持仓、价格、涨跌、已做的交易或接下来的安排，不含任何任务），抱怨/质疑/复盘纠偏，纯确认（&quot;好的&quot;&quot;可以&quot;&quot;继续&quot;）。
+- 非金融问题：与证券投研、投资决策、金融产品、上市公司、市场分析无关。
+- 依赖不可见上下文才能成立：主体、任务或关键约束必须靠前文（或前文之外看不到的历史）补全，句内无法自解释；纯承接性短指令（&quot;继续&quot;&quot;再看看&quot;&quot;那这几只呢&quot;）。
 
-不是复杂问句（以下类型无论出现在多复杂的会话中、上下文多丰富，一律判为不复杂）：
-- 纯陈述 / 状态播报 / 数据转述 / 计划告知：只汇报行情、持仓、价格、涨跌、已做的交易，或告知接下来的安排，不含任务（“价格现在是 18.73”“今天跌了 1.4%”“我把 X 卖了”“我打算明天买 X / 卖 Y”“财报出了，跌到 79 现在回到 82”）——即使提到具体标的，也只是告知信息。
-- 抱怨 / 质疑 / 复盘纠偏：只表达对前文回答的不满或纠正，不提出新任务（“你怎么没提醒我”“你老是变卦”“你的计算我不喜欢”）。
-- 承接性短指令 / 确认：单独不构成任务（“再来点”“继续”“看看 X”“可以吗”）。
-- 短预测 / 短决策 / 短评价：只含一个标的 + 泛化动作词，没有时间窗、指标、比较维度或分析要求（“X 会涨吗”“X 能到 ATH 吗”“X 该不该买”“X 怎么样”）→ 不复杂。
-- 纯动作 / 交付指令：只要求发送、跟踪、提醒、导出，无分析要求（“Deliver morning scan”“加 50 美元”）。
-
-9 个主类别（id 与中文名固定）：
-01 复杂取数计算：需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述或多步骤数据处理，核心是「算」——通过计算框架得出可核验、可复算的数值、统计表、回测表现或条件筛选名单。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。仅按显式条件过滤/匹配/排序并输出名单、不含计算/统计/回测或多步处理 → 不复杂。
-02 预测类：以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果，核心是「未来会怎样」。关键信号词：预测、目标价、能涨到多少、什么时候、概率、极端场景、剧本。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。
-03 分析研究：以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判，通过证据整合、行业公司理解和多维框架形成收敛结论。关键信号词：分析、研究、为什么、影响、框架、产业、政策。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。对既有策略、规则或回测的审计与评价（过拟合、收益归因、稳健性、实盘可用性、改进建议）也归 03。研究里出现投资判断不自动归 06。
-04 机会挖掘：以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：找出、挖掘、龙头、翻倍、涨停、机会、热点、哪只。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。必须有事件/催化/预期差/时效驱动；无事件/催化/时效的纯条件选股归 01；仅按显式条件过滤且无分析要求 → 不复杂。
-05 资产配置：以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：配置、组合、仓位、分配、多少比例、分散、资产、规划。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。只构建通用比例框架归 05；落到具体标的取舍归 06。
-06 账户诊断优化类：以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化，核心是「这笔/这些具体该怎么做」。关键信号词：持有、持仓、账户、补仓、减仓、止损、优化、怎么处理、帮我看看。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。仅在给定条件下列候选清单、筛选/比较股票、找机会，或比较策略优劣本身，不归 06。
-07 策略触发任务类：以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行，核心是「设置一个提醒/触发/监控」。关键信号词：如果……就、当……时、触发、提醒、alert、条件、规则、异动、监控。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。只设提醒/触发/监控归 07；把结果做成报告/邮件等交付物归 09；围绕长期目标的多轮管理归 08。
-08 目标跟踪执行：以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认，核心是「长期帮我盯着并迭代」。关键信号词：长期、年化、跟踪、持续、动态、季度、定期、目标收益。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。
-09 动作类：以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等，核心是「把结果做成某种形式/发出去」。关键信号词：PPT、Excel、邮件、dashboard、报告、导出、生成、建一个、发、写一个。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。单一提醒/触发器归 07；围绕长期目标的多轮管理归 08。
-
-类别判定优先级（从高到低依次判断，只取最匹配的一个）：
-有回测、量化筛选、多指标条件计算、统计规律挖掘、技术指标条件筛选 → 优先 01。
-主要问未来走势、目标价、概率、剧本、业绩或事件后表现 → 优先 02。
-主要解释原因、政策、产业、基本面、风险、宏观或资金面，或审计/评价既有策略、规则、回测方案（过拟合、收益归因、稳健性、实盘可用性） → 归 03。
-主要找机会、龙头、受益标的、热点、翻倍股 → 优先 04。
-主要做跨资产/跨产品的组合比例或分散化配置，且不要求在具体候选中作取舍 → 优先 05。
-围绕已有持仓或明确候选做买/卖/持/加/减的具体取舍决策 → 优先 06；仅按条件筛选、列候选清单、找机会或比较策略本身 → 不归 06（分别归 01/04/03）。
-设定触发条件、提醒、监控或规则（如果……就、当……时、触发、alert、异动、盯盘） → 优先 07。
-有长期目标、持续跟踪、动态调整、阶段复盘或通知确认等多轮闭环 → 优先 08。
-主要交付报告、PPT、Excel、邮件、dashboard、文件、导出或生成等交付物 → 优先 09。
-
-每类典型示例（判定时参照；措辞与示例不完全匹配不影响判定，按意图归类）：
-01 复杂取数计算：
-- 「回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满90日，买入规则为向上突破5周均线次日开盘价买入，卖出规则为向下突破或跌幅≥15%止损，交易成本含佣金0.03%+印花税0.05%+滑点0.1%，基准为沪深300全收益指数。」
-- 「我目前状态为空仓，可用资金114.3万，交易风格偏向短线高弹性博弈。在今天市场4400家普跌环境下已全仓清仓，核心目标是通过一到两笔交易获取约5%的确定性利润。请帮我筛选明天值得关注的股票池，条件：仅限创业板或科创板（20%弹性），流通市值30亿到150亿，今日跌幅&lt;2%或收红或有长下影线，股价站稳5日和10日均线，近3日上涨放量且今日缩量。输出前5只并附核心热门概念和今日换手率。」
-- 「请帮我筛选全市场A股ETF，排除货币ETF、债券ETF、黄金/贵金属/商品ETF、QDII/跨境ETF、杠杆/反向ETF。输出字段：代码、名称、近5日/20日/60日涨跌幅、今日涨跌幅。同时输出沪深300对应数据。按近5日涨跌幅从高到低排序，取前50名。」
-- 「港口航运，物流，运输板块内，目前票价&gt;4月21日票价且期间某一日涨幅≥5%，5月8日票价&gt;4月21日票价，5月10日-5月13日之间其中某一日票价处于4月22日到5月8日票价之间，满足条件的60及00开头非st股票，按4月21日到5月13日区间涨幅排序，展示完整名单。」
-- 「帮我统计，沪深主板所有股票第一天涨停，第二天收小阳十字星，并且成交量比第一天成交量要放大不低于二倍，第三天涨跌情况。」
-- 「股票每次发出减持公告后，第二天股价的表现。从历史统计看下。」
-- 「周K线图中：经长时间粘合后，5均线、20均线、60均线呈多头排列且向上发散的股票有哪些。」
-- 「2026年6月1日行业指数涨停家数前三的板块中，非ST且非300和301开头，主力资金净流入大于0，换手率大于1.2%，量比大于1.2%，5日资金净流入大于0的股票。」
-- 「选出在AI行业未来10年关键卡脖子和关键环节有高毛利的龙头企业且目前市值200亿以内的股票且在产业链顶端，独占行业50%以上核心利润的企业。」
-- 「validate the BAR columns and suggest at what value and BAR the trend changes from entry.」
-02 预测类：
-- 「中际旭创未来1年股价能涨到多少？」
-- 「159851走势分析，未来走势预测，什么时候突破前高。」
-- 「洛阳钼业现在处于磨底期，大概多久，磨底期结束以后，进入上升区间离主升浪需要多久。」
-- 「针对日本两家六氟化钨企业断供原因，全球市场需求缺口，分析中船特气估值大概未来几年到什么估值。」
-- 「根据胜宏科技、长电科技的基本面，技术面以及大盘情况，外围情况等全方位信息，预测这两个票一个月内走势。」
-- 「华电能源最近的处境和5.14以来的连日阴跌有什么异同，它会复刻后面连板的行情吗，几率多大，有什么条件。」
-- 「把山东墨龙接下来1-3天的&quot;强弱分界线（关键价位）+三种明日剧本（强/弱/震荡）&quot;也列出来。」
-- 「结合白云山的历史价格走势，预测一下未来白云山的价格走势。需要考虑所属板块影响、机构资金的情绪、公司基本经营情况、公司产品。」
-- 「根据江顺科技今天股价波动，资金流入流出，近期新闻等情况，分析并推演明天的股价波动趋势，并判断概率分布。」
-- 「综合筹码峰、量价关系、K线形态、技术面，通过日线周线月线分析，拓斯达、三峡新材、雷曼光电，短期和中期内上涨概率百分比。」
-- 「现在我们来极端预测条件，如果由于技术发展，锂电池被其他如钠电、锂电池回收等技术取代，锂矿需求直接没有了，对盐湖股份的影响有多大？」
-- 「帮我分析下这只海格通信股票可能出现的5种暴跌场景，每种都要说清楚触发条件、历史类似案例、发生概率多大。」
-- 「光线传媒自从年初大涨后，已经连续跌，目前应该很低了吧，帮我结合股票分析以及接下来他暑期宣发的影片，做一个后期走势分析。」
-- 「投资周期半年，国际复材、国瓷材料、中国巨石，哪个实现收益率百分之五十的概率更大。」
-- 「合锻智能股价今天创了新高，未来股价最可能涨到什么位置？请结合类似行情股票合理推测，并给出所有可能性和概率，触发条件。」
-03 分析研究：
-- 「美伊何时能达成停火协议，结合历史战争事件分析市场走势。」
-- 「我是一名专门研究龙头的操盘手，依照游资&quot;92科比&quot;的情绪周期所有理论细节，精准分析出现在市场赚钱效应方向，当前市场最适合（龙头、补涨、切换、空仓）中哪个方向。需选出总龙头（启动价&lt;10元、股性极佳、资金合力强、换手5%-15%、人气排名前10）、补涨龙（关联度最高、价格&lt;10元、市值&lt;200亿、底部涨幅&lt;50%等7大标准）、切换方向（旧题材退潮+新超级题材出现）、中军标的（市值&gt;500亿、日成交&gt;50亿、机构持仓&gt;30%）。」
-- 「当前影响市场的主要潜在风险有哪些？请从宏观、政策、行业等角度，分析这些风险对共封装光学(CPO)短期和中期可能造成的冲击。」
-- 「那现在电子布、树脂、覆铜板涨价，PCB中游什么时候能开始股价上涨？需要在这些上游元件之后吗？具体几月份什么日期，届时他们股价会大涨吗？比如沪电、胜宏等，专业分析并解释。最后生益科技除了覆铜板它还能做PCB电路板吗？能两个方向盘通吃吗？」
-- 「你现在是金融领域的顶级专家，请总结分析截至此刻24小时内A股市场、海外市场发生了什么大事，列明100条影响股市最核心的最新消息，覆盖A股＋海外宏观＋行业新闻＋龙虎榜/资金面。从当前主线行业筛选符合&quot;底部放量（近60日低点附近，量比＞1.5，当日成交额&gt;20日均成交额）+龙头股&quot;特征的10支股票进行量化评分，给出短线/中线/长线精准推荐，浓缩成一页极简交易决策清单。每结论标注依据，存疑时声明&quot;无法可靠结论&quot;。」
-- 「请联网筛选未来30-90天最可能被A股提前交易的&quot;预期差+景气突变+右侧早期启动/拐点确认&quot;机会。需先建立候选池全集再逐层剔除，覆盖近3日强势板块/涨停扩散/真实催化/涨价/供需缺口/政策/订单方向，按市场环境评分、预期差类型、产业链受益层级、赔率、反方证伪等框架输出正式确认池/启动候选池/预启动观察池/事件驱动池/强趋势观察/风向标的分层结果，需标注首次启动时间、量价阶段、关键价位、催化日历和反方3问。」
-- 「第一步：逆向拆解瓶颈——以产业专家视角拆解航空航天（大飞机/商业航天/低空装备）BOM物料清单，锁定扩产周期长、技术壁垒高的物理级产业链瓶颈环节。第二步：锁定非对称标的——筛选市值5亿~50亿机构覆盖少的中小盘隐形冠军。第三步：穿透财务拐点——核查近两季度毛利率拐点和CapEx扩产匹配。第四步：AI红队证伪——从技术替代、下游自研、供应链断裂三个维度穷尽暴雷风险。第五步：制定止损熔断机制——制作6个月关键里程碑清单。」
-- 「机器人赛道的上中下游+产业延伸链，制成A股市场股票投资计划详细深度分析研报。需评估并标记出S级/首选级/次选级，制作三个级别股票总清单（含序列号、名称、代码、主营产品和技术优势、核心逻辑），S级需单独深度研究，各细分产业链关键环节不许遗漏任何达到评估标准的上市公司。」
-- 「审计一个多因子策略，检查过拟合、数据泄露、收益归因和实盘可用性，并给出改进建议。」
-- 「解释某策略近期失效的原因并修复。」
-04 机会挖掘：
-- 「从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。」
-- 「昨天为什么光伏电池企业尾盘突然出现涨停潮，谁先启动的？谁先涨停的？哪个票会有持续性？」
-- 「帮我推导一下目前科技板块的炒作路径会是怎样的，推导出明天和下周最有交易价值的产业链个股。」
-- 「高志凯预言说26年底到27年初会有一波金融危机，如果从这个视角去布局板块和个股。」
-- 「从今年到现在，有哪些产品一直在涨价，涨价的底层原因是什么？根据产品上涨幅度和后续上涨空间列出关联概念股，并列出核心涨价龙头股。」
-- 「2026年是厄尔尼诺大年，这个夏天次生灾害应该会非常多，这个对后续股票市场有什么影响，哪些相关联的股票会有上涨预期，底层逻辑是什么？」
-- 「结合今日市场盘面情况，整理出5条从盘后开始到现在最重要的国内外资讯，定义出他们对明日A股市场重要度及原因，列出每条消息紧密相关的核心标的。」
-- 「今天首板的主板个股，不是受二连板以上个股带动，依靠独立逻辑涨停的有哪几个？涨停逻辑是什么。」
-- 「板块方向上这两天AI产业链的上游细分材料比较强，铜粉，靶材等，以及涨价方向的六氟化钨，大硅片，MLCC等。」
-- 「结合近期热炒的AI产业链的上游细分材料，以及涨价方向的六氟化钨、大硅片、MLCC，找出未来中报预增披露期间最受益的核心个股，并给出解释。」
-- 「检索人形机器人领域的所有研报分析以及市场评价和筹码形态，给出合适标的的投资建议。」
-- 「分析一下近5年妖股的特征，选取当前符合条件的股票。」
-- 「多晶硅去年7月到12月涨价时哪些个股跟的最多，最近多晶硅一看多商品期权合约大涨74%，资金会继续跟着炒作哪些股票？」
-05 资产配置：
-- 「我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。」
-- 「100万资金跨市场配置，A股、港股、大宗商品相关ETF如何均衡布局？」
-- 「有资金35万，二季度配置点啥ETF和股票标的组合年化收益8%。」
-- 「目前25岁单身，收入稳定无家庭负担，有闲置资金20万，想高效做财富快速积累，应该怎么制定投资策略。」
-- 「你好，我想做一个资产配置，但我对风险很敏感，属于保守型投资者。我特别说明：坚决不投股票和股票型基金，只接受债券、货币基金这类低风险产品。」
-- 「我有50万闲置资金想配置，但我风险承受能力比较低，不想碰高风险产品。另外我之前买过货币基金，收益太低不想考虑这类产品。我每月还有5千房贷要还，流动性需要考虑。你能帮我规划吗？」
-- 「我目前资产一千五，风险偏好保守偏稳健，投资期限一周，希望兼顾增长与安全，请帮我拆解预期收益5%-6%的目标，并给出A股资产配置的类别比例（如股票、债券、现金的具体占比）。」
-- 「我目前资产100w，风险偏好保守偏稳健，投资期限3年，希望兼顾增长与安全，请帮我拆解预期年化收益5%-6%的目标，并给出在湖南板块资产配置的类别比例（如股票、现金的具体占比），其中需要包括金杯电工、科力远、方盛制药的资产配置策略。」
-- 「我每月固定能结余3000元左右，想同时实现强制储蓄+稳健定投理财，兼顾安全性和小幅增值，适合配置哪些低中风险理财品种、怎么分配比例最合适？」
-- 「我这种45岁左右的中年二孩家庭，闲置资金600万左右，有房贷教育双重支出压力，需要资产保值+抗通胀，平衡攻守属性，如何做资产配置？」
-- 「我计划3-5年中长期财富积累，结合分批投入模式，请帮我制定大类资产投资方案。」
-- 「假设接下来国内财政刺激加码、基建和地产政策边际放松，我该优先看上游资源、工程机械、建材，还是先看券商和银行？请结合过去几轮稳增长周期中各板块启动顺序、弹性、持续性和回撤特征来判断。」
-06 账户诊断优化类：
-- 「搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。」
-- 「今天是2026年5月3日周日，我是一个资深的量化基金管理人，也是股票分析师。我想重新配置我的股票账户的仓位，截止到2026年5月3日，我的账户总资产3万元，其中：ST双成持仓400股市值3432元，中国黄金持仓100股市值894元，黄金ETF持仓100股市值967元，航天ETF持仓9500股市值10460元，芯片ETF持仓10000股市值9830元，我想在2026年5月6日至2026年5月30日内目标有15%以上的盈利。请给我建仓步骤的建议，包括买入或卖出的价位和量。」
-- 「我的持仓全是科技类ETF，仓位偏高波动大，如何降低回撤、优化资产结构？」
-- 「手里持有3只个股宁德时代、中际旭创和紫金矿业；2只行业ETF煤炭etf和通信etf，总仓位8成，要不要降仓加配债券基金和现金？」
-- 「上周1398元买的1手（100股）贵州茅台，占近16%仓位，现在五粮液的原因白酒板块节后开盘会大回调，我应该如何操作。」
-- 「截止至2026年4月30日收盘价，近期资金面，消息面等各方面综合比较东信和平、新国都、千红制药、创源股份、姚记科技、视觉中国，哪些票适合补仓，补仓价是多少。」
-- 「华工科技、光迅科技、生益科技、东山精密，长线持有，如何组合建仓。给出建议。」
-- 「手中的胜宏科技、江波龙、天新怎么处理比较合理。」
-- 「我持有中国卫星和四维图新，一涨一跌，目前满仓，如何调整个股仓位。」
-- 「江苏银行、宁波银行、杭州银行、青岛银行为主仓位，以唐山港、佐力药业、159201为辅仓位。这个组合行吗？」
-- 「我持有中天科技、拓维信息、长电科技、鸣志电器、航发动力、小商品城、宁波高发、深科技、昆仑万维、中科创达、云天化、农发种业、天齐锂业、金辰股份这些股票，帮我看是否合理，给仓位和风控建议，以及如何组合优化。」
-- 「50万资金，目前持有有色7.5万，沪深300ETF2万，药明康德4万，剩余资金如何配置，如何建仓。」
-- 「给ETHUSDT推荐入场价、分批买入计划和仓位大小。」
-07 策略触发任务类：
-- 「这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。」
-- 「帮我选几只最具有潜力能股价翻倍的票，我放入自选股，等股价下跌时候进入，我设置一个下跌到价位提醒。」
-- 「好的到时候美的集团快分红提醒我。」
-- 「那等中兴通讯适合加仓的时候你能主动提醒我吗。」
-- 「山子高科出现第三次大宗交易提醒我。」
-- 「工业富联，话说你能不能给我实时观察这个票，出现异动时提醒我。」
-- 「双欣材料退市前一天停牌，可以提醒我吗。」
-- 「在自选股今天盘中出现分时走势二次冲高回落后确认的买入点提醒我。」
-- 「中国电建收盘站上5.50元且近3日主力资金连续净流入且MACD翻红时提醒我。」
-- 「MACD在0轴上方金叉，收盘价站上20日均线，成交量大于20日均量1.5倍，RSI(14)&lt;70。以这个条件为规则，每天帮我筛选可以操作的股票出来。每天下午四点提醒我复盘。」
-08 目标跟踪执行：
-- 「我的目标是年化20%，基于每天市场数据帮我动态调整持仓，调整前发WhatsApp消息让我确认。」
-- 「我想长期持有，目标5-10倍收益，可以每季度再平衡。」
-- 「帮我跟踪我的持仓组合，每周生成一份表现报告，如果某只股票跌破止损线自动提醒。」
-- 「给这个投资计划设定3/6/12个月的里程碑检查点，每次检查后给出调仓建议并发邮件确认。」
-09 动作类：
-- 「给我建一个价格alert。」
-- 「把分析结果转成PPT并发邮件。」
-- 「写一个Excel或dashboard展示这些标的表现。」
-- 「生成一份PDF研究报告，包含图表和核心结论，发到我的邮箱。」
-- 「把这些选股结果导出成表格文件。」
-
-重点判别（避免 06 过判。以下“找候选/列清单/比策略”依然是复杂金融问句，只是不归 06）：
-- “帮我筛出/找出/列几只符合……条件的股票/期权/交易”，即使是按价格上限、资金额度、持有周期、收益目标等条件找候选 → 归 04（事件/时机/收益驱动）或 01（纯量化条件），是复杂问句，但不是 06。例如 “Any call options you think will give me profit in 1-3 weeks with Jan/27 exp?” → 04（找候选），不归 06。但若仅按显式条件过滤并输出名单、无事件/时机/催化/分析/计算要求 → 判不复杂。
-- 数据校验 + 定位趋势转折点/计算任务（如 “validate the BAR columns and suggest at what value the trend changes”）→ 归 01，是复杂问句，不是格式调整。
-- “哪个策略更好 / 这个策略或回测能不能用 / 该选哪种做法”（对策略、规则或回测的审计与评价） → 归 03，是复杂问句，但不是 06。
-- 只有“我持有 X，要不要止损/减仓 / 在 A、B 两个已识别候选间分配资金 / 对已识别的具体标的是否买入”这类围绕已有持仓或具体候选的取舍 → 归 06。
-- 不要因为问句出现在活跃的交易/持仓会话里就默认归 06；找候选、列清单 ≠ 做取舍决策。
-- 围绕已有持仓或明确候选的买/卖/持/加/减决策，仅当问句自身带有额外条件或分析要求（止损位、收益目标、比较维度、时间窗口、仓位/金额约束、理由或回测）时才判复杂。
-- 若只是“X 该不该买/卖/持”“hold or sell”“能不能买，只要 yes/no”“会涨吗”这类短决策——即使带持仓量、成本、缺口、行权价、到期日等参数，只要不要求分析过程或比较取舍——就不算复杂问句。
-
-07/08/09 边界（避免混淆）：
-- 设定“条件→动作”规则：如果……就 / 当……时 / 触发 / 提醒 / alert / 异动 / 监控盯盘 → 归 07。
-- 围绕长期收益目标持续跟踪、动态调仓、阶段复盘、通知确认的多轮闭环 → 归 08。
-- 把结果做成交付物：报告、PPT、Excel、PDF、邮件、dashboard、文件、导出、生成、发送 → 归 09。
-- 同时含触发规则与交付物时，按主要意图取一类。
-
-判定流程（严格按顺序，不要跳步）：
-- 第 1 步：只判断目标问句自身是否承载一个需要多步分析/计算/筛选/回测/组合构建/框架化判断/预测/比较/决策/执行的金融任务。是陈述、抱怨、确认、纯动作或单步查数 → is_complex=false，category_id=null，直接结束。
-- 第 2 步：仅当第 1 步通过，才按类别优先级规则选择唯一类别。类别匹配永远不能反过来当作“它是复杂问句”的证据。
-
-上下文使用边界：
-- prior_questions 仅用于消解指代（“它”“这些”“Q2”）和补全缺失的标的/条件；不能把一句陈述、确认或短指令“升级”成复杂问句。
-- 目标问句自身必须包含明确的金融任务；即使它出现在复杂会话中，自身不承载任务就判 is_complex=false。
+判为有价值（is_valuable=true）的情形：
+- 句内对象与任务明确，即使很短、啰嗦或拼写差，但可独立理解。
+- 前文列表仅用于理解指代；只要句内线索足够恢复主体与任务，就不算依赖不可见上文。
 
 输出要求：
-- 只输出一个可解析的裸 JSON 对象，不要输出 Markdown、代码块或说明。
-- 字段：{&quot;is_complex&quot;: bool, &quot;category_id&quot;: &quot;01&quot; 或 null, &quot;reason&quot;: &quot;中文短句，说明判为复杂/不复杂的主要理由&quot;}
+- 只输出一个可解析的裸 JSON 对象，不要 Markdown、代码块或说明。
+- 字段：{&quot;is_valuable&quot;: bool, &quot;reason&quot;: &quot;中文短句，说明判定理由&quot;}</pre>
+        </details>
+      </section>
 
-JSON 格式：
-{&quot;is_complex&quot;: true, &quot;category_id&quot;: &quot;03&quot;, &quot;reason&quot;: &quot;需要综合分析产业链并给出投资判断&quot;}</pre>
+      <section class="prompt-panel" aria-label="复杂度门提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>复杂度门提示词 <code>complexity_gate</code> · LLM</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定一段会话中、目标问句之前的所有用户问句（前文，可能为空），以及目标问句本身，判断该问句是否为&quot;复杂金融问句&quot;。
+
+复杂金融问句必须同时满足：
+1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖外部上下文就能理解在问什么（前文仅用于消解指代）。
+2. 自身承载需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行的任务，答案不能通过一次简单查询获得。
+
+以下类型一律判为不复杂（即使提到具体标的名字）：
+- 纯陈述 / 状态播报 / 数据转述 / 计划告知：只汇报行情、持仓、价格、涨跌、已做的交易，或告知接下来的安排，不含任务。
+- 承接性短指令 / 确认：单独不构成任务（&quot;继续&quot;&quot;再看看&quot;&quot;再分析一下我的持仓&quot;）。
+- 无具体对象的泛化指令：没有明确标的、条件或比较对象（&quot;分析一下市场&quot;）。
+- 短决策 / 短评价：只有&quot;要不要&quot;&quot;能不能&quot;&quot;好不好&quot;&quot;行不行&quot;式的一句话询问，即使带行权价、到期日、持仓量等参数，也没有要求分析过程或比较取舍。
+- 单步查数 / 查异动 / 查新闻：只查一个行情、原因或事实。注意区分：明确列出多个数据源/维度并要求综合找原因的调查任务是多步任务，应判复杂。
+- 简单取数计算：仅按显式条件过滤/匹配/排序并输出名单，不含计算、统计、回测或多步处理。
+- 闲聊、纠错、无实质任务、非金融问题。
+
+输出要求：
+- 只输出一个可解析的裸 JSON 对象，不要 Markdown、代码块或说明。
+- 字段：{&quot;is_complex&quot;: bool, &quot;reason&quot;: &quot;中文短句，说明判定理由&quot;}</pre>
         </details>
       </section>
 
@@ -1774,255 +1312,71 @@ JSON 格式：
         <details>
           <summary>
             <span class="summary-title">
-              <strong>独立复判提示词</strong>
+              <strong>独立复判提示词 <code>verify_complex</code> · LLM（含已确认负例）</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
               <span class="copy-status" aria-live="polite"></span>
             </span>
           </summary>
-          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定一个**单独的问句**（没有会话上下文），判断它是否是一个“复杂金融问句”。
+          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定**前文问题列表**（可能为空，仅用于消解指代）和**当前问句**，判断当前问句是否是一个&quot;复杂金融问句&quot;。
 
 复杂金融问句必须同时满足：
-1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖任何外部上下文就能理解在问什么。
+1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖前文就能理解在问什么（前文只用于理解指代，不补足任务）。
 2. 自身承载需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行的任务，答案不能通过一次简单查询获得。
 
 以下类型一律判为不复杂（即使提到具体标的名字）：
-- 纯陈述 / 计划告知：只告知已做或打算做的动作，不含任务（“我打算明天买 X”“I will buy low today and cava and geo tmr”）。
-- 承接性短指令 / 确认：单独不构成任务（“继续”“再看看”“再分析一下我的持仓”）。
-- 无具体对象的泛化指令：没有明确标的、条件或比较对象（“分析一下市场”“do an analysis”“best strategy for any market”）。
-- 短决策 / 短评价：只有“要不要”“能不能”“好不好”“行不行”式的一句话询问，即使带行权价、到期日、持仓量等参数，也没有要求分析过程或比较取舍（“Can I buy call of MU strike 800 exp 8/21/26 and sell call strike 810?” “is the strike interval good for nvda for my account?”）。
-- 单步查数 / 查异动 / 查新闻：只查一个行情、原因或事实（“What&#x27;s going on with PACS?”）。注意区分：明确列出多个数据源/维度并要求综合找原因的调查任务是多步任务，应判复杂（如“market flat at open, check the tape, charts, volume, earnings reports and headlines to find what&#x27;s going on”）。
+- 纯陈述 / 计划告知：只告知已做或打算做的动作，不含任务。
+- 承接性短指令 / 确认：单独不构成任务（&quot;继续&quot;&quot;再看看&quot;&quot;再分析一下我的持仓&quot;）。
+- 无具体对象的泛化指令：没有明确标的、条件或比较对象（&quot;分析一下市场&quot;）。
+- 短决策 / 短评价：只有&quot;要不要&quot;&quot;能不能&quot;&quot;好不好&quot;&quot;行不行&quot;式的一句话询问，即使带行权价、到期日、持仓量等参数，也没有要求分析过程或比较取舍。
+- 单步查数 / 查异动 / 查新闻：只查一个行情、原因或事实。注意区分：明确列出多个数据源/维度并要求综合找原因的调查任务是多步任务，应判复杂。
+- 简单取数计算：仅按显式条件过滤/匹配/排序并输出名单，不含计算、统计、回测或多步处理。
 - 闲聊、纠错、无实质任务、非金融问题。
 
-正例（判定时参照，与上面对照）：
-- “market flat at open, check the tape, charts, volume, earnings reports and headlines to find what&#x27;s going on” → true（多源调查，明确列出数据源与目标）
-- “SNDK already reported, and you know that - take this into consideration and give us a simple trading plan for tomorrow” → true（明确标的 + 明确任务，附带少量上下文指代不影响）
-- “Confirmed reversal under $10 over 1 million volume with catalyst” → true（带明确筛选条件的选股任务，自身完整）
-- “Should I reduce DTCR in A or B due to interest rate concerns?” → true（明确持仓 + 明确取舍维度）
-- “Is Nvda forming a breakout setup? Identify the trigger price, confirmation signal, upside target, and failed-breakout risk.” → true（明确标的 + 多项分析要求）
-
-特别注意：本判定没有会话上下文。问句依赖前文才能成立（指代无法自解释、缺少前文就不完整）→ 一律按不复杂处理。
+本次为第 1 轮独立复核：独立判断，不参考任何之前轮次的结论。判定纪律：默认从严，只有问句本身极其明确、无歧义地同时满足上面两条标准的，才判为复杂。
 
 输出要求：
 - 只输出一个可解析的裸 JSON 对象，不要 Markdown、代码块或说明。
-- 字段：{&quot;is_complex&quot;: bool, &quot;reason&quot;: &quot;中文短句，说明判定理由&quot;}</pre>
+- 字段：{&quot;is_complex&quot;: bool, &quot;reason&quot;: &quot;中文短句，说明复核理由&quot;}
+
+以下问句已被确认为不复杂（负例，判定时参照，不要与之冲突）：
+- 结合市场信息分析一下605499股票走势
+- 科技硬件、涨价链、出口制造各推5只个股
+- 目前手上有东方财富2000股成本23.31，今天价适不适合做T
+- 抓取5支真正意义上的中药题材个股给我，且目前股价处于低位的。
+- 给我整理pcb的龙头企业，要求财务状态好，订单多
+- 分析显盈科技，并给我一个进仓位价格
+- 帮我分析一下最近 ST 瑞和的走势，以及接下来，还有今天的趋势会怎么？
+- 如果我8月4号的10点45买入嘉立创，又在8月5号的9点45卖出，我的收益率是多少
+- 以有研硅这只股票为例，上个月的最高点涨到60块钱左右，最近刚出完权，一度跌到了20块左右，这两天又涨到了36，如果按照除权和复权，或者填权，这36相当于原来的多少钱？
+- 麒麟信安，晶科能源，大全能源，昱能科技，悦康药业，光峰科技最近581个交易日平均股价分别是多少？
+- 我今天买的章源钨业26块两毛九买的是25800股，然后25块九买的是5800股，然后明天要是按你给我说的呃，明天涨2%的利润，我大概能收入多少钱</pre>
+        </details>
+      </section>
+
+      <section class="prompt-panel" aria-label="翻译提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>翻译提示词 <code>translate</code> · LLM</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一名金融领域的专业翻译。将用户的问句翻译成简体中文。
+
+要求：
+- 只输出翻译结果，不解释、不补充、不回答用户的问题；
+- 保留金融术语、数字、代码、标的名称与英文专有名词的准确性；
+- 保持原问句的语气与信息完整；
+- 只输出严格 JSON：{&quot;translation&quot;: &quot;...&quot;}</pre>
         </details>
       </section>
     </main>
-
     <script>
-      // —— 流程图渲染 ——
-      (function () {
-        const NS = 'http://www.w3.org/2000/svg';
-        const el = (p, t, a) => {
-          const n = document.createElementNS(NS, t);
-          for (const k in a) n.setAttribute(k, a[k]);
-          p.appendChild(n);
-          return n;
-        };
-        const txt = (p, a, s) => {
-          const n = el(p, 'text', a);
-          n.textContent = s;
-          return n;
-        };
-
-        const INK   = '#111111';
-        const MUTED = '#737373';
-        const GRID  = '#DEDEDE';
-        const PAPER = '#FFFFFF';
-        const RED   = '#9C1D1D';
-        const AMBER = '#737373';
-        const GREEN = '#111111';
-
-        const s = document.getElementById('flow-chart-svg');
-        if (!s) return;
-
-        // 布局
-        const W = 144, H = 56, RX = 10;
-        const MAIN_Y = 240;
-        const STEP = 162;
-        const LEFT_PAD = 28;
-        const VB_W = 1300, VB_H = 480;
-
-        // 6 个主流程节点
-        const nodes = [
-          { id: 1, name: '会话分段',     sub: 'segment · LLM',     kind: 'llm'  },
-          { id: 2, name: '候选筛选',     sub: 'step1 · 规则',      kind: 'code' },
-          { id: 3, name: '语义判定',     sub: 'complex_judge',     kind: 'llm'  },
-          { id: 4, name: '组装输出行',   sub: 'assemble · 规则',   kind: 'code' },
-          { id: 5, name: '独立复判',     sub: 'verify_complex',    kind: 'llm'  },
-          { id: 6, name: '去重 + 翻译',  sub: 'post_stage',        kind: 'both' },
-        ];
-        nodes.forEach((n, i) => { n.x = LEFT_PAD + i * STEP; n.cy = MAIN_Y + H / 2; });
-
-        // arrow markers
-        const defs = el(s, 'defs', {});
-        const mkArrow = (id, fill) => {
-          const m = el(defs, 'marker', {
-            id, viewBox: '0 0 10 10', refX: 9, refY: 5,
-            markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse'
-          });
-          el(m, 'path', { d: 'M 0 0 L 10 5 L 0 10 z', fill });
-        };
-        mkArrow('a-ink',   INK);
-        mkArrow('a-muted', MUTED);
-        mkArrow('a-green', GREEN);
-        mkArrow('a-amber', AMBER);
-        mkArrow('a-red',   RED);
-
-        // —— INPUT 入口提示 ——
-        el(s, 'rect', { x: 28, y: 64, width: 130, height: 86, rx: 8,
-                        fill: PAPER, stroke: GRID, 'stroke-width': 1 });
-        txt(s, { x: 38, y: 84, 'font-size': 9, 'font-weight': 800, fill: MUTED, 'letter-spacing': '0.18em' }, 'INPUT');
-        txt(s, { x: 38, y: 104, 'font-size': 11, 'font-weight': 700, fill: INK }, 'aime/input.jsonl');
-        txt(s, { x: 38, y: 122, 'font-size': 10, 'font-weight': 600, fill: MUTED }, '多轮 agent 会话');
-        txt(s, { x: 38, y: 138, 'font-size': 10, 'font-weight': 600, fill: MUTED }, '抽取金融问句');
-
-        // —— 主线节点 ——
-        const drawNode = (n) => {
-          const isLlm = n.kind === 'llm' || n.kind === 'both';
-          const x = n.x, y = MAIN_Y;
-          el(s, 'rect', { x, y, width: W, height: H, rx: RX, ry: RX,
-                          fill: PAPER, stroke: isLlm ? RED : INK, 'stroke-width': isLlm ? 1.4 : 1 });
-          el(s, 'circle', { cx: x + 14, cy: y + 14, r: 8, fill: isLlm ? RED : INK });
-          txt(s, { x: x + 14, y: y + 17, 'font-size': 10, 'font-weight': 800, fill: '#fff', 'text-anchor': 'middle' }, n.id);
-          txt(s, { x: x + W / 2, y: y + 32, 'font-size': 12.5, 'font-weight': 700, fill: INK, 'text-anchor': 'middle' }, n.name);
-          txt(s, { x: x + W / 2, y: y + 48, 'font-size': 9.5, 'font-weight': 600, fill: MUTED, 'text-anchor': 'middle', 'letter-spacing': '0.04em' }, n.sub);
-        };
-        nodes.forEach(drawNode);
-
-        // 输入箭头 → 节点1
-        el(s, 'line', { x1: 158, y1: MAIN_Y + H / 2, x2: nodes[0].x - 2, y2: MAIN_Y + H / 2,
-                        stroke: INK, 'stroke-width': 1, 'marker-end': 'url(#a-ink)' });
-
-        // 节点间主箭头
-        for (let i = 0; i < nodes.length - 1; i++) {
-          const a = nodes[i], b = nodes[i + 1];
-          el(s, 'line', {
-            x1: a.x + W, y1: MAIN_Y + H / 2,
-            x2: b.x - 2, y2: MAIN_Y + H / 2,
-            stroke: INK, 'stroke-width': 1, 'marker-end': 'url(#a-ink)'
-          });
-        }
-
-        // —— 4 个状态汇总 lane (顶部 1 / 底部 1 / 右侧 1 accepted) ——
-        // 顶部 skipped lane
-        const TOP_LANE_Y = 120;
-        // 底部 dropped lane
-        const BOT_LANE_Y = 400;
-
-        // 顶部 lane 边框
-        el(s, 'rect', { x: 28, y: TOP_LANE_Y - 30, width: LEFT_PAD + 5 * STEP + W, height: 60, rx: 8,
-                        fill: 'none', stroke: GRID, 'stroke-width': 0.5, 'stroke-dasharray': '4 4' });
-        txt(s, { x: 40, y: TOP_LANE_Y - 12, 'font-size': 9, 'font-weight': 800, fill: AMBER, 'letter-spacing': '0.18em' }, 'SKIPPED');
-        el(s, 'rect', { x: LEFT_PAD + 2 * STEP + 24, y: TOP_LANE_Y - 18, width: W - 48, height: 36, rx: 6,
-                        fill: PAPER, stroke: AMBER, 'stroke-width': 1.2 });
-        txt(s, { x: LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, y: TOP_LANE_Y + 0,
-                 'font-size': 10.5, 'font-weight': 800, fill: AMBER, 'text-anchor': 'middle',
-                 'letter-spacing': '0.04em' }, 'LLM 失败');
-        txt(s, { x: LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, y: TOP_LANE_Y + 12,
-                 'font-size': 9, 'font-weight': 600, fill: MUTED, 'text-anchor': 'middle' }, '解析异常 / 抽不到');
-
-        // 底部 lane 边框
-        el(s, 'rect', { x: 28, y: BOT_LANE_Y - 28, width: LEFT_PAD + 5 * STEP + W, height: 56, rx: 8,
-                        fill: 'none', stroke: GRID, 'stroke-width': 0.5, 'stroke-dasharray': '4 4' });
-        txt(s, { x: 40, y: BOT_LANE_Y - 12, 'font-size': 9, 'font-weight': 800, fill: RED, 'letter-spacing': '0.18em' }, 'DROPPED');
-        // 在底部 lane 里画 4 个 compact 桶
-        const drop_lane_y = BOT_LANE_Y;
-        const drawDrop = (cx, label, tone, badge) => {
-          const bw = 116, bh = 32;
-          const bx = cx - bw / 2;
-          el(s, 'rect', { x: bx, y: drop_lane_y - bh / 2, width: bw, height: bh, rx: 6,
-                          fill: PAPER, stroke: tone, 'stroke-width': 1.2 });
-          el(s, 'rect', { x: bx + 6, y: drop_lane_y - bh / 2 + 6, width: 32, height: 12, rx: 3, fill: tone });
-          txt(s, { x: bx + 22, y: drop_lane_y - bh / 2 + 15, 'font-size': 8.5, 'font-weight': 800, fill: '#fff',
-                   'text-anchor': 'middle', 'letter-spacing': '0.04em' }, badge);
-          txt(s, { x: bx + 42, y: drop_lane_y - bh / 2 + 16, 'font-size': 10, 'font-weight': 700, fill: INK }, label);
-        };
-        drawDrop(nodes[4].x + W / 2, '复判非复杂', MUTED, 'NON');
-        drawDrop(nodes[2].x + W / 2, 'LLM 判非复杂', MUTED, 'NON');
-        drawDrop(nodes[5].x + W / 2, 'dedup', RED, 'REJ');
-
-        // —— 节点 6 → accepted 桶 ——
-        const ACC_X = LEFT_PAD + (nodes.length - 1) * STEP + W + 30;
-        const ACC_Y = MAIN_Y + H / 2;
-        el(s, 'line', {
-          x1: nodes[5].x + W + 2, y1: ACC_Y,
-          x2: ACC_X - 4, y2: ACC_Y,
-          stroke: GREEN, 'stroke-width': 2.2, 'marker-end': 'url(#a-green)'
-        });
-        el(s, 'rect', { x: ACC_X, y: ACC_Y - 32, width: 112, height: 64, rx: 8,
-                        fill: PAPER, stroke: GREEN, 'stroke-width': 1.8 });
-        txt(s, { x: ACC_X + 56, y: ACC_Y - 12, 'font-size': 10, 'font-weight': 800, fill: GREEN,
-                 'text-anchor': 'middle', 'letter-spacing': '0.18em' }, 'ACCEPTED');
-        txt(s, { x: ACC_X + 56, y: ACC_Y + 8, 'font-size': 14, 'font-weight': 800, fill: INK,
-                 'text-anchor': 'middle' }, '进入样本');
-        txt(s, { x: ACC_X + 56, y: ACC_Y + 22, 'font-size': 9, 'font-weight': 600, fill: MUTED,
-                 'text-anchor': 'middle', 'letter-spacing': '0.02em' }, 'complex_queries.jsonl');
-
-        // —— 直角折线连接器 ——
-        const arrowIdFor = (tone) => (
-          tone === RED ? 'a-red' :
-          tone === AMBER ? 'a-amber' :
-          tone === GREEN ? 'a-green' : 'a-muted'
-        );
-        // 向上到顶部 lane
-        const branchUpToLane = (sx, sy, targetX, targetY, tone) => {
-          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: targetY,
-                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
-          el(s, 'line', { x1: sx, y1: targetY, x2: targetX - 4, y2: targetY,
-                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
-                          'marker-end': 'url(#' + arrowIdFor(tone) + ')' });
-        };
-        // 向下到底部 lane
-        const branchDownToLane = (sx, sy, targetX, targetY, tone) => {
-          el(s, 'line', { x1: sx, y1: sy, x2: sx, y2: targetY,
-                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
-          el(s, 'line', { x1: sx, y1: targetY, x2: targetX - 4, y2: targetY,
-                          stroke: tone, 'stroke-width': 1, 'stroke-dasharray': '3 3',
-                          'marker-end': 'url(#' + arrowIdFor(tone) + ')' });
-        };
-
-        // 节点 3 → skipped (上)
-        branchUpToLane(nodes[2].x + W / 2, MAIN_Y, LEFT_PAD + 2 * STEP + 24 + (W - 48) / 2, TOP_LANE_Y + 0, AMBER);
-
-        // 3 条到 dropped lane
-        branchDownToLane(nodes[4].x + W / 2, MAIN_Y + H, nodes[4].x + W / 2, BOT_LANE_Y - 16, MUTED);  // 节点5 → non_complex
-        branchDownToLane(nodes[2].x + W / 2, MAIN_Y + H, nodes[2].x + W / 2, BOT_LANE_Y - 16, MUTED);  // 节点3 → non_complex
-        branchDownToLane(nodes[5].x + W / 2, MAIN_Y + H, nodes[5].x + W / 2, BOT_LANE_Y - 16, RED);    // 节点6 → rejected
-
-        // —— 底部图例 ——
-        const LEG_Y = 475;
-        el(s, 'line', { x1: 28, y1: LEG_Y - 16, x2: VB_W - 28, y2: LEG_Y - 16, stroke: GRID, 'stroke-width': 0.5 });
-        txt(s, { x: 28, y: LEG_Y - 4, 'font-size': 9, 'font-weight': 700, fill: MUTED, 'letter-spacing': '0.18em' }, '图例');
-        const chips = [
-          { x: 28,  kind: 'rect', color: INK,   sw: 1,   text: '规则 · code' },
-          { x: 138, kind: 'rect', color: RED,   sw: 1.4, text: '语义 · LLM' },
-          { x: 248, kind: 'line', color: INK,   sw: 1,   text: '主线' },
-          { x: 308, kind: 'line', color: GREEN, sw: 2.2, text: 'accepted · 进入样本' },
-          { x: 488, kind: 'line', color: RED,   sw: 1,   text: 'rejected · 规则拒绝 / dedup' },
-          { x: 700, kind: 'line', color: MUTED, sw: 1,   text: 'non_complex · 判定非复杂' },
-          { x: 900, kind: 'line', color: AMBER, sw: 1,   text: 'skipped · LLM 失败' },
-        ];
-        chips.forEach(g => {
-          if (g.kind === 'rect') {
-            el(s, 'rect', { x: g.x, y: LEG_Y + 6, width: 14, height: 14, rx: 3,
-                            fill: PAPER, stroke: g.color, 'stroke-width': g.sw });
-          } else {
-            const arrId = g.color === GREEN ? 'a-green' :
-                          g.color === RED ? 'a-red' :
-                          g.color === AMBER ? 'a-amber' :
-                          g.color === MUTED ? 'a-muted' : 'a-ink';
-            el(s, 'line', { x1: g.x, y1: LEG_Y + 13, x2: g.x + 24, y2: LEG_Y + 13,
-                            stroke: g.color, 'stroke-width': g.sw, 'stroke-dasharray': '3 3',
-                            'marker-end': 'url(#' + arrId + ')' });
-          }
-          txt(s, { x: g.x + (g.kind === 'rect' ? 22 : 32), y: LEG_Y + 17, 'font-size': 11,
-                   'font-weight': 600, fill: INK }, g.text);
-        });
-      })();
-
       function copyToClipboard(text) {
         if (navigator.clipboard && window.isSecureContext) {
           return navigator.clipboard.writeText(text);
@@ -2043,6 +1397,7 @@ JSON 格式：
 
       document.querySelectorAll(".prompt-panel").forEach((panel) => {
         const copyButton = panel.querySelector(".copy-button");
+        if (!copyButton) return; // 无复制按钮的面板（如说明面板）跳过
         const copyStatus = panel.querySelector(".copy-status");
         const promptText = panel.querySelector(".prompt-code");
         copyButton.addEventListener("click", async (event) => {

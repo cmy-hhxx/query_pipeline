@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import json
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from query_pipeline import run as api_run
 from query_pipeline.cli import main as cli_main
-
 
 def _session_lines() -> str:
     import json as _json
@@ -44,7 +40,6 @@ def _session_lines() -> str:
         for _ in range(1)
     )
 
-
 class RecordingClient:
     def __init__(self, config: object) -> None:
         self.config = config
@@ -69,7 +64,6 @@ class RecordingClient:
     async def close(self) -> None:
         return None
 
-
 class ApiTest(unittest.TestCase):
     def test_run_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +76,7 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(summary["stats"]["complex_rows"], 1)
             self.assertEqual(summary["stats"]["output_rows"], 1)
             self.assertEqual(summary["stats"]["input_format"], "session")
-            out = Path(summary["output_files"]["complex_queries"])
+            out = Path(summary["output_files"]["cleaned_queries"])
             self.assertTrue(out.exists())
             self.assertEqual(out.name, "cleaned_queries.jsonl")
 
@@ -92,7 +86,11 @@ class ApiTest(unittest.TestCase):
 
     def test_default_output_dir(self) -> None:
         # unique dataset dir so the default outputs/<parent> path can never
-        # collide with real deliverables under the repo's outputs/
+        # collide with real deliverables under the repo's outputs/; the
+        # fixture dir is removed afterwards so tests leave no residue.
+        fixture = Path("outputs") / "zz_api_fixture"
+        shutil.rmtree(fixture, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, fixture, ignore_errors=True)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             src = tmp_path / "zz_api_fixture" / "0806.jsonl"
@@ -100,10 +98,9 @@ class ApiTest(unittest.TestCase):
             src.write_text(_session_lines(), encoding="utf-8")
             with patch("query_pipeline.pipeline.runner.LLMClient", RecordingClient):
                 summary = api_run(src, work_dir=tmp_path / "work")
-            out = Path(summary["output_files"]["complex_queries"])
-            self.assertEqual(out.parent, Path("outputs") / "zz_api_fixture")
+            out = Path(summary["output_files"]["cleaned_queries"])
+            self.assertEqual(out.parent, fixture)
             self.assertTrue(out.parent.exists())
-
 
 class CliTest(unittest.TestCase):
     def test_cli_run(self) -> None:
@@ -125,7 +122,6 @@ class CliTest(unittest.TestCase):
             src.write_text(_session_lines(), encoding="utf-8")
             code = cli_main(["run", str(src), "-o", str(tmp_path / "out"), "--no-llm", "--work-dir", str(tmp_path / "work")])
             self.assertEqual(code, 0)  # rules-only run, empty output is legitimate
-
 
 if __name__ == "__main__":
     unittest.main()

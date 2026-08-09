@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+ROOT = Path(__file__).resolve().parents[2]  # repo root (tests/prompts/ -> project root)
 
 from query_pipeline.prompts import resolve_prompt
+from query_pipeline.taxonomy import templates_dir
 from query_pipeline.prompts.assemble import (
     build_complex_classify_prompt,
     build_normal_classify_prompt,
@@ -67,7 +66,6 @@ _BAD_SAMPLE = """\
 1、简单取数计算的，这个务必限制；
 """
 
-
 class ParseComplexTest(unittest.TestCase):
     def test_parses_headers_and_examples(self) -> None:
         specs = parse_complex_few_shot(_COMPLEX_SAMPLE)
@@ -77,13 +75,12 @@ class ParseComplexTest(unittest.TestCase):
         self.assertEqual(specs["02"].examples, ("中际旭创未来1年股价能涨到多少？",))
 
     def test_real_file_has_9_specs_with_content(self) -> None:
-        text = Path(ROOT / "templates" / "complex_few_shot.md").read_text(encoding="utf-8")
+        text = (templates_dir() / "complex_few_shot.md").read_text(encoding="utf-8")
         specs = parse_complex_few_shot(text)
         self.assertEqual(len(specs), 9)
         for spec in specs.values():
             self.assertTrue(spec.definition, f"category {spec.id} missing definition")
             self.assertTrue(spec.examples, f"category {spec.id} missing examples")
-
 
 class ParseNormalTest(unittest.TestCase):
     def test_parses_sections(self) -> None:
@@ -96,13 +93,12 @@ class ParseNormalTest(unittest.TestCase):
         self.assertIn("事件驱动的选股任务", spec.sections["定义"])
 
     def test_real_file_has_16_specs_with_all_sections(self) -> None:
-        text = Path(ROOT / "templates" / "normal_few_shot.md").read_text(encoding="utf-8")
+        text = (templates_dir() / "normal_few_shot.md").read_text(encoding="utf-8")
         specs = parse_normal_few_shot(text)
         self.assertEqual(len(specs), 16)
         for spec in specs.values():
             self.assertIn("定义", spec.sections)
             self.assertIn("易混类别", spec.sections)
-
 
 class BadCasesTest(unittest.TestCase):
     def test_annotation_lines_skipped(self) -> None:
@@ -117,9 +113,8 @@ class BadCasesTest(unittest.TestCase):
         )
 
     def test_real_file_has_negative_examples(self) -> None:
-        text = Path(ROOT / "templates" / "bad_cases_for_complex.md").read_text(encoding="utf-8")
+        text = (templates_dir() / "bad_cases_for_complex.md").read_text(encoding="utf-8")
         self.assertGreaterEqual(len(parse_bad_cases(text)), 10)
-
 
 class BuildPromptTest(unittest.TestCase):
     def test_complex_classify_prompt_embeds_taxonomy(self) -> None:
@@ -147,6 +142,39 @@ class BuildPromptTest(unittest.TestCase):
         self.assertIn("已被确认为不复杂", resolve_prompt("verify_complex"))
         self.assertIn("已被确认为不复杂", resolve_prompt("verify_recheck"))
 
-
 if __name__ == "__main__":
     unittest.main()
+
+class PromptContractTest(unittest.TestCase):
+    def test_prompt_contracts(self) -> None:
+        segment_prompt = resolve_prompt("segment")
+        self.assertIn("segments", segment_prompt)
+        self.assertIn("start", segment_prompt)
+        self.assertIn("end", segment_prompt)
+        self.assertIn("topic", segment_prompt)
+        self.assertIn("同一个主题不能再次出现", segment_prompt)
+        self.assertIn("宏观", segment_prompt)
+
+        judge_prompt = resolve_prompt("complex_judge")
+        for category_id, name in {
+            "01": "复杂取数计算",
+            "05": "资产配置",
+            "07": "策略触发任务类",
+            "09": "动作类",
+        }.items():
+            self.assertIn(f"{category_id} {name}", judge_prompt)
+        self.assertIn("is_complex", judge_prompt)
+        self.assertIn("category_id", judge_prompt)
+        self.assertIn("reason", judge_prompt)
+        # category definitions + priority rules embedded (guards 08/09 boundary collapse)
+        self.assertIn("长期帮我盯着并迭代", judge_prompt)
+        self.assertIn("→ 优先 09", judge_prompt)
+        # few_shot.md examples fused in (07 remapped to trigger/setup semantics;
+        # backtest-audit questions fall under 03 now)
+        self.assertIn("每类典型示例", judge_prompt)
+        self.assertIn("回测一个基于5周均线的短线择时策略", judge_prompt)
+        self.assertIn("审计一个多因子策略", judge_prompt)
+        self.assertIn("07/08/09 边界", judge_prompt)
+        # screening caliber: pure filters are non-complex; validation+trend-point tasks stay 01
+        self.assertIn("仅按显式条件过滤", judge_prompt)
+        self.assertIn("validate the BAR columns", judge_prompt)

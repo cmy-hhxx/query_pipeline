@@ -5,10 +5,22 @@
 ## 运行
 
 ```bash
-uv run query-pipeline run data/aime/0806.jsonl -o outputs/aime      # 格式自动识别
+uv run query-pipeline run data/aime/0806.jsonl -o outputs/aime      # 格式自动识别，一行命令
 uv run query-pipeline run data/iwencai/chat.jsonl --format chat     # 显式指定
 uv run query-pipeline run input.jsonl --no-llm                      # 只跑规则（输出为空属正常）
+uv run query-pipeline suggest data/aime/0806.jsonl                  # 门槛推荐：按候选数展示 10 个参数组合
 ```
+
+`suggest` 纯规则扫描（不调 LLM），返回全谱 10 个门槛组合（候选数从低到高，
+标注当前默认组合 `※默认`），选好后按示例参数跑：
+
+```bash
+uv run query-pipeline run data/aime/0806.jsonl --min-tool-calls 5 --min-unique-tools 3
+```
+
+常用旋钮：`--min-tool-calls`、`--min-unique-tools`、`--no-reject-rules`、
+`--verify-rounds`、`--dedup-threshold`、`--model`、`--concurrency`、
+`--api-key/--base-url`（覆盖 .env）。
 
 Python API（最少参数，其余全部默认）：
 

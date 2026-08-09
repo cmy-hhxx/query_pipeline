@@ -24,7 +24,9 @@ class InputConfig(ConfigModel):
 
 class OutputConfig(ConfigModel):
     dir: Path = Path("outputs")
-    complex_queries: str = "complex_queries.jsonl"
+    cleaned_queries: str = "cleaned_queries.jsonl"  # 汇总（hard + normal 两类）
+    complex_queries: str = "complex_queries.jsonl"  # 仅复杂问句
+    normal_queries: str = "normal_queries.jsonl"    # 仅普通问句
     summary: str = "summary.json"
 
 

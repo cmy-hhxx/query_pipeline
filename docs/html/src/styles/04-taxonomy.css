@@ -1,0 +1,111 @@
+/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类） */
+.taxonomy {
+  order: 3;
+  margin-top: clamp(52px, 8vw, 88px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.taxonomy > h2 {
+  margin: 0;
+  padding: 0 0 10px;
+  border-bottom: 2px solid var(--ink);
+  font-size: 24px;
+  line-height: 1.2;
+}
+.tax-intro {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tax-intro code {
+  font-size: 12px;
+}
+.tax-subhead {
+  margin: 30px 0 12px;
+  font-size: 16px;
+}
+.tax-table-head,
+.tax-card {
+  display: grid;
+  grid-template-columns:
+    minmax(210px, 1.25fr)
+    minmax(110px, 0.75fr)
+    minmax(220px, 1.4fr)
+    minmax(300px, 2fr);
+  gap: 0;
+  align-items: stretch;
+}
+.tax-table-head {
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+}
+.tax-table-head span {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.tax-grid {
+  display: block;
+  margin: 0;
+}
+.tax-grid + .tax-subhead {
+  margin-top: 44px;
+}
+.tax-card {
+  grid-template-rows: none;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.tax-card > * {
+  min-width: 0;
+  padding: 14px 12px;
+}
+.tax-head {
+  display: grid;
+  min-height: 0;
+  align-content: center;
+  align-items: baseline;
+  gap: 2px;
+}
+.tax-id {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.tax-slug {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.tax-name {
+  align-content: center;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+.tax-key,
+.tax-example {
+  align-content: center;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tax-key b,
+.tax-example b {
+  display: none;
+}

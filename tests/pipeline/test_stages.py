@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.pipeline.stages import DEFAULT_STAGES, REGISTRY, get_stage, register, stage_names
-
 
 class RegistryTest(unittest.TestCase):
     def test_default_stages_registered(self) -> None:
@@ -42,7 +37,6 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(stage_names(["preclean"]), ["preclean"])
         with self.assertRaises(ValueError):
             stage_names(["bogus"])
-
 
 class StageOrderTest(unittest.TestCase):
     """A custom stage list must drive the pipeline; discover-only yields rows
@@ -110,7 +104,6 @@ class StageOrderTest(unittest.TestCase):
             self.assertTrue(summary.success)
             self.assertEqual(summary.stats["complex_rows"], 0)  # llm off -> no judge
             # preclean + rule_gate only: no output file (runner skips empty writes)
-
 
 if __name__ == "__main__":
     unittest.main()

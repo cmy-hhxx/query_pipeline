@@ -1,0 +1,73 @@
+/* HEADER — 页面标题区与输出去向图例 */
+.topline {
+  order: 1;
+  display: block;
+  padding: 0;
+  border: 0;
+}
+h1 {
+  margin: 0 0 28px;
+  font-size: clamp(32px, 4.3vw, 48px);
+  line-height: 1.08;
+}
+.legend {
+  display: grid;
+  grid-template-columns: 112px repeat(4, minmax(0, 1fr));
+  gap: 0;
+  width: 100%;
+  border-top: 1px dashed var(--ink);
+  border-bottom: 1px dashed var(--ink);
+  background: #fff;
+}
+.legend-title {
+  display: flex;
+  align-items: center;
+  padding: 14px 12px 14px 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.badge {
+  display: grid;
+  min-height: 0;
+  align-content: center;
+  align-items: center;
+  gap: 1px;
+  border: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: #fff;
+  padding: 12px 14px;
+  white-space: normal;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge b {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.badge span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge.reject,
+.badge.non-complex,
+.badge.failed,
+.badge.accept {
+  background: transparent;
+}
+.badge.reject b {
+  color: var(--red);
+}
+.badge.non-complex b {
+  color: var(--muted);
+}
+.badge.failed b {
+  color: var(--amber);
+}
+.badge.accept b {
+  color: var(--green);
+}

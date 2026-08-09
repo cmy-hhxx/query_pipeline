@@ -66,7 +66,9 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
         if client is not None:
             await client.close()
 
+    cleaned_path = ctx.output_dir / config.output.cleaned_queries
     complex_path = ctx.output_dir / config.output.complex_queries
+    normal_path = ctx.output_dir / config.output.normal_queries
     summary_path = ctx.output_dir / config.output.summary
 
     stats = merge_stats(ctx)
@@ -75,7 +77,9 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
     # previous good output with an empty file. Partial rows are still inspectable;
     # the exit code and summary flag the failure.
     if success or ctx.rows:
-        write_jsonl(complex_path, ctx.rows)
+        write_jsonl(cleaned_path, ctx.rows)
+        write_jsonl(complex_path, [r for r in ctx.rows if r.get("difficulty_level") == "hard"])
+        write_jsonl(normal_path, [r for r in ctx.rows if r.get("difficulty_level") == "normal"])
     summary_path.write_text(
         json.dumps({**stats, "success": success}, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -85,7 +89,9 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
         name=config.name,
         stats=stats,
         output_files={
+            "cleaned_queries": str(cleaned_path),
             "complex_queries": str(complex_path),
+            "normal_queries": str(normal_path),
             "summary": str(summary_path),
         },
     )

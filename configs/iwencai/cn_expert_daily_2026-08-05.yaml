@@ -1,23 +1,26 @@
-name: session_pipeline
+# iwencai/cn_expert_daily_2026-08-05.jsonl 清洗标注配置（格式：session）
+name: iwencai_cn_expert_daily_2026-08-05
 
 input:
-  path: data/aime/0807.jsonl
-  format: auto
+  path: data/iwencai/cn_expert_daily_2026-08-05.jsonl
+  format: session
 
 output:
-  dir: outputs/aime
-  complex_queries: complex_queries_0807.jsonl
-  summary: summary_0807.json
+  dir: outputs/iwencai
+  cleaned_queries: cleaned_queries_cn_expert_0805.jsonl
+  complex_queries: complex_queries_cn_expert_0805.jsonl
+  normal_queries: normal_queries_cn_expert_0805.jsonl
+  summary: summary_cn_expert_0805.json
 
 segmentation:
-  enabled: true
+  enabled: false
 
 rule_gate:
   enabled: true
   reject_rules: true
-  min_chain_tool_calls: 7
+  min_chain_tool_calls: 5
   min_chain_steps: 1
-  min_unique_tools: 2
+  min_unique_tools: 3
 
 judge:
   enabled: true
@@ -46,7 +49,7 @@ llm:
   base_url_env: OPENAI_BASE_URL
   model: gpt-5.4-mini
   api_key_env: OPENAI_API_KEY
-  concurrency: 256
+  concurrency: 128
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object

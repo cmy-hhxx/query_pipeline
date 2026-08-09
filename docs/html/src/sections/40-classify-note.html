@@ -1,0 +1,28 @@
+      <section class="prompt-panel" aria-label="分类提示词组装说明">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>分类提示词 <code>classify_complex / classify_normal</code> · 动态组装</strong>
+            </span>
+            <span class="prompt-actions">
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">两个分类提示词不写死在代码里，构建时由模板动态组装（src/query_pipeline/prompts/assemble.py）：
+
+头部固定规则：
+你是一个金融问句分类器。给定一个**已判定为复杂金融问句**的问句（附前文问题列表，仅用于消解指代），从下列 9 类中选择**唯一**类别。
+- 只按问句意图归类，不按关键词机械匹配。
+- 若多个类别都沾边，选择最决定答案正确性的那一类。
+- 只输出严格 JSON，不要 Markdown：{"category_id": "01", "reason": "中文短句，说明归类理由"}
+- category_id 必须是下列 9 类之一。
+
+（normal 版头部同上，16 类；category_id 必须是下列 16 类之一）
+
+类别正文 = templates/categories.md（9 类清单）
+          + templates/complex_few_shot.md（每类特征 + 示例，最多 1000 条）
+          + templates/normal_few_shot.md（每类定义/适用场景/排除场景/边界规则/易混类别）
+
+改分类体系 = 改 templates/ 下的 md 文件，代码与提示词无需改动。</pre>
+        </details>
+      </section>

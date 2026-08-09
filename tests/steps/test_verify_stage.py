@@ -4,17 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.pipeline.runner import run_pipeline
-
 
 def _turns() -> list[dict]:
     names = ("web_search", "finquery", "compute")
@@ -39,7 +34,6 @@ def _turns() -> list[dict]:
             "tool_count": 8,
         },
     ]
-
 
 class RecordingClient:
     """Records verify payloads; verdicts per question text."""
@@ -73,7 +67,6 @@ class RecordingClient:
 
     async def close(self) -> None:
         return None
-
 
 class VerifyStageTest(unittest.TestCase):
     def _run(self, client_cls=RecordingClient, config_extra: str = "") -> object:
@@ -202,7 +195,6 @@ class VerifyStageTest(unittest.TestCase):
             self.assertEqual(summary.stats["verify_kept"], 1)
             self.assertEqual(summary.stats["verify_rejected"], 1)
             self.assertEqual(summary.stats["normal_rows"], 1)
-
 
 if __name__ == "__main__":
     unittest.main()

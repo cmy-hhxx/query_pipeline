@@ -1,0 +1,61 @@
+# aime/0806.jsonl 清洗标注配置（格式：session）
+name: aime_0806
+
+input:
+  path: data/aime/0806.jsonl
+  format: session
+
+output:
+  dir: outputs/aime
+  cleaned_queries: cleaned_queries_0806.jsonl
+  complex_queries: complex_queries_0806.jsonl
+  normal_queries: normal_queries_0806.jsonl
+  summary: summary_0806.json
+
+segmentation:
+  enabled: true
+
+rule_gate:
+  enabled: true
+  reject_rules: true
+  min_chain_tool_calls: 7
+  min_chain_steps: 1
+  min_unique_tools: 2
+
+judge:
+  enabled: true
+  value_prompt: value_gate
+  complexity_prompt: complexity_gate
+  classify_complex_prompt: classify_complex
+  classify_normal_prompt: classify_normal
+
+verify:
+  enabled: true
+  prompt_id: verify_complex
+  max_rounds_hard: 5
+  max_rounds_normal: 2
+
+post:
+  enabled: true
+  dedup:
+    enabled: true
+    threshold: 0.80
+    entity_slot: true
+  translate:
+    enabled: true
+
+llm:
+  enabled: true
+  base_url_env: OPENAI_BASE_URL
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+  concurrency: 256
+  max_retries: 5
+  timeout_seconds: 90
+  response_format: json_object
+
+checkpoint:
+  enabled: true
+
+debug:
+  dump_intermediates: true

@@ -34,4 +34,12 @@ async def run_rule_gate_stage(
         total += len(selected)
     ctx.candidates = candidates
     ctx.stats["candidates"] = total
+    if ctx.sessions and total == 0:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "rule_gate 过滤后候选为 0（%d 个会话全部被过滤）：当前门槛可能过严。"
+            "可运行 `query-pipeline suggest <输入>` 查看推荐参数组合。",
+            len(ctx.sessions),
+        )
     return ctx

@@ -10,6 +10,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -59,6 +60,11 @@ def run(
     verify_rounds_normal: int | None = None,
     work_dir: str | Path | None = None,
     llm_enabled: bool = True,
+    min_tool_calls: int | None = None,
+    min_unique_tools: int | None = None,
+    reject_rules: bool = True,
+    api_key: str | None = None,
+    base_url: str | None = None,
     verbose: bool = False,
 ) -> dict:
     """Run the cleaning/annotation pipeline with defaults for everything else.
@@ -81,6 +87,10 @@ def run(
         summary dict: per-stage counts, output files, success flag.
     """
     load_dotenv(_find_env_file(), override=False)
+    if api_key:
+        os.environ.setdefault("OPENAI_API_KEY", api_key)
+    if base_url:
+        os.environ.setdefault("OPENAI_BASE_URL", base_url)
 
     src = Path(input_path).expanduser().resolve()
     if not src.exists():
@@ -96,20 +106,31 @@ def run(
     work = Path(work_dir)
     _setup_logging(out / "run.log", verbose=verbose)
 
+    # 门槛默认按格式区分（session 7/1/2，chat 3/1/2——chat 工具调用分布平坦，
+    # >=7 次仅覆盖 ~1%）；显式传入时覆盖。拿不准时用 suggest 看推荐组合。
+    if min_tool_calls is None and min_unique_tools is None:
+        rule_gate = (
+            RuleGateConfig(min_chain_tool_calls=3, min_unique_tools=2)
+            if format == "chat"
+            else RuleGateConfig()
+        )
+    else:
+        rule_gate = RuleGateConfig(
+            min_chain_tool_calls=min_tool_calls if min_tool_calls is not None else 0,
+            min_unique_tools=min_unique_tools if min_unique_tools is not None else 1,
+            reject_rules=reject_rules,
+        )
+
     config = PipelineConfig(
         name=f"pipeline:{src.stem}",
         input=InputConfig(path=src, format=format),
-        output=OutputConfig(dir=out, complex_queries="cleaned_queries.jsonl", summary="summary.json"),
+        output=OutputConfig(dir=out),
         work_dir=work,
         stages=stages,
         segmentation=SegmentationConfig(enabled=True),
         # chat 工具调用分布平坦（>=7 次仅覆盖 ~1%），粗筛门槛按格式区分：
         # session 7/1/2，chat 3/1/2（与 rule_gate 设计决策一致）。
-        rule_gate=(
-            RuleGateConfig(min_chain_tool_calls=3, min_unique_tools=2)
-            if format == "chat"
-            else RuleGateConfig()
-        ),
+        rule_gate=rule_gate,
         judge=JudgeConfig(),
         verify=VerifyConfig(
             max_rounds_hard=verify_rounds_hard if verify_rounds_hard is not None else 5,

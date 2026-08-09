@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.taxonomy import COMPLEX_PREFIX, load_taxonomy, parse_categories
 
@@ -19,7 +14,6 @@ _SAMPLE = """\
 14-complex-stock-selection    复杂选股
 16-macro-information-qa    宏观信息问答
 """
-
 
 class TaxonomyTest(unittest.TestCase):
     def test_parse_complex_and_normal(self) -> None:
@@ -74,7 +68,6 @@ class TaxonomyTest(unittest.TestCase):
         self.assertEqual(tax.get("normal", "14").slug, "complex-stock-selection")
         with self.assertRaises(KeyError):
             tax.get("normal", "02")  # id exists only in complex set
-
 
 if __name__ == "__main__":
     unittest.main()

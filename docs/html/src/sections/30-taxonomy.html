@@ -1,0 +1,174 @@
+<section class="taxonomy" aria-label="双分类体系">
+  <h2>双分类体系</h2>
+  <p class="tax-intro">复杂问句（hard）归 <b>9 类</b>，输出 <code>complex-topic/{id}-{slug}</code>；非复杂但有价值的问句（normal）归 <b>16 类</b>，输出 <code>{id}-{slug}</code>。两套 id 各自从 01 起编，靠 difficulty + 前缀区分。分类数据源：<code>templates/categories.md</code>（清单）+ <code>complex_few_shot.md / normal_few_shot.md</code>（定义与示例），改分类只动模板不动代码。</p>
+
+  <h3 class="tax-subhead">复杂 9 类 · difficulty=hard</h3>
+  <div class="tax-table-head" aria-hidden="true">
+    <span>编号 / slug</span>
+    <span>分类</span>
+    <span>特征</span>
+    <span>代表问句</span>
+  </div>
+  <div class="tax-grid">
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">complex-topic/01-data-metrics-calculation</span></div>
+            <div class="tax-name">复杂取数计算</div>
+            <div class="tax-key"><b>特征</b>需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述，或多步骤数据处理。核心是「算」——不是简单查一个数，而是通过计算框架得出结果。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。</div>
+            <div class="tax-example"><b>代表</b>「回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满…」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">complex-topic/02-forecasting-and-projection</span></div>
+            <div class="tax-name">预测类</div>
+            <div class="tax-key"><b>特征</b>以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果。关键信号词：「预测」「目标价」「能涨到多少」「什么时候」「概率」「极端场景」「剧本」。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。</div>
+            <div class="tax-example"><b>代表</b>「中际旭创未来1年股价能涨到多少？」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">complex-topic/03-analysis-research</span></div>
+            <div class="tax-name">分析研究</div>
+            <div class="tax-key"><b>特征</b>以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判。关键信号词：「分析」「研究」「为什么」「影响」「框架」「产业」「政策」。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。</div>
+            <div class="tax-example"><b>代表</b>「美伊何时能达成停火协议，结合历史战争事件分析市场走势。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">complex-topic/04-opportunity-discovery</span></div>
+            <div class="tax-name">机会挖掘</div>
+            <div class="tax-key"><b>特征</b>以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：「找出」「挖掘」「龙头」「翻倍」「涨停」「机会」「热点」「哪只」。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。</div>
+            <div class="tax-example"><b>代表</b>「从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">complex-topic/05-asset-allocation</span></div>
+            <div class="tax-name">资产配置</div>
+            <div class="tax-key"><b>特征</b>以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：「配置」「组合」「仓位」「分配」「多少比例」「分散」「资产」「规划」。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。</div>
+            <div class="tax-example"><b>代表</b>「我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">complex-topic/06-investment-decision</span></div>
+            <div class="tax-name">账户诊断优化类</div>
+            <div class="tax-key"><b>特征</b>以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化。关键信号词：「持有」「持仓」「账户」「补仓」「减仓」「止损」「优化」「怎么处理」「帮我看看」。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。</div>
+            <div class="tax-example"><b>代表</b>「搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">complex-topic/07-strategy-evaluation</span></div>
+            <div class="tax-name">策略触发任务类</div>
+            <div class="tax-key"><b>特征</b>以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行。关键信号词：「如果……就」「当……时」「触发」「提醒」「alert」「条件」「规则」「异动」「监控」。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。</div>
+            <div class="tax-example"><b>代表</b>「这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">complex-topic/08-goal-execution</span></div>
+            <div class="tax-name">目标跟踪执行</div>
+            <div class="tax-key"><b>特征</b>以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认。关键信号词：「长期」「年化」「跟踪」「持续」「动态」「季度」「定期」「目标收益」。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。</div>
+            <div class="tax-example"><b>代表</b>「—」</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">complex-topic/09-action-output</span></div>
+            <div class="tax-name">动作类</div>
+            <div class="tax-key"><b>特征</b>以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等。关键信号词：「PPT」「Excel」「邮件」「dashboard」「报告」「导出」「生成」「建一个」「发」「写一个」。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。</div>
+            <div class="tax-example"><b>代表</b>「—」</div>
+          </div>
+  </div>
+
+  <h3 class="tax-subhead">普通 16 类 · difficulty=normal</h3>
+  <div class="tax-table-head" aria-hidden="true">
+    <span>编号 / slug</span>
+    <span>分类</span>
+    <span>定义</span>
+    <span>输出</span>
+  </div>
+  <div class="tax-grid">
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">01-event-and-concept-stock-selection</span></div>
+            <div class="tax-name">事件与概念选股</div>
+            <div class="tax-key"><b>定义</b>事件、政策、概念、主题或产业链驱动的选股、标的映射、受益排序和梯队划分任务。核心是从外部事件/主题出发，判断哪些股票或产业链环节受益。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">02-backtesting-data-extraction-and-calculation</span></div>
+            <div class="tax-name">回测取数计算</div>
+            <div class="tax-key"><b>定义</b>历史数据提取、指标计算、样本统计、概率估算或策略/事件表现回测任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">03-stock-diagnosis-and-data-lookup</span></div>
+            <div class="tax-name">诊股查数</div>
+            <div class="tax-key"><b>定义</b>个股、板块、市场、宏观金融数据的查询、提取、对比分析或轻量诊断任务。核心是查明数据、事实、指标、行情或局部诊断结论。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">04-analysis-evaluation-and-self-judgment</span></div>
+            <div class="tax-name">分析评价与自我判断</div>
+            <div class="tax-key"><b>定义</b>围绕股票、基金、ETF、指数、板块、宏观资产或投资观点，对某个聚焦问题进行分析评价、原因判断、价值判断、方法匹配或投资逻辑评估的任务。核心通常是回答一个明确的分析问题，不要求建立股票短期与长期、多视角的完整综合分析框架。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">05-kyc-recommendation-suggestions</span></div>
+            <div class="tax-name">KYC推荐建议</div>
+            <div class="tax-key"><b>定义</b>需要结合用户目标、风险、资金、持仓、投资期限或真实处境的投资推荐、配置建议和交易决策支持。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">06-compound-intent</span></div>
+            <div class="tax-name">复合意图</div>
+            <div class="tax-key"><b>定义</b>一句 query 中包含多个强子任务、跨多类信息源或需要复杂投研闭环的复合意图任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">07-interactive-clarification</span></div>
+            <div class="tax-name">交互澄清</div>
+            <div class="tax-key"><b>定义</b>金融投资对话中的交互澄清、多轮承接、规则/前提纠错、实体识别和模糊口径定义任务。用户问题往往不能被直接可靠回答，需要先识别缺失变量、错误前提、真实标的或应采用的金融口径，再给出分层方案或后续引导。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">08-information-and-knowledge-qa</span></div>
+            <div class="tax-name">资讯知识问答</div>
+            <div class="tax-key"><b>定义</b>金融资讯、政策、监管动态、产业事件、公司进展、市场异动、传闻、调研纪要和金融知识的直接解释、查询、比较或判断任务。答案重点是事实时效、证据质量、信息整合、影响链条和可信表达。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">09-financial-performance-interpretation</span></div>
+            <div class="tax-name">财报业绩解读</div>
+            <div class="tax-key"><b>定义</b>财报、业绩公告、经营指标、会计口径或财务影响的解释、归因和持续性判断。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">10</span><span class="tax-slug">10-financial-common-sense-and-semantic-understanding</span></div>
+            <div class="tax-name">金融常识与语义理解</div>
+            <div class="tax-key"><b>定义</b>金融常识、金融语义、指标口径、交易规则、实体识别、错别字/黑话纠错和用户真实意图补全类问题。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">11</span><span class="tax-slug">11-instruction-following-ability</span></div>
+            <div class="tax-name">指令跟随能力</div>
+            <div class="tax-key"><b>定义</b>用户给出明确任务、问题类型、对象范围、排除条件、输出焦点或格式约束，答案成败主要取决于是否严格遵守。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">12</span><span class="tax-slug">12-financial-logical-reasoning</span></div>
+            <div class="tax-name">金融逻辑推理</div>
+            <div class="tax-key"><b>定义</b>投资判断、走势预测、个股选择、强势股筛选、板块内比较和风险情景推演类金融推理任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">13</span><span class="tax-slug">13-time-awareness-ability</span></div>
+            <div class="tax-name">时间感知能力</div>
+            <div class="tax-key"><b>定义</b>答案正确性高度依赖相对日期、周几、交易日历、市场休市、披露期、历史区间、未来日期、最新数据口径或 过期数据 纠错的任务。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">14</span><span class="tax-slug">14-complex-stock-selection</span></div>
+            <div class="tax-name">复杂选股</div>
+            <div class="tax-key"><b>定义</b>多条件、多阶段、跨口径或带排序/字段/排除条件的股票筛选任务。核心是完整理解筛选条件、金融口径和先后依赖，产出符合要求的候选股票池或排序结果。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">15</span><span class="tax-slug">15-stock-comprehensive-analysis-and-selection</span></div>
+            <div class="tax-name">股票综合分析与选股决策</div>
+            <div class="tax-key"><b>定义</b>围绕个股、多标的组合或市场进行多维综合分析，并形成投资判断、趋势判断、强弱判断、买卖/持有建议、风险边界或操作策略的任务。核心是整合基本面、技术面、资金面、消息面和风险，给出可解释的决策结论。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+          <div class="tax-card">
+            <div class="tax-head"><span class="tax-id">16</span><span class="tax-slug">16-macro-information-qa</span></div>
+            <div class="tax-name">宏观信息问答</div>
+            <div class="tax-key"><b>定义</b>查询、整理或比较人口、卫生、教育、贫困、就业及其他宏观或社会经济统计指标的任务。核心是按指定国家、地区、城市、年份、指标定义和统计口径给出权威、可追溯的数值，并妥善处理缺失、估算、修订和跨对象可比性。</div>
+            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
+          </div>
+  </div>
+</section>

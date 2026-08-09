@@ -14,26 +14,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-SESSION = "session"
-CHAT = "chat"
+from query_pipeline.adapters import CHAT, SESSION, match_adapter
 
 _SAMPLE_LINES = 5
-
-
-def classify_record(record: dict[str, Any]) -> str | None:
-    has_thread = isinstance(record.get("thread_id"), str) and bool(record.get("thread_id"))
-    has_context = isinstance(record.get("context"), list)
-    has_judge = isinstance(record.get("judge_data"), dict)
-    if has_thread and has_context:
-        return SESSION
-    if has_judge:
-        return CHAT
-    if "thread_id" in record or "context" in record or "judge_data" in record:
-        raise ValueError(
-            "record has partial or malformed format markers "
-            "(thread_id/context/judge_data), cannot classify"
-        )
-    return None
 
 
 def sniff_format(path: Path, *, sample_lines: int = _SAMPLE_LINES) -> str:
@@ -54,7 +37,7 @@ def sniff_format(path: Path, *, sample_lines: int = _SAMPLE_LINES) -> str:
                 continue  # bad lines are handled by the pre-clean stage
             if not isinstance(record, dict):
                 continue
-            fmt = classify_record(record)
+            fmt = match_adapter(record)
             if fmt is not None:
                 seen.add(fmt)
             if len(seen) > 1:

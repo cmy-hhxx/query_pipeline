@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import tempfile
 import textwrap
 import unittest
@@ -10,13 +9,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.io.checkpoint import Checkpoint, _src_hash, content_key, stage_fingerprint
 from query_pipeline.pipeline.runner import run_pipeline
-
 
 def _make_turn(idx: int, question: str) -> dict[str, Any]:
     if idx % 2 == 0:
@@ -46,13 +41,11 @@ def _make_turn(idx: int, question: str) -> dict[str, Any]:
         "chain": [{"plan": "", "tools": [{"name": names[i % 3], "input": {}, "output": "x"}]} for i in range(8)],
     }
 
-
 def _session(thread_id: str, tag: str) -> dict[str, Any]:
     return {
         "thread_id": thread_id,
         "context": [_make_turn(0, f"{tag} simple"), _make_turn(1, f"{tag} complex query")],
     }
-
 
 class ScriptedClient:
     """Records every call; raises RuntimeError for prompts whose
@@ -101,7 +94,6 @@ class ScriptedClient:
     async def close(self) -> None:
         return None
 
-
 def _factory(
     clients: list[ScriptedClient],
     *,
@@ -119,7 +111,6 @@ def _factory(
 
     return factory
 
-
 def run_pipeline_with_fakes(
     cfg: Any,
     *,
@@ -135,7 +126,6 @@ def run_pipeline_with_fakes(
     ):
         summary = run_pipeline(cfg)
     return summary, clients[0] if clients else ScriptedClient()
-
 
 class CheckpointUnitTest(unittest.TestCase):
     def test_roundtrip_and_torn_tail(self) -> None:
@@ -182,7 +172,6 @@ class CheckpointUnitTest(unittest.TestCase):
         self.assertEqual(content_key("a", "b"), content_key("a", "b"))
         self.assertNotEqual(content_key("a", "b"), content_key("a", "c"))
 
-
 class SessionResumeTest(unittest.TestCase):
     def test_session_stage_resumes_after_network_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,9 +205,8 @@ class SessionResumeTest(unittest.TestCase):
             )
             self.assertEqual(len(_checkpoint_keys(cp_path)), 3)
 
-            rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
+            rows = _read_jsonl(tmp_path / "out/cleaned_queries.jsonl")
             self.assertEqual([r["input"]["text"] for r in rows], ["S0 complex query", "S1 complex query", "S2 complex query"])
-
 
 class VerifyResumeTest(unittest.TestCase):
     def test_verify_stage_resumes_after_network_failure(self) -> None:
@@ -247,7 +235,6 @@ class VerifyResumeTest(unittest.TestCase):
                 [],
             )
 
-
 class TranslateResumeTest(unittest.TestCase):
     def test_translate_stage_resumes_after_network_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,9 +256,8 @@ class TranslateResumeTest(unittest.TestCase):
             self.assertEqual(summary2.stats["translate_failed"], 0)
             self.assertEqual([c["text"] for c in client2.calls if "text" in c], ["T1 complex query"])
 
-            rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
+            rows = _read_jsonl(tmp_path / "out/cleaned_queries.jsonl")
             self.assertEqual(rows[1]["translation"], "翻译：T1 complex query")
-
 
 class CheckpointInvalidationTest(unittest.TestCase):
     def test_input_change_invalidates_session_checkpoint(self) -> None:
@@ -300,7 +286,7 @@ class CheckpointInvalidationTest(unittest.TestCase):
                 ["W0 complex query NEW"],
             )
 
-            rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
+            rows = _read_jsonl(tmp_path / "out/cleaned_queries.jsonl")
             texts = [r["input"]["text"] for r in rows]
             self.assertIn("W0 complex query NEW", texts)
             self.assertNotIn("W0 complex query", texts)
@@ -316,7 +302,6 @@ class CheckpointInvalidationTest(unittest.TestCase):
             with patch("query_pipeline.io.checkpoint._src_hash", return_value="bbbb"):
                 fp_b = stage_fingerprint(cfg, "judge")
         self.assertNotEqual(fp_a, fp_b)
-
 
 def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
     config_path = tmp_path / "config.yaml"
@@ -340,7 +325,9 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
               format: session
             output:
               dir: out
+              cleaned_queries: cleaned_queries.jsonl
               complex_queries: complex_queries.jsonl
+              normal_queries: normal_queries.jsonl
               summary: summary.json
             work_dir: work
             segmentation:
@@ -376,16 +363,13 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
     )
     return config_path
 
-
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text(
         "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in rows), encoding="utf-8"
     )
 
-
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
 
 def _checkpoint_keys(path: Path) -> set[str]:
     keys: set[str] = set()
@@ -396,7 +380,6 @@ def _checkpoint_keys(path: Path) -> set[str]:
         if row.get("type") != "meta":
             keys.add(row["key"])
     return keys
-
 
 if __name__ == "__main__":
     unittest.main()

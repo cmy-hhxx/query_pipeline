@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 from typing import Any
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from query_pipeline.quality.rules import check_record
 
 LONG = "这是一段足够长的正常回答。" * 20
-
 
 def _row(**overrides: Any) -> dict[str, Any]:
     row = {
@@ -42,10 +36,8 @@ def _row(**overrides: Any) -> dict[str, Any]:
     row.update(overrides)
     return row
 
-
 def _rules(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["rule"]: item for item in check_record(row)}
-
 
 class QcAnswerRuleTest(unittest.TestCase):
     def test_refusal_rule(self) -> None:
@@ -65,7 +57,6 @@ class QcAnswerRuleTest(unittest.TestCase):
         self.assertTrue(rules["refusal"]["ok"])
         self.assertTrue(rules["event_type"]["ok"])
         self.assertTrue(rules["truncation"]["ok"])
-
 
 if __name__ == "__main__":
     unittest.main()

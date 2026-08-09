@@ -1,0 +1,68 @@
+/* BASE — 设计变量、全局重置、基础排版 */
+:root {
+  --bg: #fff;
+  --surface: #fff;
+  --surface-soft: #fff;
+  --ink: #111;
+  --ink-soft: #333;
+  --muted: #737373;
+  --line: #dedede;
+  --line-strong: #999;
+  --red: #9c1d1d;
+  --red-soft: #fff;
+  --red-line: #9c1d1d;
+  --amber: #737373;
+  --amber-soft: #fff;
+  --green: #111;
+  --green-soft: #fff;
+  --focus: #9c1d1d;
+  --max: 1120px;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+  background: #fff;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+main {
+  display: flex;
+  width: min(var(--max), calc(100% - 48px));
+  margin: 0 auto;
+  padding: clamp(36px, 6vw, 72px) 0 72px;
+  flex-direction: column;
+}
+h1,
+h2,
+h3 {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+code,
+pre,
+.tax-id,
+.tax-slug {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+code {
+  color: var(--ink);
+  background: transparent;
+}
+button {
+  font: inherit;
+}
+button:focus-visible,
+summary:focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--focus), transparent 72%);
+  outline-offset: 2px;
+}
