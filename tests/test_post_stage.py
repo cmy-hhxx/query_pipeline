@@ -419,7 +419,7 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertEqual(summary.stats["dedup_removed"], 0)  # post disabled
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1"}
+                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1", "last_event_type": None}
             )  # post stage 不再触碰 meta
             self.assertIsNone(rows[0]["translation"])  # 中文原文 → null（post 关闭时亦然）
 
@@ -451,7 +451,7 @@ def _make_turn(
 ) -> dict[str, Any]:
     return {
         "question": question,
-        "answer": f"answer{idx}",
+        "answer": f"answer{idx} " + "x" * 60,
         "run_id": f"{prefix}r{idx}",
         "trace_id": f"{prefix}trace{idx}",
         "request_time": f"2026-08-05 04:{idx:02d}:00",

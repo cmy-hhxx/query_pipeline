@@ -22,6 +22,7 @@ class Turn(BaseModel):
     user_id: str = ""
     status: str | None = "completed"
     outcome: str | None = "success"
+    last_event_type: str | None = None  # session dialect: runFinished / runCancelled / ...
     tool_names: str = ""  # fallback when chain has no tools (from tool_names / tool_names_text)
     tool_count: int | None = None  # authoritative tool-call count when chain is absent
 

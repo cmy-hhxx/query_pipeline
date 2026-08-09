@@ -23,7 +23,7 @@ def _make_turn(idx: int, question: str) -> dict[str, Any]:
         # simple turn: too few tool calls to be a candidate
         return {
             "question": question,
-            "answer": f"answer{idx}",
+            "answer": f"answer{idx} " + "x" * 60,
             "run_id": f"r{idx}",
             "trace_id": f"trace{idx}",
             "status": "completed",
@@ -36,7 +36,7 @@ def _make_turn(idx: int, question: str) -> dict[str, Any]:
     names = ("web_search", "finquery", "compute")
     return {
         "question": question,
-        "answer": f"answer{idx}",
+        "answer": f"answer{idx} " + "x" * 60,
         "run_id": f"r{idx}",
         "trace_id": f"trace{idx}",
         "status": "completed",

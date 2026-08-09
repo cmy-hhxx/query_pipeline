@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from query_pipeline.models.output import OutputRow
+from query_pipeline.steps.answer_gate_stage import _DANGLING_END, _REFUSAL_PATTERNS
 from query_pipeline.taxonomy import COMPLEX_PREFIX, load_taxonomy
 from query_pipeline.post.dedup import dedup_rows
 from query_pipeline.config.models import DedupConfig
@@ -134,6 +135,26 @@ def _check_answer(row: dict[str, Any]) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _check_refusal(row: dict[str, Any]) -> tuple[bool, str]:
+    text = (row.get("text_answer") or "").strip()
+    if not text:
+        return False, "text_answer 为空"
+    for pattern in _REFUSAL_PATTERNS:
+        if pattern.search(text):
+            return False, f"回答疑似拒绝（命中 {pattern.pattern[:40]}）：{text[:60]}"
+    return True, "ok"
+
+
+def _check_event_type(row: dict[str, Any]) -> tuple[bool, str]:
+    meta = row.get("meta")
+    event = meta.get("last_event_type") if isinstance(meta, dict) else None
+    if event is None:
+        return True, "ok"  # chat rows carry no event field
+    if event != "runFinished":
+        return False, f"last_event_type={event}（回答不完整/非正常回答）"
+    return True, "ok"
+
+
 def _check_truncation(row: dict[str, Any]) -> tuple[bool, str]:
     text = (row.get("text_answer") or "").strip()
     if not text:
@@ -191,6 +212,8 @@ PER_RECORD_RULES: list[RuleCheck] = [
     RuleCheck("chain", _check_chain),
     RuleCheck("answer", _check_answer),
     RuleCheck("truncation", _check_truncation),
+    RuleCheck("refusal", _check_refusal),
+    RuleCheck("event_type", _check_event_type),
     RuleCheck("timing", _check_timing),
     RuleCheck("meta", _check_meta),
 ]

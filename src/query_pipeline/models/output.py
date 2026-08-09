@@ -23,6 +23,7 @@ class OutputMeta(BaseModel):
     reason: str | None = None
     request_time: str = ""
     run_id: str = ""
+    last_event_type: str | None = None
 
 
 class ContextTurn(BaseModel):

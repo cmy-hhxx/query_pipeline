@@ -41,7 +41,7 @@ def _make_turn(
 ) -> dict[str, Any]:
     return {
         "question": question,
-        "answer": answer if answer is not None else f"answer{idx}",
+        "answer": answer if answer is not None else f"answer{idx} " + "x" * 60,
         "run_id": f"r{idx}",
         "trace_id": f"trace{idx}",
         "request_time": f"2026-08-05 04:{idx:02d}:00",
@@ -359,7 +359,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         row = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), segment, idx=2, category_id="03")
         self.assertEqual(
             row["context"],
-            [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}],
+            [{"question": "Q1 简单查询", "answer": "answer0 " + "x" * 60}, {"question": "Q2 复杂取数", "answer": "answer1 " + "x" * 60}],
         )
         # Session-first turn: context stays empty (nothing precedes it).
         first = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), Segment(start=0, end=3, topic="topic"), idx=0, category_id="03")
@@ -395,15 +395,15 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["trace_id"], "trace2")  # original input turn's trace_id
         self.assertEqual(row["category"], "complex-topic/03-analysis-research")
         self.assertEqual(row["input"]["text"], "Q3 复杂预测")
-        self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}])
+        self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0 " + "x" * 60}, {"question": "Q2 复杂取数", "answer": "answer1 " + "x" * 60}])
         self.assertEqual(row["tools"], ["web_search", "finquery", "compute"])
-        self.assertEqual(row["raw_answer"], "answer2")
-        self.assertEqual(row["text_answer"], "answer2")
+        self.assertEqual(row["raw_answer"], "answer2 " + "x" * 60)
+        self.assertEqual(row["text_answer"], "answer2 " + "x" * 60)
         self.assertEqual(row["user_id"], "u2")
         self.assertEqual(row["difficulty_level"], "hard")
         self.assertEqual(
             row["meta"],
-            {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "run_id": "r2"},
+            {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "run_id": "r2", "last_event_type": None},
         )
         self.assertIsNone(row["translation"])  # 中文原文 → null
         self.assertEqual(row["first_token_time_ms"], 200)
@@ -445,9 +445,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["trace_id"], "trace1")
             self.assertEqual(row["category"], "complex-topic/01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
-            self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
+            self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0 " + "x" * 60}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1"})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1", "last_event_type": None})
             self.assertIsNone(row["translation"])  # 中文原文 → null
             normal = rows[1]
             self.assertEqual(normal["trace_id"], "trace2")
@@ -683,8 +683,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                     "input": {"text": "Q2 复杂取数", "image": None, "file": None},
                     "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
                     "chain": [{"plan": "", "tools": [{"name": "web_search", "input": {}, "output": "x"}]}],
-                    "raw_answer": "raw_answer",
-                    "text_answer": "text_answer",
+                    "raw_answer": "raw_answer " + "y" * 60,
+                    "text_answer": "text_answer " + "y" * 60,
                     "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
                 },
             }
@@ -710,9 +710,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["tools"], ["web_search"])
-            self.assertEqual(row["raw_answer"], "raw_answer")
-            self.assertEqual(row["text_answer"], "text_answer")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": ""})
+            self.assertEqual(row["raw_answer"], "raw_answer " + "y" * 60)
+            self.assertEqual(row["text_answer"], "text_answer " + "y" * 60)
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "", "last_event_type": None})
 
     def test_end_to_end_chat_respects_tool_gates(self) -> None:
         # Chat records always carry judge_data.chain, so the chain/tool AND-gates
@@ -729,8 +729,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                     "input": {"text": "Q2 复杂取数", "image": None, "file": None},
                     "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
                     "chain": [{"plan": "", "tools": [{"name": "web_search", "input": {}, "output": "x"}]}],
-                    "raw_answer": "raw_answer",
-                    "text_answer": "text_answer",
+                    "raw_answer": "raw_answer " + "y" * 60,
+                    "text_answer": "text_answer " + "y" * 60,
                     "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
                 },
             }
@@ -743,8 +743,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                     "input": {"text": "Q2 复杂取数", "image": None, "file": None},
                     "context": [{"question": "Q1 简单查询", "answer": "answer0"}],
                     "chain": _chain_with_steps(8, names),
-                    "raw_answer": "raw_answer",
-                    "text_answer": "text_answer",
+                    "raw_answer": "raw_answer " + "y" * 60,
+                    "text_answer": "text_answer " + "y" * 60,
                     "meta": {"session_round": 2, "request_time": "2026-08-05 04:01:00"},
                 },
             }

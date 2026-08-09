@@ -20,7 +20,7 @@ Stage = Callable[
     Awaitable[PipelineContext],
 ]
 
-DEFAULT_STAGES: tuple[str, ...] = ("preclean", "segment", "rule_gate", "judge", "verify", "post")
+DEFAULT_STAGES: tuple[str, ...] = ("preclean", "segment", "rule_gate", "judge", "verify", "answer_gate", "post")
 
 REGISTRY: dict[str, Stage] = {}
 

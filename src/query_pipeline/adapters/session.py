@@ -44,6 +44,7 @@ def adapt_turn(raw: dict[str, Any]) -> Turn:
         user_id=_as_str(raw.get("user_id")),
         status=raw.get("status", "completed"),
         outcome=raw.get("outcome", "success"),
+        last_event_type=raw.get("last_event_type"),
         tool_names=_tool_names_fallback(raw),
         tool_count=raw.get("tool_count"),
     )

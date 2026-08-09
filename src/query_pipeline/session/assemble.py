@@ -63,6 +63,11 @@ def assemble_row(
         output_tokens=turn.output_tokens,
         request_time_ms=_request_time_ms(turn.request_time),
         difficulty_level=difficulty,
-        meta=OutputMeta(reason=reason, request_time=turn.request_time, run_id=turn.run_id),
+        meta=OutputMeta(
+            reason=reason,
+            request_time=turn.request_time,
+            run_id=turn.run_id,
+            last_event_type=turn.last_event_type,
+        ),
     )
     return row.model_dump(mode="python")
