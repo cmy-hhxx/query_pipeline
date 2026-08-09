@@ -91,15 +91,18 @@ class ApiTest(unittest.TestCase):
             api_run("/nonexistent/input.jsonl")
 
     def test_default_output_dir(self) -> None:
+        # unique dataset dir so the default outputs/<parent> path can never
+        # collide with real deliverables under the repo's outputs/
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            src = tmp_path / "aime" / "0806.jsonl"
+            src = tmp_path / "zz_api_fixture" / "0806.jsonl"
             src.parent.mkdir()
             src.write_text(_session_lines(), encoding="utf-8")
             with patch("query_pipeline.pipeline.runner.LLMClient", RecordingClient):
                 summary = api_run(src, work_dir=tmp_path / "work")
             out = Path(summary["output_files"]["complex_queries"])
-            self.assertEqual(out.parent, Path("outputs") / "aime")
+            self.assertEqual(out.parent, Path("outputs") / "zz_api_fixture")
+            self.assertTrue(out.parent.exists())
 
 
 class CliTest(unittest.TestCase):
