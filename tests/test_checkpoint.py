@@ -196,7 +196,7 @@ class SessionResumeTest(unittest.TestCase):
             summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
-            cp_path = tmp_path / "work/checkpoints/judge.jsonl"
+            cp_path = tmp_path / "work" / "logs" / "checkpoints" / "judge.jsonl"
             self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
             # Run 2: only t1's judge re-runs; t0/t2 replay from checkpoint.

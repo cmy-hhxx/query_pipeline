@@ -68,7 +68,7 @@ class LLMConfig(ConfigModel):
     max_retries: int = 5
     timeout_seconds: float = 90.0
     response_format: str = "json_object"
-    cache: Path = Path("work/llm_cache.jsonl")
+    cache: Path | None = None  # None -> <work_dir>/logs/llm_cache.jsonl
 
 
 class VerifyConfig(ConfigModel):
@@ -121,7 +121,7 @@ class PostConfig(ConfigModel):
 
 class CheckpointConfig(ConfigModel):
     enabled: bool = True
-    dir: Path = Path("work/checkpoints")
+    dir: Path | None = None  # None -> <work_dir>/logs/checkpoints
 
 
 class DebugConfig(ConfigModel):
@@ -130,9 +130,20 @@ class DebugConfig(ConfigModel):
 
 class PipelineConfig(ConfigModel):
     name: str = "question_pipeline"
+
+    @property
+    def cache_path(self) -> Path:
+        """LLM 缓存实际路径（默认 <work_dir>/logs/llm_cache.jsonl）。"""
+        return self.llm.cache or (self.work_dir or Path("logs")) / "logs" / "llm_cache.jsonl"
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        """阶段 checkpoint 实际目录（默认 <work_dir>/logs/checkpoints）。"""
+        return self.checkpoint.dir or (self.work_dir or Path("logs")) / "logs" / "checkpoints"
+
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
-    work_dir: Path = Path("work")
+    work_dir: Path | None = None  # None -> output.dir（产物、日志、缓存同目录）
     stages: list[str] | None = None  # None -> pipeline default stage order
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     rule_gate: RuleGateConfig = Field(default_factory=RuleGateConfig)

@@ -9,8 +9,6 @@ output:
   complex_queries: complex_queries_0807.jsonl
   summary: summary_0807.json
 
-work_dir: work/aime/0807
-
 segmentation:
   enabled: true
 
@@ -52,11 +50,9 @@ llm:
   max_retries: 5
   timeout_seconds: 90
   response_format: json_object
-  cache: work/aime/0807/llm_cache.jsonl
 
 checkpoint:
   enabled: true
-  dir: work/aime/0807/checkpoints
 
 debug:
   dump_intermediates: true

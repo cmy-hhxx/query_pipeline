@@ -36,7 +36,7 @@ async def run_post_stage(
             client=client,
             llm_cfg=cfg.llm,
             cache=cache,
-            cache_path=cfg.llm.cache,
+            cache_path=cfg.cache_path,
             checkpoint=checkpoint,
             cache_lock=cache_lock,
         )

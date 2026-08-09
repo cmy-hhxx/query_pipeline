@@ -94,7 +94,7 @@ def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
 
 
 def stage_checkpoint(cfg: PipelineConfig, stage: str) -> "Checkpoint":
-    path = cfg.checkpoint.dir / f"{stage}.jsonl"
+    path = cfg.checkpoint_dir / f"{stage}.jsonl"
     if not cfg.checkpoint.enabled:
         return Checkpoint(path=path, enabled=False)
     return Checkpoint.load(path, expected_meta=stage_meta(cfg, stage))

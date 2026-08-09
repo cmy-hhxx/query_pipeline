@@ -18,7 +18,7 @@ class PipelineContext:
 
     @property
     def work_dir(self) -> Path:
-        return self.config.work_dir
+        return self.config.work_dir or self.config.output.dir
 
     @property
     def output_dir(self) -> Path:

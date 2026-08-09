@@ -40,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", default="gpt-5.4-mini", help="judge 模型（默认复用管线模型）")
     run.add_argument("--concurrency", type=int, default=64, help="LLM 并发数")
     run.add_argument("--input", type=Path, help="输出 jsonl 路径覆盖（默认 outputs/<dataset>/cleaned_queries.jsonl）")
-    run.add_argument("--qc-dir", type=Path, help="QC 产物目录覆盖（默认 work/<dataset>/<date>/qc）")
-    run.add_argument("--cache", type=Path, help="LLM 缓存文件覆盖（默认 work/<dataset>/<date>/llm_cache.jsonl）")
+    run.add_argument("--qc-dir", type=Path, help="QC 产物目录覆盖（默认 outputs/<dataset>/qc）")
+    run.add_argument("--cache", type=Path, help="LLM 缓存文件覆盖（默认 outputs/<dataset>/logs/llm_cache.jsonl）")
     run.add_argument("-v", "--verbose", action="store_true")
     return parser
 

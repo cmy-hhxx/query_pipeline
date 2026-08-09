@@ -34,7 +34,7 @@ async def run_segment_stage(
                 turns=turns,
                 llm_cfg=cfg.llm,
                 cache=cache,
-                cache_path=cfg.llm.cache,
+                cache_path=cfg.cache_path,
                 cache_lock=cache_lock,
             )
         return session.thread_id, segments

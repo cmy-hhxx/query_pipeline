@@ -18,8 +18,10 @@ def source_path(dataset: str, date: str, root: Path | None = None) -> Path:
 
 
 def qc_dir(dataset: str, date: str, root: Path | None = None) -> Path:
-    return (root or project_root()) / "work" / dataset / date / "qc"
+    # QC 产物与管线产物同在一个数据集目录（outputs/<dataset>/qc/），date 仅用于产物内标注。
+    return (root or project_root()) / "outputs" / dataset / "qc"
 
 
 def llm_cache_path(dataset: str, date: str, root: Path | None = None) -> Path:
-    return (root or project_root()) / "work" / dataset / date / "llm_cache.jsonl"
+    # 复用管线 LLM 缓存（outputs/<dataset>/logs/llm_cache.jsonl）
+    return (root or project_root()) / "outputs" / dataset / "logs" / "llm_cache.jsonl"

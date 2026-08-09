@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--concurrency", type=int, default=256, help="Parallel LLM calls")
     run_parser.add_argument("--stages", default=None, help="Comma-separated stage names (default: built-in order)")
     run_parser.add_argument("--no-post", action="store_true", help="Skip dedup/translate")
-    run_parser.add_argument("--work-dir", default=None, help="Scratch dir (default: work/<input stem>)")
+    run_parser.add_argument("--work-dir", default=None, help="Scratch dir override (default: the output dir)")
     run_parser.add_argument("--no-llm", action="store_true", help="Rules only (empty output expected)")
     run_parser.add_argument("-v", "--verbose", action="store_true")
     return parser

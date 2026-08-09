@@ -28,7 +28,7 @@ JSONL，一行一条，格式**自动识别**（`format: auto`，可显式覆盖
 - **session**：顶层 `thread_id` + `context[]`；每个 turn 含 `question`/`answer`/`trace_id`/`run_id`/`status`/`outcome`/`last_event_type`/`chain`/`tool_names`/`tool_count` 等。所有 turn 参与筛选。
 - **chat**：judge_data 包装的单题。`judge_data.context`（前文）+ `judge_data.input.text`（目标问句）+ `chain`/`meta`；只取末轮为候选。chat 记录必然携带 `judge_data.chain`，工具门槛同样生效。
 
-混合/无法识别的文件**报错退出**（不静默处理）。坏行 → `work/<name>/bad_lines.jsonl`；输入按 trace/thread id 去重；空 context 会话过滤。
+混合/无法识别的文件**报错退出**（不静默处理）。坏行 → `outputs/<数据集>/logs/bad_lines.jsonl`；输入按 trace/thread id 去重；空 context 会话过滤。
 
 ## 流程（stage 可插拔，默认顺序）
 
@@ -62,7 +62,7 @@ preclean → segment → rule_gate → judge → verify → answer_gate → post
 
 ## 断点续跑
 
-杀进程后直接重跑，已完成单元跳过：LLM 缓存 `work/<name>/llm_cache.jsonl` + 阶段 checkpoint `work/<name>/checkpoints/`（judge/verify/translate）。配置/输入/源码变化自动失效。强制全量重跑：删 checkpoints 和 llm_cache。
+杀进程后直接重跑，已完成单元跳过：LLM 缓存 + 阶段 checkpoint 都在 `outputs/<数据集>/logs/` 下（judge/verify/translate）。配置/输入/源码变化自动失效。强制全量重跑：删 logs/checkpoints 和 logs/llm_cache.jsonl。
 
 ## 质检（quality）
 

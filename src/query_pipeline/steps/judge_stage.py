@@ -169,7 +169,7 @@ async def _process_session(
             idx=idx,
             llm_cfg=ctx.config.llm,
             cache=cache,
-            cache_path=ctx.config.llm.cache,
+            cache_path=ctx.config.cache_path,
             cache_lock=cache_lock,
         ),
         concurrency=ctx.config.llm.concurrency,

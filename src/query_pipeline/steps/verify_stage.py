@@ -85,7 +85,7 @@ async def run_verify_stage(
                     parsed = parse_verify_response(raw)
                     await put_cache(
                         cache,
-                        cfg.llm.cache,
+                        cfg.cache_path,
                         cache_key,
                         parsed.to_cache_label(),
                         meta={

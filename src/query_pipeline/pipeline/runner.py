@@ -49,7 +49,7 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
     cache_lock = asyncio.Lock()
     if config.llm.enabled:
         client = LLMClient(config.llm)
-        cache = load_cache(config.llm.cache)
+        cache = load_cache(config.cache_path)
 
     try:
         for name in stage_names(ctx.config.stages):

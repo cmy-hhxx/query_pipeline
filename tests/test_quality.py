@@ -336,7 +336,7 @@ class ApiTest(unittest.TestCase):
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
 
-        qc = root / "work" / "aime" / "0807" / "qc"
+        qc = root / "outputs" / "aime" / "qc"
         qc.mkdir(parents=True, exist_ok=True)
         overview_data = {
             "dataset": "aime",
