@@ -15,4 +15,5 @@ outputs_*/
 work_*
 logs/
 .reasonix
-.DS_Store
+dist/
+.pytest_cache/
