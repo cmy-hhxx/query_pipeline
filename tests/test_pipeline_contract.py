@@ -196,6 +196,7 @@ class SessionPipelineContractTest(unittest.TestCase):
         current = session.turns[2]
         self.assertEqual(current.question, "当前问句")
         self.assertEqual(current.answer, "text")  # text_answer preferred over raw_answer
+        self.assertEqual(current.answer_full, "raw")  # raw_answer 独立保留
         self.assertEqual(current.trace_id, "t1")
         self.assertEqual(current.first_token_ms, 10)
         self.assertEqual(current.request_time, "2026-08-05 04:02:00")
@@ -383,13 +384,12 @@ class SessionPipelineContractTest(unittest.TestCase):
         segment = Segment(start=0, end=3, topic="topic")
         row = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), segment, idx=2, category_id="03", reason="需要多步分析")
 
-        self.assertEqual(row["capture_mode"], "full_link")
+        self.assertEqual(row["capture_mode"], "full_link")  # turn 带 chain
         self.assertEqual(row["user_cohort"], "regular")
         self.assertEqual(row["source_case_id"], "t1")
         self.assertEqual(row["trace_id"], "trace2")  # original input turn's trace_id
         self.assertEqual(row["category"], "03-analysis-research")
         self.assertEqual(row["input"]["text"], "Q3 复杂预测")
-        self.assertEqual(row["session_round"], 3)  # 1-based within segment
         self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}, {"question": "Q2 复杂取数", "answer": "answer1"}])
         self.assertEqual(row["tools"], ["web_search", "finquery", "compute"])
         self.assertEqual(row["raw_answer"], "answer2")
@@ -398,11 +398,16 @@ class SessionPipelineContractTest(unittest.TestCase):
         self.assertEqual(row["difficulty_level"], "hard")
         self.assertEqual(
             row["meta"],
-            {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "run_id": "r2", "translation": ""},
+            {"reason": "需要多步分析", "request_time": "2026-08-05 04:02:00", "run_id": "r2"},
         )
+        self.assertIsNone(row["translation"])  # 中文原文 → null
         self.assertEqual(row["first_token_time_ms"], 200)
         self.assertEqual(row["finish_answer_time_ms"], 400)
         self.assertFalse(any(k in row["context"][0] for k in ("chain", "tools", "run_id")))
+
+        # 无 chain 的 turn → capture_mode=end2end
+        row_no_chain = assemble_row(adapt_session({"thread_id": "t1", "context": turns}), segment, idx=3, category_id="01", reason="r")
+        self.assertEqual(row_no_chain["capture_mode"], "end2end")
 
     def test_end_to_end_produces_complex_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -433,10 +438,10 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["trace_id"], "trace1")
             self.assertEqual(row["category"], "01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
-            self.assertEqual(row["session_round"], 2)
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1", "translation": ""})
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1"})
+            self.assertIsNone(row["translation"])  # 中文原文 → null
 
     def test_end_to_end_llm_failure_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -461,7 +466,6 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["trace_id"], "trace2")
             self.assertEqual(rows[0]["category"], "02-forecasting-and-projection")
-            self.assertEqual(rows[0]["session_round"], 3)
             self.assertEqual(len(rows[0]["context"]), 2)
 
     def test_end_to_end_verify_filters_context_only_rows(self) -> None:
@@ -625,7 +629,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
         # Two candidate turns with identical English text: verify keeps both,
-        # dedup drops the second, translate fills meta.translation on the
+        # dedup drops the second, translate fills top-level translation on the
         # survivor, and the client closes inside the same event loop.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -652,7 +656,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["trace_id"], "trace1")
-            self.assertEqual(rows[0]["meta"]["translation"], "翻译：complex calc A")
+            self.assertEqual(rows[0]["translation"], "翻译：complex calc A")
 
     def test_end_to_end_chat_format(self) -> None:
         # input.format=chat: each line is a single-case question with a
@@ -694,11 +698,11 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["trace_id"], "t1")
             self.assertEqual(row["category"], "01-data-metrics-calculation")
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
-            self.assertEqual(row["session_round"], 2)  # context_len + 1 == judge_data.meta.session_round
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0"}])
             self.assertEqual(row["tools"], ["web_search"])
-            self.assertEqual(row["raw_answer"], "text_answer")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "", "translation": ""})
+            self.assertEqual(row["raw_answer"], "raw_answer")
+            self.assertEqual(row["text_answer"], "text_answer")
+            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": ""})
 
     def test_end_to_end_chat_with_step1_enabled(self) -> None:
         # last_only must ignore step1 chain/tool AND-gates: a single-tool-call trailing

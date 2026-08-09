@@ -32,6 +32,7 @@ def adapt_turn(raw: dict[str, Any]) -> Turn:
     return Turn(
         question=_as_str(raw.get("question")),
         answer=_as_str(raw.get("answer") or raw.get("answer_full")),
+        answer_full=_as_str(raw.get("answer_full") or raw.get("answer")),
         trace_id=_as_str(raw.get("trace_id")),
         run_id=_as_str(raw.get("run_id")),
         chain=chain if isinstance(chain, list) else [],

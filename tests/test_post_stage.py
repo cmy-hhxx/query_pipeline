@@ -218,7 +218,7 @@ class DedupTest(unittest.TestCase):
 
 
 class TranslateTest(unittest.TestCase):
-    def test_adds_translation_to_meta(self) -> None:
+    def test_adds_translation_to_row(self) -> None:
         rows = [_row("how to hedge against inflation", "r1")]
 
         async def handler(system_prompt: str, user_prompt: str) -> str:
@@ -236,7 +236,7 @@ class TranslateTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(rows[0]["meta"]["translation"], "如何对冲通胀")
+        self.assertEqual(rows[0]["translation"], "如何对冲通胀")
         self.assertEqual(counters, {"translated": 1, "translate_skipped": 0, "translate_failed": 0})
 
     def test_adds_translation_with_null_meta(self) -> None:
@@ -264,7 +264,8 @@ class TranslateTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(rows[0]["meta"]["translation"], "如何对冲通胀")
+        self.assertEqual(rows[0]["translation"], "如何对冲通胀")
+        self.assertIsNone(rows[0]["meta"])  # 不再触碰 meta
 
     def test_chinese_text_skipped_no_llm_call(self) -> None:
         rows = [_row("如何对冲通胀风险", "r1")]
@@ -284,10 +285,10 @@ class TranslateTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(rows[0]["meta"]["translation"], "如何对冲通胀风险")
+        self.assertIsNone(rows[0]["translation"])  # 中文原文 → null
         self.assertEqual(counters, {"translated": 0, "translate_skipped": 1, "translate_failed": 0})
 
-    def test_failure_falls_back_to_original(self) -> None:
+    def test_failure_leaves_null(self) -> None:
         rows = [_row("how to hedge against inflation", "r1")]
 
         async def handler(system_prompt: str, user_prompt: str) -> str:
@@ -305,7 +306,7 @@ class TranslateTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(rows[0]["meta"]["translation"], "how to hedge against inflation")
+        self.assertIsNone(rows[0]["translation"])  # 翻译失败 → null（fail-open 保留行）
         self.assertEqual(counters, {"translated": 0, "translate_skipped": 0, "translate_failed": 1})
 
     def test_cache_round_trip_reuses_translation(self) -> None:
@@ -345,7 +346,7 @@ class TranslateTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(rows2[0]["meta"]["translation"], "如何对冲通胀")
+        self.assertEqual(rows2[0]["translation"], "如何对冲通胀")
         self.assertEqual(counters2, {"translated": 1, "translate_skipped": 0, "translate_failed": 0})
 
     def test_needs_translation_heuristics(self) -> None:
@@ -395,7 +396,7 @@ class PostStagePipelineTest(unittest.TestCase):
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source_case_id"], "t1")  # first occurrence kept
-            self.assertEqual(rows[0]["meta"]["translation"], "利率上升如何影响债券价格？")
+            self.assertEqual(rows[0]["translation"], "利率上升如何影响债券价格？")
             self.assertEqual(rows[0]["meta"]["reason"], "需要预测")
 
             deduped = list(read_jsonl(tmp_path / "work" / "deduped.jsonl"))
@@ -417,8 +418,9 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertNotIn("dedup_removed", summary.stats)
             rows = list(read_jsonl(tmp_path / "out" / "complex_queries.jsonl"))
             self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1", "translation": ""}
-            )  # untouched by post stage
+                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1"}
+            )  # post stage 不再触碰 meta
+            self.assertIsNone(rows[0]["translation"])  # 中文原文 → null（post 关闭时亦然）
 
 
 def _turns(prefix: str) -> list[dict[str, Any]]:

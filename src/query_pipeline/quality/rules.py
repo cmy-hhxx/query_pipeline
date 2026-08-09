@@ -28,7 +28,8 @@ _DANGLING_END = ",，:：-—–"
 _CONTENT_FIELDS = ("text_answer", "raw_answer", "input.text", "category", "tools", "meta.reason")
 
 # Key fields whose empty rate is tracked at the dataset level.
-_KEY_FIELDS = ("trace_id", "source_case_id", "category", "input.text", "text_answer", "meta.reason", "meta.translation")
+# translation 不入空值率统计：中文问句按规范 translation=null 属正常（见 _check_meta 逐条校验）
+_KEY_FIELDS = ("trace_id", "source_case_id", "category", "input.text", "text_answer", "meta.reason")
 
 
 @dataclass(frozen=True)
@@ -161,9 +162,6 @@ def _check_timing(row: dict[str, Any]) -> tuple[bool, str]:
             return False, f"{field} 非数值：{value!r}"
         if isinstance(value, (int, float)) and value < 0:
             return False, f"{field} 为负：{value!r}"
-    session_round = row.get("session_round")
-    if isinstance(session_round, (int, float)) and session_round < 1:
-        return False, f"session_round 非法：{session_round!r}"
     return True, "ok"
 
 
@@ -176,10 +174,15 @@ def _check_meta(row: dict[str, Any]) -> tuple[bool, str]:
         return False, "meta.reason 缺失或为空"
     inp = row.get("input")
     question = inp.get("text") if isinstance(inp, dict) else ""
+    translation = row.get("translation")
     if _has_cjk(str(question)):
-        translation = meta.get("translation")
+        # 中文问句不需要翻译：translation 应为 null（旧语义是回填原文，已废弃）
+        if translation is not None and str(translation).strip():
+            return False, "中文问句不应有 translation（应为 null）"
+    else:
+        # 非中文问句需要翻译：translation 应非空
         if not isinstance(translation, str) or not translation.strip():
-            return False, "中文问句缺少 meta.translation 翻译"
+            return False, "非中文问句缺少 translation 翻译"
     return True, "ok"
 
 

@@ -46,15 +46,15 @@ def assemble_row(
     ]
     row = OutputRow(
         source_case_id=session.thread_id,
+        capture_mode="full_link" if turn.chain else "end2end",
         trace_id=turn.trace_id,
         category=f"{category_id}-{ENGLISH_CATEGORIES[category_id]}",
         input=OutputInput(text=turn.question),
-        session_round=idx - segment.start + 1,
         context=prior,
         chain=turn.chain,
         tools=extract_tool_names(turn),
-        raw_answer=turn.answer,
-        text_answer=turn.answer,
+        raw_answer=turn.answer_full or turn.answer,
+        text_answer=turn.answer or turn.answer_full,
         user_id=turn.user_id,
         first_token_time_ms=turn.first_token_ms,
         finish_answer_time_ms=turn.total_duration_ms,

@@ -1,0 +1,81 @@
+// =====================================================================
+// 复杂金融问句输出行（filter_out schema）标准示例
+//
+// 真实产出为紧凑 JSONL（一行一条，无注释）；本文件是带注释的参考版，
+// 字段与 src/query_pipeline/session/assemble.py::assemble_row 逐项对齐，
+// 经 post_stage（dedup / translate）处理后即为最终输出。
+//
+// 取值口径按输入格式分两种（由 config 的 input.format 决定）：
+//   session：整条多轮会话，字段从顶层 thread_id / context[] 的 turn 映射；
+//   chat   ：judge_data 包装的单题，字段从 judge_data 及其 meta 映射。
+// 注释里 "session: X；chat: Y" 分别给出两种格式的取值来源。
+//
+// 标注 "预留" 的字段是下游契约的一部分：当前管线取默认值或不填，
+// 由后续消费方填充；删除或改语义前必须与用户确认。
+//
+// meta 是预留逃生字段（OutputMeta extra="allow"）：任何额外键都会被原样
+// 保留并输出。新增需求优先加进 meta，避免改动顶层结构。
+// =====================================================================
+{
+  // --- 采集与样本归属 ---
+  "capture_mode": "full_link",      // 预留：采集方式。输入 turn 带 chain → "full_link"（工具链路采集）；不带 chain → "end2end"（纯问答直出）。两格式相同
+  "user_cohort": "regular",         // 预留：用户分层，默认 "regular"，后续消费方填充。两格式相同
+  "source_case_id": "case_id",      // 会话标识。session: 顶层 thread_id；chat: judge_data.case_id（缺省回退顶层 trace_id）
+  "answer_key": "",                 // 预留：答案评测锚点，当前不填
+  "trace_id": "trace_id",           // 行主键，对应当前 turn。session: turn.trace_id；chat: judge_data.trace_id（缺省回退顶层 trace_id）
+
+  // --- 分类 ---
+  "category": "03-analysis-research", // "{category_id}-{英文slug}"；01..09 定义见 src/query_pipeline/models/records.py。两格式相同
+
+  // --- 问句本体 ---
+  "input": {
+    "text": "请分析某上市公司近期业绩变化",  // 用户问句。session: turn.question；chat: judge_data.input.text（缺省回退顶层 question）
+    "image": "",                      // 预留：图片。chat 源 judge_data.input 携带，当前管线不透传
+    "file": ""                        // 预留：附件。同上
+  },
+  "context": [                    // 前文对话，每项仅 {question, answer}（刻意精简；更细的 turn 信息按需进 meta）。
+    {                             // session: 同段前文（段首回退整会话前文，会话首轮为空数组）；
+      "question": "前一个用户问句",  // chat: judge_data.context 全部前文
+      "answer": "前一个模型回答"
+    }
+  ],
+  "chain": [                      // 工具调用原始链路。session: turn.chain；chat: judge_data.chain（缺省空数组）
+    {
+      "plan": "第一步的计划",
+      "tools": [
+        { "name": "web_search", "input": { "query": "..." }, "output": "..." },
+        { "name": "finquery", "input": { "sql": "..." }, "output": "..." }
+      ]
+    }
+  ],
+  "tools": ["web_search", "finquery"], // 从 chain 按出现顺序抽取的去重工具名；chain 无工具时回退 turn.tool_names。两格式相同
+
+  // --- 回答 ---
+  "raw_answer": "模型原始回答（含引用标记/工具痕迹）", // session: turn.answer_full（缺省回退 answer）；chat: judge_data.raw_answer
+  "text_answer": "模型纯文本回答（下游直接使用）",      // session: turn.answer（缺省回退 answer_full）；chat: judge_data.text_answer（缺省回退 raw_answer）
+
+  // --- 运行与版本元信息 ---
+  "multimodal": [],                 // 预留：多模态产物，当前不填
+  "model_version": "",              // 预留：生成模型版本，当前不填
+  "release_id": "",                 // 预留：发布批次，当前不填
+  "agent_mode": "",                 // 预留：agent 模式。chat 源 judge_data.meta.agent_mode 有值，当前不透传
+  "translation": null,              // 问句译文（post_stage translate 填充）。原文已是中文 → null（不需要翻译）；翻译失败 → null
+  "user_id": "",                    // 用户标识。session: turn.user_id；chat: judge_data.meta.user_id
+  "difficulty_level": "hard",       // 预留：管线只输出复杂问句，当前为 "hard"（标注结论，消费方可扩展）
+
+  // --- 性能指标（源数据缺失时为 null）---
+  "first_token_time_ms": null,      // 首 token 时延(ms)。session: turn.first_token_ms；chat: judge_data.meta.first_token_time_cost
+  "finish_answer_time_ms": null,    // 整轮耗时(ms)。session: turn.total_duration_ms；chat: judge_data.meta.finish_answer_time_cost
+  "input_tokens": null,             // 输入 token 数。session: turn.input_tokens；chat: judge_data.meta.input_tokens
+  "output_tokens": null,            // 输出 token 数。session: turn.output_tokens；chat: judge_data.meta.output_tokens
+  "request_time_ms": null,          // 问句时间 → 北京时间 epoch ms。session: turn.request_time；chat: judge_data.meta.request_time；解析失败为 null
+
+  // --- 扩展元信息（逃生字段区，extra 原样保留）---
+  "meta": {
+    "reason": "judge 判复杂的理由",      // complex_judge 输出，必填（QC meta 规则要求非空）
+    "request_time": "2026-08-05 04:01:00", // 原始问句时间字符串，与 request_time_ms 并存（ms 给机器、字符串给人/溯源）
+    "run_id": "run_id",               // session: turn.run_id（run UUID）；chat 源无此字段 → 空
+    // 逃生字段示例（当前不填，按需扩展；注意 translation 是顶层字段，不放在 meta）：
+    // "ground_truth": "真实答案", "citations": [], "agent_mode": "...", ...
+  }
+}

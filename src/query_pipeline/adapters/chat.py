@@ -43,6 +43,7 @@ def adapt_chat(record: dict[str, Any]) -> Session:
         Turn(
             question=question,
             answer=_as_str(jd.get("text_answer") or jd.get("raw_answer")),
+            answer_full=_as_str(jd.get("raw_answer") or jd.get("text_answer")),
             trace_id=_as_str(jd.get("trace_id") or record.get("trace_id")),
             chain=chain if isinstance(chain, list) else [],
             request_time=_as_str(meta.get("request_time")),

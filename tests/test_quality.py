@@ -32,7 +32,6 @@ def _row(**overrides: Any) -> dict[str, Any]:
             "image": "",
             "file": "",
         },
-        "session_round": 1,
         "context": [],
         "chain": [
             {
@@ -51,7 +50,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "model_version": "",
         "release_id": "",
         "agent_mode": "",
-        "translation": "",
+        "translation": None,
         "user_id": "u1",
         "difficulty_level": "hard",
         "first_token_time_ms": 1000,
@@ -62,7 +61,6 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "meta": {
             "reason": "需要多指标综合分析",
             "request_time": "2026-08-04 10:47:25",
-            "translation": "今天8月3日，分析金安国际这只股票…",
         },
     }
     row.update(overrides)
@@ -87,11 +85,11 @@ class RuleTest(unittest.TestCase):
         self.assertFalse(rules["category"]["ok"])
 
     def test_question_too_short(self) -> None:
-        rules = _rules_by_name(_row(input={"text": "好的", "image": "", "file": ""}))
+        rules = _rules_by_name(_row(input={"text": "好的"}))
         self.assertFalse(rules["question"]["ok"])
 
     def test_question_too_long(self) -> None:
-        rules = _rules_by_name(_row(input={"text": "长" * 3000, "image": "", "file": ""}))
+        rules = _rules_by_name(_row(input={"text": "长" * 3000}))
         self.assertFalse(rules["question"]["ok"])
 
     def test_chain_empty(self) -> None:
@@ -124,16 +122,23 @@ class RuleTest(unittest.TestCase):
         self.assertFalse(rules["timing"]["ok"])
 
     def test_meta_missing_reason(self) -> None:
-        rules = _rules_by_name(_row(meta={"translation": "x", "request_time": "t"}))
+        rules = _rules_by_name(_row(meta={"request_time": "t"}))
         self.assertFalse(rules["meta"]["ok"])
 
-    def test_zh_question_requires_translation(self) -> None:
-        rules = _rules_by_name(_row(meta={"reason": "r", "request_time": "t", "translation": ""}))
+    def test_zh_question_translation_must_be_null(self) -> None:
+        # 中文问句不需要翻译：translation 应为 null，回填原文/译文都算错
+        rules = _rules_by_name(_row(translation="今天8月3日，分析金安国际这只股票…"))
         self.assertFalse(rules["meta"]["ok"])
 
-    def test_english_question_no_translation_ok(self) -> None:
-        row = _row(input={"text": "What drives GPIQ performance?", "image": "", "file": ""})
-        row["meta"] = {"reason": "r", "request_time": "t", "translation": ""}
+    def test_english_question_requires_translation(self) -> None:
+        row = _row(input={"text": "What drives GPIQ performance?"})
+        row["translation"] = None
+        rules = _rules_by_name(row)
+        self.assertFalse(rules["meta"]["ok"])
+
+    def test_english_question_with_translation_ok(self) -> None:
+        row = _row(input={"text": "What drives GPIQ performance?"})
+        row["translation"] = "是什么驱动了 GPIQ 的表现？"
         rules = _rules_by_name(row)
         self.assertTrue(rules["meta"]["ok"])
 

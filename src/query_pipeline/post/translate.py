@@ -47,12 +47,10 @@ async def translate_rows(
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
 
-    def put(row: dict[str, Any], translation: str) -> None:
+    def put(row: dict[str, Any], translation: str | None) -> None:
+        # translation 是顶层唯一字段：只有非中文问句翻译成功才填译文；
+        # 原文已是中文、或翻译失败 → null（见 templates/filter_out.jsonc）。
         row["translation"] = translation
-        # meta may be null on input rows; normalize to a dict before writing the translation.
-        meta = row.get("meta") or {}
-        row["meta"] = meta
-        meta["translation"] = translation
 
     async def worker(row: dict[str, Any]) -> None:
         text = _row_text(row)
@@ -63,9 +61,9 @@ async def translate_rows(
             counts["translate_skipped" if record["skipped"] else "translated"] += 1
             return
         if not needs_translation(text):
-            put(row, text)
+            put(row, None)  # 原文已是中文：不需要翻译 → null
             counts["translate_skipped"] += 1
-            await checkpoint.mark(key, translation=text, skipped=True)
+            await checkpoint.mark(key, translation=None, skipped=True)
             return
         user_prompt = "请翻译以下用户问句，只输出严格 JSON：\n" + json.dumps(
             {"text": text}, ensure_ascii=False, separators=(",", ":")
@@ -91,7 +89,7 @@ async def translate_rows(
             counts["translated"] += 1
             await checkpoint.mark(key, translation=translation, skipped=False)
         except (ValueError, RuntimeError):
-            put(row, text)
+            put(row, None)  # 翻译失败：无译文 → null（fail-open 保留行，下轮重试）
             counts["translate_failed"] += 1
 
     await run_concurrent(

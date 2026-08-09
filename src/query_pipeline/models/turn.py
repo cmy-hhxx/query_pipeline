@@ -9,7 +9,8 @@ class Turn(BaseModel):
     """Canonical turn after input adapters; stages never read dialect field names."""
 
     question: str = ""
-    answer: str = ""
+    answer: str = ""  # 纯文本回答（输出 text_answer）
+    answer_full: str = ""  # 原始回答（含引用标记/工具痕迹；输出 raw_answer），缺省回退 answer
     trace_id: str = ""
     run_id: str = ""
     chain: list[Any] = Field(default_factory=list)

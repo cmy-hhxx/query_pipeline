@@ -248,8 +248,8 @@ class TranslateResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=True))
 
-            # Run 1: translation of T1 fails (falls back to the original text)
-            # and is not checkpointed; T0/T2 are.
+            # Run 1: translation of T1 fails (leaves translation null) and is
+            # not checkpointed; T0/T2 are.
             summary1, _ = run_pipeline_with_fakes(cfg, translate_fail={"T1 complex query"})
             self.assertEqual(summary1.stats["translated"], 2)
             self.assertEqual(summary1.stats["translate_failed"], 1)
@@ -262,7 +262,7 @@ class TranslateResumeTest(unittest.TestCase):
             self.assertEqual([c["text"] for c in client2.calls if "text" in c], ["T1 complex query"])
 
             rows = _read_jsonl(tmp_path / "out/complex_queries.jsonl")
-            self.assertEqual(rows[1]["meta"]["translation"], "翻译：T1 complex query")
+            self.assertEqual(rows[1]["translation"], "翻译：T1 complex query")
 
 
 class CheckpointInvalidationTest(unittest.TestCase):
