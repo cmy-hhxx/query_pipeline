@@ -39,6 +39,29 @@ def _find_env_file() -> Path:
     return Path.cwd() / ".env"
 
 
+def _setup_logging(log_file: Path, *, verbose: bool) -> None:
+    """Attach one stream handler + one file handler to the query_pipeline logger.
+
+    The file handler is swapped to the current run's output directory so the
+    run log and the deliverable jsonl live side by side (single audit dir).
+    """
+    import logging
+
+    logger = logging.getLogger("query_pipeline")
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        stream = logging.StreamHandler()
+        stream.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(stream)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(file_handler)
+
+
 def run(
     input_path: str | Path,
     output_dir: str | Path | None = None,
@@ -74,12 +97,6 @@ def run(
     Returns:
         summary dict: per-stage counts, output files, success flag.
     """
-    import logging
-
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     load_dotenv(_find_env_file(), override=False)
 
     src = Path(input_path).expanduser().resolve()
@@ -88,11 +105,13 @@ def run(
 
     if output_dir is None:
         output_dir = Path("outputs") / src.parent.name
+    # 日志、输出 jsonl、中间产物、缓存/checkpoint 全部放在同一目录，便于审计。
     if work_dir is None:
-        work_dir = Path("work") / src.stem
+        work_dir = output_dir
 
     out = Path(output_dir)
     work = Path(work_dir)
+    _setup_logging(out / "run.log", verbose=verbose)
 
     config = PipelineConfig(
         name=f"pipeline:{src.stem}",
@@ -101,7 +120,13 @@ def run(
         work_dir=work,
         stages=stages,
         segmentation=SegmentationConfig(enabled=True),
-        rule_gate=RuleGateConfig(),
+        # chat 工具调用分布平坦（>=7 次仅覆盖 ~1%），粗筛门槛按格式区分：
+        # session 7/1/2，chat 3/1/2（与 rule_gate 设计决策一致）。
+        rule_gate=(
+            RuleGateConfig(min_chain_tool_calls=3, min_unique_tools=2)
+            if format == "chat"
+            else RuleGateConfig()
+        ),
         judge=JudgeConfig(),
         verify=VerifyConfig(
             max_rounds_hard=verify_rounds_hard if verify_rounds_hard is not None else 5,

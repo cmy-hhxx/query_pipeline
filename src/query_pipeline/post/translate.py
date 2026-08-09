@@ -93,7 +93,7 @@ async def translate_rows(
             counts["translate_failed"] += 1
 
     await run_concurrent(
-        rows, worker, concurrency=llm_cfg.concurrency, description="LLM translate", show_progress=True
+        rows, worker, concurrency=llm_cfg.concurrency, description="LLM translate"
     )
     return counts
 

@@ -13,7 +13,7 @@ from query_pipeline.llm.runner import run_concurrent
 
 class RunConcurrentTest(unittest.TestCase):
     async def _run(self, concurrency: int) -> list[int]:
-        return await run_concurrent([1, 2, 3], lambda x: _sq(x), concurrency=concurrency, show_progress=False)
+        return await run_concurrent([1, 2, 3], lambda x: _sq(x), concurrency=concurrency)
 
     def test_clamps_nonpositive_concurrency(self) -> None:
         # concurrency=0 previously deadlocked on Semaphore(0); -1 raised ValueError.

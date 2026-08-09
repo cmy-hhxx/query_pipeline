@@ -6,8 +6,6 @@ import logging
 from collections import Counter
 from typing import Any
 
-from rich.progress import Progress
-
 from query_pipeline.io.checkpoint import content_key, stage_checkpoint
 from query_pipeline.io.jsonl import write_jsonl
 from query_pipeline.llm.runner import run_concurrent
@@ -79,6 +77,7 @@ async def run_judge_stage(
         return ctx
 
     checkpoint = stage_checkpoint(cfg, "judge")
+    logger.info("[judge] judging %d session(s), concurrency=%d", len(ctx.sessions), cfg.llm.concurrency)
     counters: Counter[str] = Counter()
     complex_categories: Counter[str] = Counter()
     normal_categories: Counter[str] = Counter()
@@ -86,30 +85,21 @@ async def run_judge_stage(
     rows: list[dict[str, Any]] = []
     results: dict[int, Any] = {}
 
-    with Progress() as progress:
-        task_id = progress.add_task("Sessions", total=len(ctx.sessions))
+    async def process(index: int, session) -> None:
+        key = session_content_key(session)
+        record = checkpoint.get(key)
+        if record is not None and {"rows", "stats", "judged"} <= set(record):
+            results[index] = (record["rows"], record["stats"], record["judged"])
+            return
+        try:
+            sess_rows, sess_stats, judged = await _process_session(ctx, client, cache, cache_lock, session)
+        except Exception as exc:  # noqa: BLE001
+            sess_rows, sess_stats, judged = [], {"session_error": 1, "error": str(exc)[:200]}, []
+        if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
+            await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
+        results[index] = (sess_rows, sess_stats, judged)
 
-        async def process(index: int, session) -> None:
-            key = session_content_key(session)
-            record = checkpoint.get(key)
-            if record is not None and {"rows", "stats", "judged"} <= set(record):
-                results[index] = (record["rows"], record["stats"], record["judged"])
-                return
-            try:
-                sess_rows, sess_stats, judged = await _process_session(
-                    ctx, client, cache, cache_lock, session, progress
-                )
-            except Exception as exc:  # noqa: BLE001
-                sess_rows, sess_stats, judged = [], {"session_error": 1, "error": str(exc)[:200]}, []
-            if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
-                await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
-            results[index] = (sess_rows, sess_stats, judged)
-
-        async def tracked(index: int, session) -> None:
-            await process(index, session)
-            progress.advance(task_id)
-
-        await asyncio.gather(*(tracked(i, s) for i, s in enumerate(ctx.sessions)))
+    await asyncio.gather(*(process(i, s) for i, s in enumerate(ctx.sessions)))
 
     for index in range(len(ctx.sessions)):
         if index not in results:
@@ -161,7 +151,6 @@ async def _process_session(
     cache: dict[str, dict[str, Any]],
     cache_lock: asyncio.Lock,
     session,
-    progress: Progress | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
     turns = session.turns
     if not turns:
@@ -185,8 +174,6 @@ async def _process_session(
         ),
         concurrency=ctx.config.llm.concurrency,
         description="LLM funnel",
-        show_progress=False,
-        progress=progress,
     )
 
     rows: list[dict[str, Any]] = []

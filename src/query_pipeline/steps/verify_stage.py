@@ -115,7 +115,6 @@ async def run_verify_stage(
         worker,
         concurrency=cfg.llm.concurrency,
         description="LLM verify",
-        show_progress=True,
     )
 
     kept: list[dict[str, Any]] = []

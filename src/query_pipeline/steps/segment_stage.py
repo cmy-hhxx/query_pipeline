@@ -40,7 +40,7 @@ async def run_segment_stage(
         return session.thread_id, segments
 
     results = await run_concurrent(
-        ctx.sessions, worker, concurrency=cfg.llm.concurrency, description="LLM segment", show_progress=True
+        ctx.sessions, worker, concurrency=cfg.llm.concurrency, description="LLM segment"
     )
     ctx.segments = {thread_id: segments for thread_id, segments in results}
     ctx.stats["segments"] = sum(len(v) for v in ctx.segments.values())
