@@ -1,11 +1,18 @@
 // =====================================================================
-// 复杂金融问句输出行（filter_out schema）标准示例
+// 清洗标注问句输出行（filter_out schema）标准示例
 //
 // 真实产出为紧凑 JSONL（一行一条，无注释）；本文件是带注释的参考版，
 // 字段与 src/query_pipeline/session/assemble.py::assemble_row 逐项对齐，
-// 经 post_stage（dedup / translate）处理后即为最终输出。
+// 经 verify / answer_gate / post（dedup / translate）处理后即为最终输出。
 //
-// 取值口径按输入格式分两种（由 config 的 input.format 决定）：
+// 输出含两类样本（同一文件，difficulty_level 区分）：
+//   hard  ：复杂金融问句，category 带 complex-topic/ 前缀（与 fin_bench
+//           complex-topic/ 目录名对齐，是下游 join 键，07 的 slug 是历史
+//           遗留不能改）；
+//   normal：有价值但非复杂问句，category 为 {id}-{slug}（普通 16 类）。
+// 两类 id 都从 01 开始，靠前缀 + difficulty_level 区分，不需要新字段。
+//
+// 取值口径按输入格式分两种（format 自动识别，可显式指定）：
 //   session：整条多轮会话，字段从顶层 thread_id / context[] 的 turn 映射；
 //   chat   ：judge_data 包装的单题，字段从 judge_data 及其 meta 映射。
 // 注释里 "session: X；chat: Y" 分别给出两种格式的取值来源。
@@ -25,7 +32,7 @@
   "trace_id": "trace_id",           // 行主键，对应当前 turn。session: turn.trace_id；chat: judge_data.trace_id（缺省回退顶层 trace_id）
 
   // --- 分类 ---
-  "category": "03-analysis-research", // "{category_id}-{英文slug}"；01..09 定义见 src/query_pipeline/models/records.py。两格式相同
+  "category": "complex-topic/03-analysis-research", // 复杂：complex-topic/{id}-{英文slug}（9 类）；普通：{id}-{slug}（16 类）。定义见 templates/categories.md，运行时解析。两格式相同
 
   // --- 问句本体 ---
   "input": {
@@ -61,7 +68,7 @@
   "agent_mode": "",                 // 预留：agent 模式。chat 源 judge_data.meta.agent_mode 有值，当前不透传
   "translation": null,              // 问句译文（post_stage translate 填充）。原文已是中文 → null（不需要翻译）；翻译失败 → null
   "user_id": "",                    // 用户标识。session: turn.user_id；chat: judge_data.meta.user_id
-  "difficulty_level": "hard",       // 预留：管线只输出复杂问句，当前为 "hard"（标注结论，消费方可扩展）
+  "difficulty_level": "hard",       // 样本难度：复杂问句 "hard"；有价值非复杂问句 "normal"。两类同文件输出
 
   // --- 性能指标（源数据缺失时为 null）---
   "first_token_time_ms": null,      // 首 token 时延(ms)。session: turn.first_token_ms；chat: judge_data.meta.first_token_time_cost
@@ -72,9 +79,10 @@
 
   // --- 扩展元信息（逃生字段区，extra 原样保留）---
   "meta": {
-    "reason": "judge 判复杂的理由",      // complex_judge 输出，必填（QC meta 规则要求非空）
+    "reason": "分类调用输出的归类理由",  // classify 输出，必填（QC meta 规则要求非空）
     "request_time": "2026-08-05 04:01:00", // 原始问句时间字符串，与 request_time_ms 并存（ms 给机器、字符串给人/溯源）
-    "run_id": "run_id"               // session: turn.run_id（run UUID）；chat 源无此字段 → 空
+    "run_id": "run_id",              // session: turn.run_id（run UUID）；chat 源无此字段 → 空
+    "last_event_type": "runFinished" // session: turn.last_event_type；回答质量门控要求 runFinished（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 会被过滤）；chat 源无此字段 → null
     // 逃生字段示例（当前不填，按需扩展；注意 translation 是顶层字段，不放在 meta）：
     // "ground_truth": "真实答案", "citations": [], "agent_mode": "...", ...
   }
