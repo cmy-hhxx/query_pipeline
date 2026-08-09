@@ -99,6 +99,15 @@ class PrecleanTest(unittest.TestCase):
         self.assertEqual(dup, 1)
         self.assertEqual(empty, 0)
 
+    def test_chat_non_dict_judge_data_no_crash(self) -> None:
+        # judge_data 为 truthy 非 dict：preclean 不得抛 AttributeError，
+        # 行保留（key 为空），由后续 adapt 失败路径进 bad_lines。
+        records = [{"trace_id": "t1", "judge_data": "not-a-dict"}]
+        kept, dup, empty = preclean_records(records, CHAT)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dup, 0)
+        self.assertEqual(empty, 0)
+
     def test_records_without_key_kept(self) -> None:
         records = [{"foo": "bar", "context": [{"question": "q"}]}, {"foo": "baz", "context": [{"question": "q"}]}]
         kept, dup, empty = preclean_records(records, SESSION)

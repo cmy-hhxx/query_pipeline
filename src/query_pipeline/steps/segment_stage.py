@@ -39,9 +39,12 @@ async def run_segment_stage(
             )
         return session.thread_id, segments
 
-    results = await run_concurrent(
-        ctx.sessions, worker, concurrency=cfg.llm.concurrency, description="LLM segment"
-    )
-    ctx.segments = {thread_id: segments for thread_id, segments in results}
+    results = await run_concurrent(ctx.sessions, worker, description="LLM segment")
+    ctx.segments = {}
+    for session, (thread_id, segments) in zip(ctx.sessions, results):
+        if segments is None:  # run_concurrent 兜底网捕获的意外异常：回退 whole_session
+            turns = session.turns
+            segments = [Segment(0, len(turns) - 1, "whole_session")] if turns else []
+        ctx.segments[thread_id] = segments
     ctx.stats["segments"] = sum(len(v) for v in ctx.segments.values())
     return ctx

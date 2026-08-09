@@ -37,9 +37,11 @@ class SegmentationConfig(ConfigModel):
 class RuleGateConfig(ConfigModel):
     enabled: bool = True
     reject_rules: bool = True
-    min_chain_tool_calls: int = 7
+    # None = 未显式设置：rule_gate 阶段按嗅探到的实际输入格式补齐默认
+    # （session 7/1/2，chat 3/1/2——chat 工具调用分布平坦，>=7 次仅覆盖 ~1%）。
+    min_chain_tool_calls: int | None = None
     min_chain_steps: int = 1
-    min_unique_tools: int = 2
+    min_unique_tools: int | None = None
 
 
 class JudgeConfig(ConfigModel):

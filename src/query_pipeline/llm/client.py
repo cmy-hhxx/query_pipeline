@@ -5,7 +5,7 @@ import os
 import random
 from typing import Any, cast
 
-from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from query_pipeline.config.models import LLMConfig
 
@@ -21,6 +21,7 @@ class LLMClient:
         self.config = config
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         # Cap in-flight HTTP calls process-wide across all pipeline stages.
+        # 这是全管线唯一的限流点（run_concurrent/audit 不再叠加 semaphore）。
         self._semaphore = asyncio.Semaphore(max(1, config.concurrency))
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
@@ -47,12 +48,20 @@ class LLMClient:
                 if not content:
                     raise ValueError("empty response content")
                 return content
-            except (APIConnectionError, APITimeoutError, RateLimitError, APIError, ValueError, IndexError) as exc:
-                last_error = exc
-                if attempt == self.config.max_retries:
-                    break
-                sleep_seconds = min(30.0, 1.5 * (2 ** (attempt - 1))) + random.uniform(0, 0.5)
-                await asyncio.sleep(sleep_seconds)
+            except (APIConnectionError, APITimeoutError, RateLimitError, ValueError, IndexError) as exc:
+                # 连接/超时/429/响应解析类：可重试（RateLimitError 必须先于 APIStatusError 捕获）
+                retryable: Exception = exc
+            except APIStatusError as exc:
+                # 4xx 是永久错误（参数/鉴权/不存在等），重试无意义且慢（最长 ~22s+抖动），直接抛；
+                # 5xx 服务端错误可重试。
+                if exc.status_code < 500:
+                    raise
+                retryable = exc
+            last_error = retryable
+            if attempt == self.config.max_retries:
+                break
+            sleep_seconds = min(30.0, 1.5 * (2 ** (attempt - 1))) + random.uniform(0, 0.5)
+            await asyncio.sleep(sleep_seconds)
         raise RuntimeError(f"LLM request failed after retries: {last_error}")
 
     async def close(self) -> None:

@@ -422,6 +422,50 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["candidates"], 0)
             self.assertEqual(summary.stats["complex_rows"], 0)
 
+    def test_value_gate_string_false_rejects_fail_closed(self) -> None:
+        # LLM 输出 "is_valuable": "false"（字符串）：严格解析后应为 False 并丢弃候选，
+        # 不得因 bool("false") == True 静默放行。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            class StringBoolClient(FakeSessionLLMClient):
+                async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                    payload = json.loads(user_prompt.split("\n", 1)[1])
+                    if "current_question" in payload and "价值判官" in system_prompt:
+                        return json.dumps({"is_valuable": "false", "reason": "字符串布尔"}, ensure_ascii=False)
+                    return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", StringBoolClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["value_rejected"], 2)  # 全部候选被 value 门拒
+            self.assertEqual(summary.stats["complex_rows"], 0)
+            self.assertEqual(summary.stats["llm_failed"], 0)
+
+    def test_empty_success_run_keeps_previous_output(self) -> None:
+        # 成功但零输出的 run 不得用空文件覆盖上次良好产物。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+            cfg_nollm = load_pipeline_config(_write_config(tmp_path, llm_enabled=False))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                summary1 = run_pipeline(cfg)
+            self.assertEqual(summary1.stats["complex_rows"], 1)
+            out_path = Path(summary1.output_files["cleaned_queries"])
+            before = out_path.read_text(encoding="utf-8")
+
+            summary2 = run_pipeline(cfg_nollm)  # success=True 且零输出
+            self.assertTrue(summary2.success)
+            self.assertEqual(summary2.stats["complex_rows"], 0)
+            self.assertTrue(summary2.stats.get("output_preserved_previous"))
+            self.assertEqual(out_path.read_text(encoding="utf-8"), before)  # 未被空文件覆盖
+
     def test_llm_disabled_no_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -449,6 +493,36 @@ class SessionPipelineContractTest(unittest.TestCase):
             summary = run_pipeline(cfg)
 
             self.assertEqual(summary.stats["total_sessions"], 1)
+            self.assertEqual(summary.stats["input_bad_lines"], 1)
+            bad_lines = _read_jsonl(tmp_path / "work" / "logs" / "bad_lines.jsonl")
+            self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
+
+    def test_chat_non_dict_judge_data_lands_in_bad_lines(self) -> None:
+        # judge_data 为 truthy 非 dict：preclean 不再崩溃；行走 adapt 失败路径进 bad_lines。
+        # 坏行放在第 6 行（前 5 行样本都是正常 chat），避免 sniff_format 的 partial-marker 报错。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            def good(case_id: str) -> dict[str, Any]:
+                return {
+                    "trace_id": f"t{case_id}",
+                    "question": "Q2 复杂取数",
+                    "judge_data": {
+                        "case_id": case_id,
+                        "input": {"text": "Q2 复杂取数"},
+                        "context": [{"question": "Q1", "answer": "a"}],
+                        "chain": _chain_with_steps(8, ("web_search", "finquery", "compute")),
+                        "raw_answer": "raw " + "y" * 60,
+                        "text_answer": "text " + "y" * 60,
+                    },
+                }
+
+            records = [good(f"c{i}") for i in range(1, 6)] + [{"trace_id": "bad", "judge_data": "not-a-dict"}]
+            _write_jsonl(tmp_path / "input.jsonl", records)
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=False, input_format="chat"))
+
+            summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["total_sessions"], 5)
             self.assertEqual(summary.stats["input_bad_lines"], 1)
             bad_lines = _read_jsonl(tmp_path / "work" / "logs" / "bad_lines.jsonl")
             self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))

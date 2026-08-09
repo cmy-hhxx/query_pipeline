@@ -52,19 +52,21 @@ async def translate_rows(
         # 原文已是中文、或翻译失败 → null（见 templates/filter_out.jsonc）。
         row["translation"] = translation
 
-    async def worker(row: dict[str, Any]) -> None:
+    async def worker(row: dict[str, Any]) -> bool:
+        # 返回 True 表示处理完成（成功/跳过/失败均已计数）；
+        # run_concurrent 兜底网捕获的意外异常返回 None，由调用方补记 failed。
         text = _row_text(row)
         key = content_key(text)
         record = checkpoint.get(key)
         if record is not None:
             put(row, record["translation"])
             counts["translate_skipped" if record["skipped"] else "translated"] += 1
-            return
+            return True
         if not needs_translation(text):
             put(row, None)  # 原文已是中文：不需要翻译 → null
             counts["translate_skipped"] += 1
             await checkpoint.mark(key, translation=None, skipped=True)
-            return
+            return True
         user_prompt = "请翻译以下用户问句，只输出严格 JSON：\n" + json.dumps(
             {"text": text}, ensure_ascii=False, separators=(",", ":")
         )
@@ -91,10 +93,10 @@ async def translate_rows(
         except (ValueError, RuntimeError):
             put(row, None)  # 翻译失败：无译文 → null（fail-open 保留行，下轮重试）
             counts["translate_failed"] += 1
+        return True
 
-    await run_concurrent(
-        rows, worker, concurrency=llm_cfg.concurrency, description="LLM translate"
-    )
+    results = await run_concurrent(rows, worker, description="LLM translate")
+    counts["translate_failed"] += sum(1 for r in results if r is None)  # 兜底网异常
     return counts
 
 

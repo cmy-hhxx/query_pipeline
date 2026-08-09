@@ -85,7 +85,9 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
 
 def stage_meta(cfg: PipelineConfig, stage: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"stage_hash": stage_fingerprint(cfg, stage)}
-    if stage == "judge":
+    # 输入文件变化必须让所有"从输入行推导内容"的阶段 checkpoint 失效
+    # （judge 行重建 → verify 前文/难度可能变 → translate 文本可能变）。
+    if stage in {"judge", "verify", "translate"}:
         stat = cfg.input.path.stat()
         meta.update(
             {"input_path": str(cfg.input.path), "input_size": stat.st_size, "input_mtime_ns": stat.st_mtime_ns}

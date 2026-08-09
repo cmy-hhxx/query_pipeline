@@ -22,6 +22,23 @@ def _prior_questions(row: dict[str, Any]) -> list[str]:
     return [str(t.get("question") or "") for t in context if isinstance(t, dict)]
 
 
+def _verify_content_key(row: dict[str, Any], prior: list[str], difficulty: str) -> str:
+    """Checkpoint 键：必须覆盖参与判定的全部输入（前文、难度）与行身份。
+
+    prior_questions 参与 LLM 判定、difficulty 决定轮数与期望判定，任一变化时
+    重放旧裁决都会给出错误结果（如 judge 重跑后同一问句 hard→normal）。
+    """
+    inp = row.get("input")
+    question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
+    return content_key(
+        str(row.get("source_case_id", "")),
+        str(row.get("trace_id", "")),
+        question,
+        difficulty,
+        "\n".join(prior),
+    )
+
+
 async def run_verify_stage(
     ctx: PipelineContext,
     client: LLMClient | None,
@@ -48,7 +65,8 @@ async def run_verify_stage(
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         difficulty = row.get("difficulty_level", "hard")
         max_rounds = cfg.verify.max_rounds_hard if difficulty == "hard" else cfg.verify.max_rounds_normal
-        key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
+        prior = _prior_questions(row)
+        key = _verify_content_key(row, prior, difficulty)
         record = checkpoint.get(key)
         if record is not None:
             return {
@@ -58,7 +76,7 @@ async def run_verify_stage(
                 "rounds": record.get("rounds", []),
             }
         user_prompt = "请复核以下问句，只输出严格 JSON：\n" + json.dumps(
-            {"prior_questions": _prior_questions(row), "question": question},
+            {"prior_questions": prior, "question": question},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -120,15 +138,13 @@ async def run_verify_stage(
         await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
         return {"keep": keep, "reason": reason, "error": error, "rounds": rounds}
 
-    results = await run_concurrent(
-        ctx.rows,
-        worker,
-        concurrency=cfg.llm.concurrency,
-        description="LLM verify",
-    )
+    results = await run_concurrent(ctx.rows, worker, description="LLM verify")
 
     kept: list[dict[str, Any]] = []
     for row, result in zip(ctx.rows, results):
+        if result is None:  # run_concurrent 兜底网捕获的意外异常：fail-closed 丢弃
+            counts["failed"] += 1
+            continue
         keep, reason, error = result["keep"], result["reason"], result["error"]
         inp = row.get("input")
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""

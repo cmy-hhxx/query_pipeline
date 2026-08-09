@@ -50,13 +50,14 @@ def _as_dict(raw: str | dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_value_response(raw: str | dict[str, Any]) -> ValueResult:
-    data = _as_dict(raw)
-    return ValueResult(is_valuable=bool(data.get("is_valuable")), reason=data.get("reason"))
+    # 严格类型校验：LLM 输出 "is_valuable": "false"（字符串）会被 pydantic 正确解析为
+    # False，而手工 bool("false") == True 会静默放行；非法值抛 ValidationError
+    # （ValueError 子类）→ 候选 fail-closed 丢弃。
+    return ValueResult.model_validate(_as_dict(raw))
 
 
 def parse_complexity_response(raw: str | dict[str, Any]) -> ComplexityResult:
-    data = _as_dict(raw)
-    return ComplexityResult(is_complex=bool(data.get("is_complex")), reason=data.get("reason"))
+    return ComplexityResult.model_validate(_as_dict(raw))
 
 
 def parse_classify_response(raw: str | dict[str, Any]) -> ClassifyResult:

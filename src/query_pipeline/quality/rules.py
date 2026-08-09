@@ -113,6 +113,13 @@ def _check_category(row: dict[str, Any]) -> tuple[bool, str]:
 
 
 def _check_chain(row: dict[str, Any]) -> tuple[bool, str]:
+    if row.get("capture_mode") == "end2end":
+        # end2end 输入本身无 chain（工具调用由 tool_count 兜底过 rule_gate），
+        # 只校验 tools 非空，不再要求 chain。
+        tools = row.get("tools")
+        if not isinstance(tools, list) or not tools:
+            return False, "end2end 行 tools 缺失或为空"
+        return True, "ok"
     chain = row.get("chain")
     if not isinstance(chain, list) or not chain:
         return False, "chain 缺失、非列表或为空"
@@ -308,9 +315,13 @@ def _dataset_category_skew(records: list[dict[str, Any]]) -> tuple[bool, str, li
     top_count = max(counts.values())
     top_share = top_count / n
     evidence = [f"{cat}: {cnt}（{cnt / n:.0%}）" for cat, cnt in sorted(counts.items(), key=lambda kv: -kv[1])]
-    zero_ids = [
-        cid for cid in load_taxonomy().complex if cid not in {str(cat).split("-")[0] for cat in counts}
-    ]
+    # complex id 从 taxonomy path 提取（complex-topic/09-… → "09"）；normal id
+    # （01-16）与 complex id（01-09）会碰撞，绝不能计入 complex 覆盖集合。
+    complex_present: set[str] = set()
+    for cat in counts:
+        if cat.startswith(COMPLEX_PREFIX):
+            complex_present.add(cat[len(COMPLEX_PREFIX) :].split("-", 1)[0])
+    zero_ids = [cid for cid in load_taxonomy().complex if cid not in complex_present]
     detail = f"最高类别占 {top_share:.0%}"
     if zero_ids:
         detail += f"；零记录类别：{', '.join(zero_ids)}"

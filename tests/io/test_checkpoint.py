@@ -293,6 +293,83 @@ class CheckpointInvalidationTest(unittest.TestCase):
             self.assertIn("W0 complex query NEW", texts)
             self.assertNotIn("W0 complex query", texts)
 
+    def test_stage_meta_attaches_input_stat_for_verify_and_translate(self) -> None:
+        from query_pipeline.io.checkpoint import stage_meta
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write_jsonl(tmp_path / "input.jsonl", [_session("t0", "S0")])
+            cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
+            for stage in ("judge", "verify", "translate"):
+                meta = stage_meta(cfg, stage)
+                self.assertIn("input_size", meta, stage)
+                self.assertIn("input_mtime_ns", meta, stage)
+                self.assertIn("input_path", meta, stage)
+
+    def test_input_change_reseeds_verify_checkpoint(self) -> None:
+        # 输入文件变化 → verify checkpoint 必须整体重播种（README：输入变化自动失效），
+        # 不得重放旧前文/旧难度下的裁决。用全新 LLM cache 隔离缓存命中干扰。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sessions = [_session("t0", "R0")]
+            _write_jsonl(tmp_path / "input.jsonl", sessions)
+            cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
+
+            summary1, _ = run_pipeline_with_fakes(cfg)
+            self.assertEqual(summary1.stats["verify_kept"], 1)
+
+            # 输入追加一个会话（其余不变）+ 全新 cache：verify 仍须重新验证旧会话
+            _write_jsonl(tmp_path / "input.jsonl", sessions + [_session("t1", "R1")])
+            cfg2 = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
+            cfg2.llm.cache = tmp_path / "work" / "llm_cache2.jsonl"
+            summary2, client2 = run_pipeline_with_fakes(cfg2)
+            self.assertEqual(summary2.stats["verify_kept"], 2)
+            verify_calls = [
+                c["question"]
+                for c in client2.calls
+                if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c
+            ]
+            self.assertIn("R0 complex query", verify_calls)  # 旧行重新验证而非重放
+
+    def test_verify_key_includes_difficulty_no_stale_replay(self) -> None:
+        # judge 指纹单独失效（只改 complexity_gate prompt 内容）→ 同一问句 hard→normal；
+        # verify checkpoint 不重播种（输入/config/源码/verify prompt 均未变），
+        # 必须靠"键含难度"避免重放旧 hard 裁决。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sessions = [_session("t0", "D0")]
+            _write_jsonl(tmp_path / "input.jsonl", sessions)
+            cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
+
+            def factory(clients: list, complex_qs: set[str]) -> Any:
+                def make(config: object) -> ScriptedClient:
+                    client = DifficultyFlipClient(config, complex_qs=complex_qs)
+                    clients.append(client)
+                    return client
+                return make
+
+            clients: list[Any] = []
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory(clients, {"D0 complex query"})):
+                summary1 = run_pipeline(cfg)
+            self.assertEqual(summary1.stats["complex_rows"], 1)
+            self.assertEqual(summary1.stats["verify_kept"], 1)
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory(clients, set())), patch.dict(
+                "query_pipeline.prompts.PROMPTS", {"complexity_gate": "complexity_gate 已更新（内容变化）"}
+            ):
+                summary2 = run_pipeline(cfg)
+
+            # judge 重跑：复杂度门改为非复杂 → normal 行
+            self.assertEqual(summary2.stats["normal_rows"], 1)
+            self.assertEqual(summary2.stats["complex_rows"], 0)
+            # verify 不得重放 hard 的 keep：normal 期望=非复杂，按缓存 round1 判定应拒绝
+            self.assertEqual(summary2.stats["verify_rejected"], 1)
+            self.assertEqual(summary2.stats["verify_kept"], 0)
+            # verify checkpoint 出现第二个键（normal 难度）
+            cp = _read_jsonl(tmp_path / "work" / "logs" / "checkpoints" / "verify.jsonl")
+            keys = {r["key"] for r in cp if r.get("type") != "meta"}
+            self.assertEqual(len(keys), 2)
+
     def test_fingerprint_tracks_source(self) -> None:
         # Code changes must invalidate the checkpoint fingerprint (else a behavior fix
         # silently never takes effect on resume).
@@ -385,3 +462,33 @@ def _checkpoint_keys(path: Path) -> set[str]:
 
 if __name__ == "__main__":
     unittest.main()
+
+class DifficultyFlipClient(ScriptedClient):
+    """ScriptedClient 的变体：复杂度门按 complex_qs 集合判定 hard/normal。
+
+    value/classify/segment/verify 沿用 ScriptedClient 行为（verify 恒判复杂）。
+    """
+
+    def __init__(self, config: object, complex_qs: set[str]) -> None:
+        super().__init__()
+        self.config = config
+        self.complex_qs = complex_qs
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        self.calls.append(payload)
+        if "questions" in payload:
+            n = len(payload["questions"])
+            return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]}, ensure_ascii=False)
+        if "价值判官" in system_prompt:
+            return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
+        if "已判定为复杂金融问句" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
+        if "有价值但非复杂" in system_prompt:
+            return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "current_question" in payload:
+            is_complex = payload["current_question"] in self.complex_qs
+            return json.dumps({"is_complex": is_complex, "reason": "判定"}, ensure_ascii=False)
+        if "question" in payload:
+            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+        raise AssertionError(f"unexpected payload: {sorted(payload)}")

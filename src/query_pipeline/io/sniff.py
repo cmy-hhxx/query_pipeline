@@ -52,9 +52,13 @@ def preclean_records(
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Drop duplicate input rows (session by thread_id, chat by case_id/trace_id)
     and empty-context sessions. Returns (records, duplicates, empties)."""
-    key_fn = (lambda r: str(r.get("thread_id") or "")) if fmt == SESSION else (
-        lambda r: str(((r.get("judge_data") or {}).get("case_id")) or r.get("trace_id") or "")
-    )
+    def _chat_key(record: dict[str, Any]) -> str:
+        # judge_data 非 dict（如字符串）时防护：key 置空 → 行保留 → 由 adapt 失败路径进 bad_lines
+        judge = record.get("judge_data")
+        case_id = judge.get("case_id") if isinstance(judge, dict) else None
+        return str(case_id or record.get("trace_id") or "")
+
+    key_fn = (lambda r: str(r.get("thread_id") or "")) if fmt == SESSION else _chat_key
     seen: set[str] = set()
     kept: list[dict[str, Any]] = []
     duplicates = 0

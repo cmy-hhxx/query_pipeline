@@ -68,6 +68,51 @@ class RecordingClient:
     async def close(self) -> None:
         return None
 
+def _row(source_case_id: str = "c1", trace_id: str = "t1", question: str = "Q", prior: list[str] | None = None) -> dict:
+    return {
+        "source_case_id": source_case_id,
+        "trace_id": trace_id,
+        "input": {"text": question},
+        "context": [{"question": p, "answer": "a"} for p in (prior or [])],
+    }
+
+
+class VerifyKeyUnitTest(unittest.TestCase):
+    def test_key_sensitive_to_prior_questions(self) -> None:
+        from query_pipeline.steps.verify_stage import _verify_content_key
+
+        base = _row()
+        self.assertNotEqual(
+            _verify_content_key(base, ["前文A"], "hard"),
+            _verify_content_key(base, ["前文B"], "hard"),
+        )
+        self.assertNotEqual(
+            _verify_content_key(base, [], "hard"),
+            _verify_content_key(base, ["前文A"], "hard"),
+        )
+
+    def test_key_sensitive_to_difficulty(self) -> None:
+        from query_pipeline.steps.verify_stage import _verify_content_key
+
+        base = _row()
+        self.assertNotEqual(
+            _verify_content_key(base, ["前文"], "hard"),
+            _verify_content_key(base, ["前文"], "normal"),
+        )
+
+    def test_key_sensitive_to_identity(self) -> None:
+        from query_pipeline.steps.verify_stage import _verify_content_key
+
+        self.assertNotEqual(
+            _verify_content_key(_row(trace_id="t1"), [], "hard"),
+            _verify_content_key(_row(trace_id="t2"), [], "hard"),
+        )
+        self.assertEqual(
+            _verify_content_key(_row(), [], "hard"),
+            _verify_content_key(_row(), [], "hard"),
+        )
+
+
 class VerifyStageTest(unittest.TestCase):
     def _run(self, client_cls=RecordingClient, config_extra: str = "") -> object:
         import tempfile

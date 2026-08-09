@@ -83,28 +83,27 @@ async def run_judge_stage(
     normal_categories: Counter[str] = Counter()
     debug_judged: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
-    results: dict[int, Any] = {}
 
-    async def process(index: int, session) -> None:
+    async def process(session) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
         key = session_content_key(session)
         record = checkpoint.get(key)
         if record is not None and {"rows", "stats", "judged"} <= set(record):
-            results[index] = (record["rows"], record["stats"], record["judged"])
-            return
+            return record["rows"], record["stats"], record["judged"]
         try:
             sess_rows, sess_stats, judged = await _process_session(ctx, client, cache, cache_lock, session)
-        except Exception as exc:  # noqa: BLE001
+            if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
+                await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
+        except Exception as exc:  # noqa: BLE001 checkpoint 磁盘异常等也按会话错误兜底
             sess_rows, sess_stats, judged = [], {"session_error": 1, "error": str(exc)[:200]}, []
-        if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
-            await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
-        results[index] = (sess_rows, sess_stats, judged)
+        return sess_rows, sess_stats, judged
 
-    await asyncio.gather(*(process(i, s) for i, s in enumerate(ctx.sessions)))
-
-    for index in range(len(ctx.sessions)):
-        if index not in results:
+    # 会话层与其余阶段一致走 run_concurrent：纯任务编排 + 单行异常兜底（返回 None）。
+    results_list = await run_concurrent(ctx.sessions, process, description="LLM judge sessions")
+    for index, result in enumerate(results_list):
+        if result is None:  # run_concurrent 兜底网捕获的意外异常
+            counters["session_errors"] += 1
             continue
-        sess_rows, sess_stats, judged = results[index]
+        sess_rows, sess_stats, judged = result
         rows.extend(sess_rows)
         counters.update({k: v for k, v in sess_stats.items() if k not in ("categories", "categories_normal", "error")})
         if "error" in sess_stats:
@@ -172,7 +171,6 @@ async def _process_session(
             cache_path=ctx.config.cache_path,
             cache_lock=cache_lock,
         ),
-        concurrency=ctx.config.llm.concurrency,
         description="LLM funnel",
     )
 
@@ -185,6 +183,9 @@ async def _process_session(
     complex_categories: Counter[str] = Counter()
     normal_categories: Counter[str] = Counter()
     for j in judged:
+        if j is None:  # run_concurrent 兜底网捕获的意外异常（如 cache 磁盘 OSError）
+            llm_failed += 1
+            continue
         if j.get("error"):
             llm_failed += 1
             continue

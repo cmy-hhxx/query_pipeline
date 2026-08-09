@@ -107,19 +107,14 @@ def run(
     _setup_logging(out / "run.log", verbose=verbose)
 
     # 门槛默认按格式区分（session 7/1/2，chat 3/1/2——chat 工具调用分布平坦，
-    # >=7 次仅覆盖 ~1%）；显式传入时覆盖。拿不准时用 suggest 看推荐组合。
-    if min_tool_calls is None and min_unique_tools is None:
-        rule_gate = (
-            RuleGateConfig(min_chain_tool_calls=3, min_unique_tools=2)
-            if format == "chat"
-            else RuleGateConfig()
-        )
-    else:
-        rule_gate = RuleGateConfig(
-            min_chain_tool_calls=min_tool_calls if min_tool_calls is not None else 0,
-            min_unique_tools=min_unique_tools if min_unique_tools is not None else 1,
-            reject_rules=reject_rules,
-        )
+    # >=7 次仅覆盖 ~1%）：未显式传入的旋钮保持 None，由 rule_gate 阶段按嗅探到的
+    # 实际格式补齐（format="auto" 也不会用错门槛）；reject_rules 始终透传，
+    # --no-reject-rules 不再被默认分支吞掉。拿不准时用 suggest 看推荐组合。
+    rule_gate = RuleGateConfig(
+        min_chain_tool_calls=min_tool_calls,
+        min_unique_tools=min_unique_tools,
+        reject_rules=reject_rules,
+    )
 
     config = PipelineConfig(
         name=f"pipeline:{src.stem}",
@@ -128,8 +123,6 @@ def run(
         work_dir=work,
         stages=stages,
         segmentation=SegmentationConfig(enabled=True),
-        # chat 工具调用分布平坦（>=7 次仅覆盖 ~1%），粗筛门槛按格式区分：
-        # session 7/1/2，chat 3/1/2（与 rule_gate 设计决策一致）。
         rule_gate=rule_gate,
         judge=JudgeConfig(),
         verify=VerifyConfig(

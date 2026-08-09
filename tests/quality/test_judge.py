@@ -163,7 +163,7 @@ class JudgeTest(unittest.TestCase):
             indices, verdicts = asyncio.run(
                 judge_mod.run_llm_judge(
                     records, client, {}, asyncio.Lock(), cache_path,
-                    ratio=0.5, seed=1, concurrency=4,
+                    ratio=0.5, seed=1,
                 )
             )
             self.assertEqual(len(indices), 4)

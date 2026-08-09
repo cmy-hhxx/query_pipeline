@@ -5,6 +5,23 @@ from query_pipeline.models.turn import Turn
 from query_pipeline.rules.reject import generic_reject_reason
 
 
+# 未显式设置的旋钮按输入格式补齐（chat 工具调用分布平坦，>=7 次仅覆盖 ~1%）。
+# suggest.py 的 is_default 标记同源：session 7/2、chat 3/2。
+_FORMAT_DEFAULTS = {"session": (7, 2), "chat": (3, 2)}
+
+
+def effective_gate(cfg: RuleGateConfig, fmt: str) -> RuleGateConfig:
+    """按输入格式补齐 None 旋钮；显式传入的旋钮保持原值。"""
+    calls, tools = _FORMAT_DEFAULTS.get(fmt, _FORMAT_DEFAULTS["session"])
+    return RuleGateConfig(
+        enabled=cfg.enabled,
+        reject_rules=cfg.reject_rules,
+        min_chain_tool_calls=calls if cfg.min_chain_tool_calls is None else cfg.min_chain_tool_calls,
+        min_chain_steps=cfg.min_chain_steps,
+        min_unique_tools=tools if cfg.min_unique_tools is None else cfg.min_unique_tools,
+    )
+
+
 def is_eligible(turn: Turn) -> bool:
     if turn.status not in (None, "completed"):
         return False
@@ -69,18 +86,20 @@ def unique_tools(turn: Turn) -> int:
 
 def select_candidates(turns: list[Turn], cfg: RuleGateConfig) -> list[int]:
     """Indices that pass reject rules + chain/tool AND-gates."""
+    gate = effective_gate(cfg, "session")  # 直接调用者无格式上下文 → session 默认
+    assert gate.min_chain_tool_calls is not None and gate.min_unique_tools is not None
     candidates: list[int] = []
     for idx, turn in enumerate(turns):
         if not is_eligible(turn):
             continue
-        if cfg.reject_rules:
+        if gate.reject_rules:
             reason = generic_reject_reason(turn.question)
             if reason:
                 continue
         if (
-            chain_tool_calls(turn) >= cfg.min_chain_tool_calls
-            and chain_steps(turn) >= cfg.min_chain_steps
-            and unique_tools(turn) >= cfg.min_unique_tools
+            chain_tool_calls(turn) >= gate.min_chain_tool_calls
+            and chain_steps(turn) >= gate.min_chain_steps
+            and unique_tools(turn) >= gate.min_unique_tools
         ):
             candidates.append(idx)
     return candidates
@@ -97,14 +116,16 @@ def select_last_only(turns: list[Turn], cfg: RuleGateConfig | None = None) -> li
     if not is_eligible(turn):
         return []
     if cfg is not None:
-        if cfg.reject_rules:
+        gate = effective_gate(cfg, "session")
+        assert gate.min_chain_tool_calls is not None and gate.min_unique_tools is not None
+        if gate.reject_rules:
             reason = generic_reject_reason(turn.question)
             if reason:
                 return []
         if not (
-            chain_tool_calls(turn) >= cfg.min_chain_tool_calls
-            and chain_steps(turn) >= cfg.min_chain_steps
-            and unique_tools(turn) >= cfg.min_unique_tools
+            chain_tool_calls(turn) >= gate.min_chain_tool_calls
+            and chain_steps(turn) >= gate.min_chain_steps
+            and unique_tools(turn) >= gate.min_unique_tools
         ):
             return []
     return [idx]

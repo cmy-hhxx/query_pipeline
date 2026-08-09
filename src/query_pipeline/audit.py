@@ -58,7 +58,7 @@ async def audit_rows(
     concurrency: int = 64,
 ) -> list[dict[str, Any]]:
     client = LLMClient(LLMConfig(model=model, concurrency=concurrency))
-    semaphore = asyncio.Semaphore(max(1, concurrency))
+    # 限流由 LLMClient 进程级 semaphore 承担，此处不再叠加第二层。
     results: list[dict[str, Any]] = []
 
     async def check(row: dict[str, Any]) -> dict[str, Any]:
@@ -66,17 +66,16 @@ async def audit_rows(
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         # 3 次独立判定取多数：LLM 对边界问句的判定有波动，多数裁决更稳。
         verdicts: list[tuple[bool, str]] = []
-        async with semaphore:
-            for _ in range(3):
-                try:
-                    raw = await client.complete(
-                        system_prompt=AUDIT_PROMPT,
-                        user_prompt=json.dumps({"question": question}, ensure_ascii=False),
-                    )
-                    data = json.loads(raw)
-                    verdicts.append((bool(data.get("is_complex")), str(data.get("reason") or "")))
-                except Exception as exc:  # noqa: BLE001 审计失败按通过处理
-                    verdicts.append((True, f"audit_error: {str(exc)[:80]}"))
+        for _ in range(3):
+            try:
+                raw = await client.complete(
+                    system_prompt=AUDIT_PROMPT,
+                    user_prompt=json.dumps({"question": question}, ensure_ascii=False),
+                )
+                data = json.loads(raw)
+                verdicts.append((bool(data.get("is_complex")), str(data.get("reason") or "")))
+            except Exception as exc:  # noqa: BLE001 审计失败按通过处理
+                verdicts.append((True, f"audit_error: {str(exc)[:80]}"))
         is_complex = sum(1 for v, _ in verdicts if v) >= 2
         reasons = [r for v, r in verdicts if not v]
         reason = "; ".join(dict.fromkeys(reasons))[:120] or "多数判定为复杂"

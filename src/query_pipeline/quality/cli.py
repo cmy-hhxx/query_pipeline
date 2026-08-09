@@ -66,7 +66,6 @@ def _run_llm_phase(
                 cache_path,
                 ratio=args.ratio,
                 seed=args.seed,
-                concurrency=args.concurrency,
             )
         finally:
             await client.close()

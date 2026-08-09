@@ -76,10 +76,26 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
     # Write output unless the run failed AND produced nothing — avoid clobbering a
     # previous good output with an empty file. Partial rows are still inspectable;
     # the exit code and summary flag the failure.
-    if success or ctx.rows:
+    if ctx.rows:
         write_jsonl(cleaned_path, ctx.rows)
         write_jsonl(complex_path, [r for r in ctx.rows if r.get("difficulty_level") == "hard"])
         write_jsonl(normal_path, [r for r in ctx.rows if r.get("difficulty_level") == "normal"])
+    elif success:
+        # 成功但零输出（全部候选被 value 拒 / 门槛调严 / --no-llm 等）：已存在上次产物时
+        # 保留旧文件并告警，不得用空文件覆盖；首次运行（无历史产物）仍写空文件，
+        # 保证 --no-llm 首跑与 output_files 契约不变。
+        targets = (cleaned_path, complex_path, normal_path)
+        existing = [p for p in targets if p.exists()]
+        if existing:
+            logger.warning(
+                "run 成功但零输出：保留上次产物（%s），未用空文件覆盖。如确需清空请先删除产物。",
+                ", ".join(str(p) for p in existing),
+            )
+            stats["output_preserved_previous"] = True
+        else:
+            write_jsonl(cleaned_path, [])
+            write_jsonl(complex_path, [])
+            write_jsonl(normal_path, [])
     summary_path.write_text(
         json.dumps({**stats, "success": success}, ensure_ascii=False, indent=2), encoding="utf-8"
     )

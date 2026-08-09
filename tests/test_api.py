@@ -82,6 +82,126 @@ class ApiTest(unittest.TestCase):
             self.assertTrue(out.exists())
             self.assertEqual(out.name, "cleaned_queries.jsonl")
 
+    def _run_with(self, src: Path, tmp: Path, **kwargs: object) -> dict:
+        with patch("query_pipeline.pipeline.runner.LLMClient", RecordingClient):
+            return api_run(src, output_dir=tmp / "out", work_dir=tmp / "work", **kwargs)
+
+    def _chat_line(self, case_id: str, n_calls: int, tool_names: list[str]) -> str:
+        import json as _json
+
+        chain = [
+            {"plan": "", "tools": [{"name": tool_names[i % len(tool_names)], "input": {}, "output": "o"}]}
+            for i in range(n_calls)
+        ]
+        return _json.dumps(
+            {
+                "trace_id": f"tr-{case_id}",
+                "question": "帮我分析茅台估值并给出买卖建议",
+                "judge_data": {
+                    "case_id": case_id,
+                    "input": {"text": "帮我分析茅台估值并给出买卖建议"},
+                    "context": [],
+                    "chain": chain,
+                    "raw_answer": "分析如下，" + "数据" * 30,
+                    "text_answer": "分析如下，" + "数据" * 30,
+                },
+            }
+        )
+
+    def test_auto_chat_uses_chat_gate(self) -> None:
+        # chat 输入 + format="auto"：门槛必须是 chat 的 3/2（4 次调用 2 种工具
+        # 能过 3/2，但过不了 session 的 7/2）——旧实现 auto 落到 7/2 会过滤掉。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            src.write_text(self._chat_line("c1", 4, ["web_search", "finquery"]) + "\n", encoding="utf-8")
+            summary = self._run_with(src, tmp_path)
+        self.assertEqual(summary["stats"]["input_format"], "chat")
+        self.assertEqual(summary["stats"]["complex_rows"], 1)
+
+    def test_auto_session_uses_session_gate(self) -> None:
+        # session 输入 + format="auto"：门槛必须是 session 的 7/2（4 次调用应被过滤）
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            chain = [
+                {"plan": "p", "tools": [{"name": n, "input": {}, "output": "o"}]}
+                for n in ("web_search", "finquery")
+            ] * 2
+            src.write_text(
+                json.dumps(
+                    {
+                        "thread_id": "t1",
+                        "context": [
+                            {
+                                "question": "帮我分析茅台的估值",
+                                "answer": "分析如下，" + "数据" * 30,
+                                "trace_id": "tr1",
+                                "status": "completed",
+                                "outcome": "success",
+                                "chain": chain,
+                                "tool_count": 4,
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            summary = self._run_with(src, tmp_path)
+        self.assertEqual(summary["stats"]["input_format"], "session")
+        self.assertEqual(summary["stats"]["candidates"], 0)
+
+    def test_no_reject_rules_effective(self) -> None:
+        # --no-reject-rules 必须生效：问句命中 reject（LOW_VALUE_COMMON）时，
+        # 默认被拒；reject_rules=False 时保留（旧实现默认分支吞掉该参数）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            chain = [
+                {"plan": "p", "tools": [{"name": n, "input": {}, "output": "o"}]}
+                for n in ("web_search", "finquery", "compute")
+            ] * 3
+            src.write_text(
+                json.dumps(
+                    {
+                        "thread_id": "t1",
+                        "context": [
+                            {
+                                "question": "好的",
+                                "answer": "好的，" + "数据" * 30,
+                                "trace_id": "tr1",
+                                "status": "completed",
+                                "outcome": "success",
+                                "chain": chain,
+                                "tool_count": 9,
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with patch("query_pipeline.pipeline.runner.LLMClient", RecordingClient):
+                default = api_run(src, output_dir=tmp_path / "out1", work_dir=tmp_path / "work1")
+                no_reject = api_run(
+                    src, output_dir=tmp_path / "out2", work_dir=tmp_path / "work2", reject_rules=False
+                )
+        self.assertEqual(default["stats"]["candidates"], 0)
+        self.assertEqual(no_reject["stats"]["candidates"], 1)
+        self.assertEqual(no_reject["stats"]["complex_rows"], 1)
+
+    def test_single_knob_keeps_format_default(self) -> None:
+        # 只传 min_tool_calls=5：min_unique_tools 必须补 chat 默认 2（而非旧实现的 1）。
+        # 5 次调用但仅 1 种工具 → 被 2 过滤（旧实现 (5,1) 会放行）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            src.write_text(self._chat_line("c1", 5, ["web_search"]) + "\n", encoding="utf-8")
+            summary = self._run_with(src, tmp_path, min_tool_calls=5)
+        self.assertEqual(summary["stats"]["input_format"], "chat")
+        self.assertEqual(summary["stats"]["candidates"], 0)
+
     def test_missing_input_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
             api_run("/nonexistent/input.jsonl")

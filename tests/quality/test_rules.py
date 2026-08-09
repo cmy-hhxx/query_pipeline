@@ -82,6 +82,17 @@ class RuleTest(unittest.TestCase):
         rules = _rules_by_name(_row(chain=[]))
         self.assertFalse(rules["chain"]["ok"])
 
+    def test_chain_end2end_skips_chain_requirement(self) -> None:
+        # end2end 行合法无 chain：只要求 tools 非空
+        row = _row(capture_mode="end2end", chain=[], tools=["web_search"])
+        rules = _rules_by_name(row)
+        self.assertTrue(rules["chain"]["ok"])
+
+    def test_chain_end2end_requires_tools(self) -> None:
+        row = _row(capture_mode="end2end", chain=[], tools=[])
+        rules = _rules_by_name(row)
+        self.assertFalse(rules["chain"]["ok"])
+
     def test_chain_malformed_hop(self) -> None:
         rules = _rules_by_name(_row(chain=[{"plan": "", "tools": "oops"}]))
         self.assertFalse(rules["chain"]["ok"])
@@ -151,4 +162,29 @@ class DatasetRuleTest(unittest.TestCase):
         rules = {r["rule"]: r for r in run_dataset_rules(rows)}
         self.assertTrue(rules["unknown_fields"]["ok"])
         self.assertEqual(rules["unknown_fields"]["evidence"], ["legacy_run_id"])
+
+    def test_category_skew_complex_id_not_falsely_zero(self) -> None:
+        # 仅 complex 09 有记录：09 不能出现在"零记录类别"里（旧实现 split("-")[0]
+        # 得到 "complex"，误报 09；normal 01 的 id 还会"覆盖"complex 01）。
+        rows = [
+            _row(trace_id="t1", category="complex-topic/09-action-output"),
+            _row(trace_id="t2", category="complex-topic/09-action-output", difficulty_level="hard"),
+        ]
+        rules = {r["rule"]: r for r in run_dataset_rules(rows)}
+        skew = rules["category_skew"]
+        self.assertNotIn("09", skew["detail"])
+        # complex 01-08 仍然如实报零
+        self.assertIn("零记录类别", skew["detail"])
+        self.assertIn("01", skew["detail"])
+
+    def test_category_skew_normal_id_does_not_cover_complex(self) -> None:
+        # 仅 normal 01 有记录：complex 01 仍是零记录类别（id 碰撞不得串扰）。
+        rows = [
+            _row(trace_id="t1", category="01-event-and-concept-stock-selection", difficulty_level="normal"),
+            _row(trace_id="t2", category="01-event-and-concept-stock-selection", difficulty_level="normal"),
+        ]
+        rules = {r["rule"]: r for r in run_dataset_rules(rows)}
+        skew = rules["category_skew"]
+        self.assertIn("零记录类别", skew["detail"])
+        self.assertIn("01", skew["detail"])
 

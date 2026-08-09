@@ -95,7 +95,6 @@ async def run_llm_judge(
     *,
     ratio: float,
     seed: int,
-    concurrency: int,
 ) -> tuple[list[int], list[dict[str, Any]]]:
     """Sample records and LLM-judge each; returns (sample_indices, verdicts)."""
     sample_indices = select_sample(records, ratio=ratio, seed=seed)
@@ -110,7 +109,8 @@ async def run_llm_judge(
             row, client, cache, cache_lock, cache_path,
             system_prompt=system_prompt, model=model,
         ),
-        concurrency=concurrency,
         description="LLM 抽检判定",
     )
+    # run_concurrent 兜底网返回 None：按判定失败处理（与 judge_one 内部异常一致）
+    verdicts = [v for v in verdicts if v is not None]
     return sample_indices, verdicts

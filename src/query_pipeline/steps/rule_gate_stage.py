@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from query_pipeline.pipeline.context import PipelineContext
-from query_pipeline.session.candidates import is_eligible, select_candidates, select_last_only
+from query_pipeline.session.candidates import effective_gate, is_eligible, select_candidates, select_last_only
 
 
 async def run_rule_gate_stage(
@@ -19,15 +19,16 @@ async def run_rule_gate_stage(
     carry judge_data.chain, so the tool gates are a meaningful coarse filter.
     """
     cfg = ctx.config
+    gate = effective_gate(cfg.rule_gate, ctx.stats.get("input_format", "session"))
     candidates: dict[str, list[int]] = {}
     total = 0
     for session in ctx.sessions:
         if session.candidate_mode == "last_only":
-            selected = select_last_only(session.turns, cfg.rule_gate) if cfg.rule_gate.enabled else (
+            selected = select_last_only(session.turns, gate) if gate.enabled else (
                 select_last_only(session.turns)
             )
         else:
-            selected = select_candidates(session.turns, cfg.rule_gate) if cfg.rule_gate.enabled else [
+            selected = select_candidates(session.turns, gate) if gate.enabled else [
                 i for i, t in enumerate(session.turns) if is_eligible(t)
             ]
         candidates[session.thread_id] = selected
