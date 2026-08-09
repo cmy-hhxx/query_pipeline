@@ -9,20 +9,21 @@ process to render timestamps in Asia/Shanghai — including third-party loggers
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _BEIJING = timezone(timedelta(hours=8))
 
 
-def beijing_converter(timestamp: float) -> "time.struct_time":
+def beijing_converter(timestamp: float) -> time.struct_time:
     return datetime.fromtimestamp(timestamp, tz=_BEIJING).timetuple()
 
 
 def setup_logging(log_file: Path, *, verbose: bool) -> logging.Logger:
     """Configure the query_pipeline logger: stream + per-run file handler."""
     # Beijing time for every formatter in the process (own + imported loggers).
-    logging.Formatter.converter = staticmethod(beijing_converter)
+    setattr(logging.Formatter, "converter", staticmethod(beijing_converter))
 
     logger = logging.getLogger("query_pipeline")
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)

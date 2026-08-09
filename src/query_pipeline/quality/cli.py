@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 # 与管线一致：整个日志系统统一北京时间（含第三方库）。
-logging.Formatter.converter = staticmethod(beijing_converter)
+setattr(logging.Formatter, "converter", staticmethod(beijing_converter))
 
 
 def build_parser() -> argparse.ArgumentParser:
