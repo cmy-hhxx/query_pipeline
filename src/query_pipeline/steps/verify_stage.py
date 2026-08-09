@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from query_pipeline.io.checkpoint import content_key, stage_checkpoint
 from query_pipeline.io.jsonl import write_jsonl
@@ -142,6 +145,10 @@ async def run_verify_stage(
             counts["rejected"] += 1
 
     ctx.rows = kept
+    logger.info(
+        "[verify] kept=%d rejected=%d failed=%d",
+        counts["kept"], counts["rejected"], counts["failed"],
+    )
     ctx.stats["verify_kept"] = counts["kept"]
     ctx.stats["verify_rejected"] = counts["rejected"]
     ctx.stats["verify_failed"] = counts["failed"]

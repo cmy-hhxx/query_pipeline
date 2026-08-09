@@ -124,6 +124,15 @@ async def run_judge_stage(
         debug_judged.extend(judged)
 
     ctx.rows = rows
+    logger.info(
+        "[judge] candidates=%d valuable=%d complex=%d normal=%d value_rejected=%d llm_failed=%d",
+        ctx.stats.get("candidates", 0),
+        ctx.stats.get("candidates", 0) - ctx.stats.get("value_rejected", 0) - ctx.stats.get("llm_failed", 0),
+        counters.get("complex_rows", 0),
+        counters.get("normal_rows", 0),
+        counters.get("value_rejected", 0),
+        counters.get("llm_failed", 0),
+    )
     ctx.stats.update(
         {
             "segments": sum(len(v) for v in ctx.segments.values()),

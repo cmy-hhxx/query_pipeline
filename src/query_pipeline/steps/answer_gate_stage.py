@@ -10,8 +10,12 @@ answers below a length floor. Drops are counted per reason for the summary.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
+from collections import Counter
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from query_pipeline.pipeline.context import PipelineContext
 
@@ -81,6 +85,10 @@ async def run_answer_gate_stage(
             )
     ctx.rows = kept
     ctx.stats["answer_gate_rejected"] = len(rejected)
+    if rejected:
+        by_reason = Counter(r["reason"].split("(")[0] for r in rejected)
+        top = ", ".join(f"{reason}={count}" for reason, count in by_reason.most_common(8))
+        logger.info("[answer_gate] rejected %d row(s): %s", len(rejected), top)
     if rejected and ctx.config.debug.dump_intermediates:
         from query_pipeline.io.jsonl import write_jsonl
 

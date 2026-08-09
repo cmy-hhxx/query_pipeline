@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from query_pipeline.config.models import PipelineConfig
 from query_pipeline.io.jsonl import write_jsonl
@@ -50,7 +54,14 @@ async def run_pipeline_async(config: PipelineConfig) -> RunSummary:
     try:
         for name in stage_names(ctx.config.stages):
             stage = get_stage(name)
+            rows_before = len(ctx.rows)
+            started = time.monotonic()
             ctx = await stage(ctx, client, cache, cache_lock)
+            elapsed = time.monotonic() - started
+            logger.info(
+                "[stage] %-12s rows %d -> %d  (%.1fs)",
+                name, rows_before, len(ctx.rows), elapsed,
+            )
     finally:
         if client is not None:
             await client.close()
