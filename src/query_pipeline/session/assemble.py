@@ -49,7 +49,11 @@ def assemble_row(
         source_case_id=session.thread_id,
         capture_mode="full_link" if turn.chain else "end2end",
         trace_id=turn.trace_id,
-        category=load_taxonomy().get(difficulty, category_id).path,
+        category=(
+            "other"
+            if category_id == "other"
+            else load_taxonomy().get(difficulty, category_id).path
+        ),
         input=OutputInput(text=turn.question),
         context=prior,
         chain=turn.chain,

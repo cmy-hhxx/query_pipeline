@@ -26,8 +26,8 @@ def _run_success(stats: dict[str, Any]) -> bool:
     """
     if stats.get("session_errors", 0) > 0:
         return False
-    if stats.get("llm_failed", 0) > 0:
-        return False
+    # llm_failed is counted but not fatal: a deterministic LLM parse failure on a
+    # single candidate must not block delivery of the rest (fail-closed drop).
     if stats.get("total_sessions", 0) == 0:
         return False
     if stats.get("input_bad_lines", 0) == stats.get("total_sessions", 0):

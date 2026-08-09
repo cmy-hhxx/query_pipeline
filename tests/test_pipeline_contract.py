@@ -166,7 +166,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             "complex_rows": 0,
         }
         self.assertTrue(_run_success(clean))
-        self.assertFalse(_run_success({**clean, "llm_failed": 1}))
+        # llm_failed is counted, not fatal (deterministic single-candidate failures
+        # must not block delivery); session-level errors still fail the run.
+        self.assertTrue(_run_success({**clean, "llm_failed": 1}))
         self.assertFalse(_run_success({**clean, "session_errors": 1}))
         self.assertFalse(_run_success({**clean, "total_sessions": 0}))
         self.assertFalse(_run_success({**clean, "input_bad_lines": 10}))
@@ -464,7 +466,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeFailingSessionLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertFalse(summary.success)  # llm_failed=1 makes the run a failure (exit 1)
+            self.assertTrue(summary.success)  # llm_failed counted, not fatal
             # segmentation failure -> whole session is one segment; judge failure on turn1 dropped.
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
@@ -472,8 +474,10 @@ class SessionPipelineContractTest(unittest.TestCase):
             # verify failure is fail-closed: the surviving row is dropped.
             self.assertEqual(summary.stats["verify_failed"], 1)
             self.assertEqual(summary.stats["verify_kept"], 0)
-            # run failed and produced nothing -> no output file written
-            self.assertFalse(Path(summary.output_files["complex_queries"]).exists())
+            # run succeeds (llm_failed counted, not fatal); empty output is written
+            out_path = Path(summary.output_files["complex_queries"])
+            self.assertTrue(out_path.exists())
+            self.assertEqual(out_path.read_text(encoding="utf-8").strip(), "")
 
     def test_end_to_end_value_gate_rejects_context_only_followups(self) -> None:
         # The value gate (first semantic layer) rejects the context-only

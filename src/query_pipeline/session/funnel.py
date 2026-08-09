@@ -7,7 +7,7 @@ candidate (fail-closed); the funnel only assembles rows for survivors.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, field_validator
 
@@ -35,10 +35,12 @@ class ClassifyResult(BaseModel):
     category_id: str
     reason: str | None = None
 
+    OTHER: ClassVar[str] = "other"
+
     @field_validator("category_id")
     @classmethod
     def validate_category_id(cls, value: str) -> str:
-        if value not in load_taxonomy().complex and value not in load_taxonomy().normal:
+        if value != ClassifyResult.OTHER and value not in load_taxonomy().complex and value not in load_taxonomy().normal:
             raise ValueError(f"invalid category_id: {value}")
         return value
 
@@ -131,6 +133,8 @@ async def funnel_candidate(
                 client, llm_cfg, cache, cache_path, cache_lock,
                 step="classify_complex", prompt_id="classify_complex", payload=payload, parse=parse_classify_response,
             )
+            if classify.category_id == ClassifyResult.OTHER:
+                raise ValueError("classify_complex returned 'other' — complex taxonomy has no fallback")
             difficulty = "hard"
         else:
             classify = await _call(

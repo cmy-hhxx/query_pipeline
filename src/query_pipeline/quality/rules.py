@@ -95,6 +95,9 @@ def _check_category(row: dict[str, Any]) -> tuple[bool, str]:
     category = row.get("category")
     if not isinstance(category, str) or not category:
         return False, "category 缺失或非字符串"
+    if category == "other":
+        # 普通分类的兜底标签（normal_few_shot.md 决策步骤允许 other）
+        return (True, "ok") if row.get("difficulty_level") == "normal" else (False, "other 仅允许出现在 normal 行")
     cat = next((c for c in load_taxonomy().all() if c.path == category), None)
     if cat is None:
         return False, f"未知 category：{category!r}"
