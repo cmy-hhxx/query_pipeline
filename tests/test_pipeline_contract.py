@@ -18,7 +18,7 @@ from query_pipeline.llm.cache import make_cache_key
 from query_pipeline.models.session import Segment, parse_segment_response, parse_step2_response
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
-from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
+from query_pipeline.prompts import resolve_prompt as _resolve
 from query_pipeline.session.assemble import assemble_row
 from query_pipeline.session.candidates import chain_steps, chain_tool_calls, select_candidates
 from query_pipeline.adapters.chat import adapt_chat
@@ -506,9 +506,9 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_cache_key_verify_rounds_distinct(self) -> None:
         q = "question"
-        base = make_cache_key(q, step="verify:verify_complex", model="m", prompt=VERIFY_COMPLEX)
-        r2 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=VERIFY_RECHECK.format(round_no=2))
-        r3 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=VERIFY_RECHECK.format(round_no=3))
+        base = make_cache_key(q, step="verify:verify_complex", model="m", prompt=_resolve("verify_complex"))
+        r2 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=_resolve("verify_recheck").format(round_no=2))
+        r3 = make_cache_key(q, step="verify:verify_recheck", model="m", prompt=_resolve("verify_recheck").format(round_no=3))
         self.assertNotEqual(base, r2)
         self.assertNotEqual(r2, r3)
         self.assertNotEqual(base, r3)
@@ -932,11 +932,11 @@ class FakeVerifyCascadeLLMClient:
         if "current_question" in payload:  # step2 judge
             return json.dumps({"is_complex": True, "category_id": "03", "reason": "上下文复杂"}, ensure_ascii=False)
         question = payload["question"]
-        if system_prompt == VERIFY_COMPLEX:
+        if system_prompt == _resolve("verify_complex"):
             round_no = 1
-        elif system_prompt == VERIFY_RECHECK.format(round_no=2):
+        elif system_prompt == _resolve("verify_recheck").format(round_no=2):
             round_no = 2
-        elif system_prompt == VERIFY_RECHECK.format(round_no=3):
+        elif system_prompt == _resolve("verify_recheck").format(round_no=3):
             round_no = 3
         else:
             raise AssertionError(f"unexpected verify system prompt: {system_prompt[:60]!r}")
@@ -965,9 +965,9 @@ class FakeVerifyMidRoundErrorLLMClient:
         if "current_question" in payload:  # step2 judge
             return json.dumps({"is_complex": True, "category_id": "03", "reason": "复杂"}, ensure_ascii=False)
         question = payload["question"]
-        if system_prompt == VERIFY_COMPLEX:
+        if system_prompt == _resolve("verify_complex"):
             round_no = 1
-        elif system_prompt == VERIFY_RECHECK.format(round_no=2):
+        elif system_prompt == _resolve("verify_recheck").format(round_no=2):
             round_no = 2
         else:
             round_no = 3
