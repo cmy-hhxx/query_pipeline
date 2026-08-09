@@ -25,7 +25,9 @@ class PipelineContext:
         return self.config.output.dir
 
     def path(self, name: str) -> Path:
-        return self.work_dir / name
+        # 中间过程数据统一落在 logs/ 下：交付物（cleaned_queries/summary/run.log）
+        # 留在输出目录顶层，调试数据与缓存/checkpoint 归 logs/。
+        return self.work_dir / "logs" / name
 
     def prune_debug_artifacts(self, *names: str) -> None:
         # When intermediates aren't dumped, don't let a prior run's debug artifact

@@ -10,6 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from query_pipeline.config.models import LLMConfig
+from query_pipeline.logging_setup import beijing_converter
 from query_pipeline.io.jsonl import read_jsonl_with_bad_lines, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
@@ -17,6 +18,10 @@ from query_pipeline.quality import aggregate, judge as judge_mod, report, rules
 from query_pipeline.quality.paths import llm_cache_path, project_root, qc_dir, source_path
 
 logger = logging.getLogger(__name__)
+
+
+# 与管线一致：整个日志系统统一北京时间（含第三方库）。
+logging.Formatter.converter = staticmethod(beijing_converter)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -6,6 +6,20 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+# U+2028 Line Separator / U+2029 Paragraph Separator inside model answers or
+# original data trip editors' "unusual line terminator" warnings and break
+# naive line-based consumers. They are invisible separators — collapse to a
+# space when writing (keeps JSONL strictly one line per record).
+_UNUSUAL_LINE_TERMINATORS = str.maketrans({"\u2028": " ", "\u2029": " "})
+
+
+def _dumps(record: dict[str, Any]) -> str:
+    out = {k: v for k, v in record.items() if not k.startswith("_")}
+    return json.dumps(out, ensure_ascii=False, separators=(",", ":")).translate(
+        _UNUSUAL_LINE_TERMINATORS
+    )
+
+
 
 def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
@@ -55,13 +69,11 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as handle:
         for record in records:
-            out = {k: v for k, v in record.items() if not k.startswith("_")}
-            handle.write(json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n")
+            handle.write(_dumps(record) + "\n")
     os.replace(tmp, path)
 
 
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    out = {k: v for k, v in record.items() if not k.startswith("_")}
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n")
+        handle.write(_dumps(record) + "\n")

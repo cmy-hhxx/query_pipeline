@@ -75,11 +75,16 @@ async def run_answer_gate_stage(
         if reason is None:
             kept.append(row)
         else:
+            inp = row.get("input")
+            question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
             rejected.append(
                 {
                     "trace_id": row.get("trace_id", ""),
                     "source_case_id": row.get("source_case_id", ""),
                     "difficulty": row.get("difficulty_level", ""),
+                    "category": row.get("category", ""),
+                    "question": question[:200],
+                    "answer": str(row.get("text_answer") or "")[:200],
                     "reason": reason,
                 }
             )

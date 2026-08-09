@@ -40,26 +40,9 @@ def _find_env_file() -> Path:
 
 
 def _setup_logging(log_file: Path, *, verbose: bool) -> None:
-    """Attach one stream handler + one file handler to the query_pipeline logger.
+    from query_pipeline.logging_setup import setup_logging
 
-    The file handler is swapped to the current run's output directory so the
-    run log and the deliverable jsonl live side by side (single audit dir).
-    """
-    import logging
-
-    logger = logging.getLogger("query_pipeline")
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    for handler in list(logger.handlers):
-        if isinstance(handler, logging.FileHandler):
-            logger.removeHandler(handler)
-    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
-        stream = logging.StreamHandler()
-        stream.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        logger.addHandler(stream)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logger.addHandler(file_handler)
+    setup_logging(log_file, verbose=verbose)
 
 
 def run(
@@ -136,7 +119,7 @@ def run(
             enabled=llm_enabled,
             model=model,
             concurrency=concurrency,
-            cache=work / "llm_cache.jsonl",
+            cache=work / "logs" / "llm_cache.jsonl",
         ),
         post=PostConfig(
             enabled=post_enabled,
@@ -146,7 +129,7 @@ def run(
             ),
             translate=TranslateConfig(enabled=True),
         ),
-        checkpoint=CheckpointConfig(enabled=True, dir=work / "checkpoints"),
+        checkpoint=CheckpointConfig(enabled=True, dir=work / "logs" / "checkpoints"),
         debug=DebugConfig(dump_intermediates=True),
     )
     summary = run_pipeline(config)

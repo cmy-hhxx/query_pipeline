@@ -507,7 +507,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual([r["trace_id"] for r in rows], ["trace1"])
 
-            verified = _read_jsonl(tmp_path / "work/verified.jsonl")
+            verified = _read_jsonl(tmp_path / "work" / "logs" / "verified.jsonl")
             self.assertEqual([v["trace_id"] for v in verified], ["trace1"])
             self.assertEqual(verified[0]["is_complex"], True)
 
@@ -570,7 +570,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual([r["input"]["text"] for r in rows], ["帮我分析贵州茅台的估值并给出买卖建议"])
 
-            verified = _read_jsonl(tmp_path / "work/verified.jsonl")
+            verified = _read_jsonl(tmp_path / "work" / "logs" / "verified.jsonl")
             self.assertEqual([v["trace_id"] for v in verified], ["trace0", "trace1", "trace2"])
             by_q = {v["question"]: v for v in verified}
             self.assertTrue(by_q["帮我分析贵州茅台的估值并给出买卖建议"]["is_complex"])
@@ -819,7 +819,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["total_sessions"], 1)
             self.assertEqual(summary.stats["input_bad_lines"], 1)
-            bad_lines = _read_jsonl(tmp_path / "work" / "bad_lines.jsonl")
+            bad_lines = _read_jsonl(tmp_path / "work" / "logs" / "bad_lines.jsonl")
             self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
 
 

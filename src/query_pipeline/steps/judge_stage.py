@@ -214,6 +214,7 @@ async def _process_session(
         {
             "thread_id": session.thread_id,
             "idx": j.get("idx"),
+            "question": turns[j["idx"]].question[:200] if j.get("idx") is not None else "",
             "is_valuable": bool(getattr(j.get("value"), "is_valuable", None)),
             "is_complex": bool(getattr(j.get("complexity"), "is_complex", None)),
             "difficulty": j.get("difficulty"),
