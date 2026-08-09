@@ -31,7 +31,8 @@ judge:
 verify:
   enabled: true
   prompt_id: verify_complex
-  max_rounds: 3
+  max_rounds_hard: 5
+  max_rounds_normal: 2
 
 post:
   enabled: true

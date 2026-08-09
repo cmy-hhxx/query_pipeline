@@ -61,7 +61,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
         )
     if stage == "verify":
         prompts = {cfg.verify.prompt_id: resolve_prompt(cfg.verify.prompt_id)}
-        if cfg.verify.max_rounds > 1:
+        if max(cfg.verify.max_rounds_hard, cfg.verify.max_rounds_normal) > 1:
             prompts["verify_recheck"] = resolve_prompt("verify_recheck")
         return _hash_material(
             {

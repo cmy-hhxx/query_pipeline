@@ -356,7 +356,8 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
             verify:
               enabled: true
               prompt_id: verify_complex
-              max_rounds: 1
+              max_rounds_hard: 1
+              max_rounds_normal: 1
             {post_block}
             llm:
               enabled: true

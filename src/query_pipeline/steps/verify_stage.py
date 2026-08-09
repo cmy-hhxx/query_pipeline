@@ -14,15 +14,23 @@ from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.prompts import resolve_prompt
 
 
+def _prior_questions(row: dict[str, Any]) -> list[str]:
+    context = row.get("context") or []
+    return [str(t.get("question") or "") for t in context if isinstance(t, dict)]
+
+
 async def run_verify_stage(
     ctx: PipelineContext,
     client: LLMClient | None,
     cache: dict[str, dict[str, Any]],
     cache_lock: asyncio.Lock,
 ) -> PipelineContext:
-    """Standalone multi-round re-check; LLM failures keep the row (fail-open) and are
-    checkpointed too, so a resumed run replays the failure (deterministic fail-open).
-    discover, by contrast, stays fail-closed: errored sessions are not checkpointed."""
+    """Context-aware multi-round re-check, rounds per difficulty.
+
+    hard rows must stay complex in every round; normal rows must stay
+    non-complex. LLM failures drop the row (fail-closed, admission bar is
+    high) and are checkpointed so a resumed run replays the same verdict.
+    """
     cfg = ctx.config
     ctx.prune_debug_artifacts("verified.jsonl")
     if not cfg.verify.enabled or client is None or not ctx.rows:
@@ -36,6 +44,7 @@ async def run_verify_stage(
         inp = row.get("input")
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         difficulty = row.get("difficulty_level", "hard")
+        max_rounds = cfg.verify.max_rounds_hard if difficulty == "hard" else cfg.verify.max_rounds_normal
         key = content_key(str(row.get("source_case_id", "")), str(row.get("trace_id", "")), question)
         record = checkpoint.get(key)
         if record is not None:
@@ -45,13 +54,17 @@ async def run_verify_stage(
                 "error": record.get("error"),
                 "rounds": record.get("rounds", []),
             }
-        user_prompt = "请判断以下单个问句是否属于复杂金融问句，只输出严格 JSON：\n" + json.dumps(
-            {"question": question}, ensure_ascii=False, separators=(",", ":")
+        user_prompt = "请复核以下问句是否属于复杂金融问句，只输出严格 JSON：\n" + json.dumps(
+            {"prior_questions": _prior_questions(row), "question": question},
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
         rounds: list[dict[str, Any]] = []
         error: str | None = None
         reason: str | None = None
-        for round_no in range(1, cfg.verify.max_rounds + 1):
+        expected = difficulty == "hard"
+        keep = False
+        for round_no in range(1, max_rounds + 1):
             if round_no == 1:
                 prompt_id = cfg.verify.prompt_id
                 system_prompt = resolve_prompt(prompt_id)
@@ -86,13 +99,11 @@ async def run_verify_stage(
                 break
             reason = parsed.reason
             rounds.append({"round": round_no, "is_complex": parsed.is_complex, "reason": parsed.reason})
-            if not parsed.is_complex:
+            if parsed.is_complex != expected:
                 break
-        # hard rows must stay complex in every round; normal rows must stay non-complex.
-        expected = difficulty == "hard"
-        keep = error is not None or (bool(rounds) and all(r["is_complex"] == expected for r in rounds))
-        # Fail-open: errored rows are kept in output AND checkpointed, so a resumed run
-        # replays the failure instead of re-verifying (deterministic across resumes).
+            keep = round_no == max_rounds
+        # Fail-closed: errored rows are dropped (keep=False) and checkpointed so a
+        # resumed run replays the drop instead of re-verifying.
         await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
         return {"keep": keep, "reason": reason, "error": error, "rounds": rounds}
 
@@ -124,7 +135,6 @@ async def run_verify_stage(
         )
         if error is not None:
             counts["failed"] += 1
-            kept.append(row)
         elif keep:
             counts["kept"] += 1
             kept.append(row)

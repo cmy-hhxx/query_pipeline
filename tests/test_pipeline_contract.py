@@ -469,15 +469,11 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["llm_failed"], 1)
-            # verify failure is fail-open: the row survives and is counted.
+            # verify failure is fail-closed: the surviving row is dropped.
             self.assertEqual(summary.stats["verify_failed"], 1)
             self.assertEqual(summary.stats["verify_kept"], 0)
-
-            rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["trace_id"], "trace2")
-            self.assertEqual(rows[0]["category"], "complex-topic/02-forecasting-and-projection")
-            self.assertEqual(len(rows[0]["context"]), 2)
+            # run failed and produced nothing -> no output file written
+            self.assertFalse(Path(summary.output_files["complex_queries"]).exists())
 
     def test_end_to_end_value_gate_rejects_context_only_followups(self) -> None:
         # The value gate (first semantic layer) rejects the context-only
@@ -511,11 +507,12 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual([v["trace_id"] for v in verified], ["trace1"])
             self.assertEqual(verified[0]["is_complex"], True)
 
-    def test_verify_config_max_rounds(self) -> None:
-        self.assertEqual(VerifyConfig().max_rounds, 3)
-        self.assertEqual(VerifyConfig(max_rounds=1).max_rounds, 1)
+    def test_verify_config_rounds(self) -> None:
+        self.assertEqual(VerifyConfig().max_rounds_hard, 5)
+        self.assertEqual(VerifyConfig().max_rounds_normal, 2)
+        self.assertEqual(VerifyConfig(max_rounds_hard=1).max_rounds_hard, 1)
         with self.assertRaises(ValueError):
-            VerifyConfig(max_rounds=0)
+            VerifyConfig(max_rounds_hard=0)
 
     def test_cache_key_verify_rounds_distinct(self) -> None:
         q = "question"
@@ -582,8 +579,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                 [(1, True), (2, False)],
             )
 
-    def test_verify_multi_round_error_mid_round_fail_open(self) -> None:
-        # Round 2 of the "flaky" question raises: fail-open keeps the row
+    def test_verify_multi_round_error_mid_round_fail_closed(self) -> None:
+        # Round 2 of the "flaky" question raises: fail-closed drops the row
         # (verify_failed=1) and checkpoints the failure, so a re-run replays
         # both rows from the checkpoint with zero LLM calls.
         with tempfile.TemporaryDirectory() as tmp:
@@ -630,13 +627,13 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary2 = run_pipeline(cfg)
             self.assertEqual(summary2.stats["verify_kept"], 1)
             self.assertEqual(summary2.stats["verify_failed"], 1)
-            # both rows replay from the checkpoint (errored rows are sticky fail-open)
+            # both rows replay from the checkpoint (errored rows are sticky fail-closed)
             self.assertEqual(len(clients2[0].calls), 0)
 
             rows = _read_jsonl(Path(summary.output_files["complex_queries"]))
             self.assertEqual(
                 {r["input"]["text"] for r in rows},
-                {"帮我构建一个沪深300的增强策略并回测", "分析一下中概股的估值并给出配置建议"},
+                {"帮我构建一个沪深300的增强策略并回测"},
             )
 
     def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
@@ -824,6 +821,8 @@ class SessionPipelineContractTest(unittest.TestCase):
 
 def _funnel_response(system_prompt: str, payload: dict[str, Any]) -> str | None:
     """Shared fake for the decoupled funnel; returns None when not a funnel call."""
+    if "current_question" not in payload:
+        return None  # segment / verify / translate payloads handled elsewhere
     if "价值判官" in system_prompt:
         return json.dumps({"is_valuable": True, "reason": "金融相关"}, ensure_ascii=False)
     if "已判定为复杂金融问句" in system_prompt:
@@ -833,14 +832,10 @@ def _funnel_response(system_prompt: str, payload: dict[str, Any]) -> str | None:
         return json.dumps({"category_id": cid, "reason": reason}, ensure_ascii=False)
     if "有价值但非复杂" in system_prompt:
         return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-    if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" in system_prompt:
-        return None  # verify prompt, not complexity gate
-    if "复杂金融问句必须同时满足" in system_prompt:
-        q = payload["current_question"]
-        return json.dumps(
-            {"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False
-        )
-    return None
+    q = payload["current_question"]
+    return json.dumps(
+        {"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False
+    )
 
 
 class FakeSessionLLMClient:
@@ -900,9 +895,9 @@ class FakePostStageLLMClient:
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+        if "current_question" in payload:
             return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
-        if "question" in payload:  # verify: standalone question
+        if "question" in payload:  # verify
             return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
         if "text" in payload:  # translate
             return json.dumps({"translation": "翻译：" + payload["text"]}, ensure_ascii=False)
@@ -935,7 +930,7 @@ class FakeJudgeThenVerifyClient:
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:  # complexity gate
+        if "current_question" in payload:  # complexity gate
             q = payload["current_question"]
             return json.dumps({"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False)
         if payload["question"] == "Q2 复杂取数":
@@ -960,7 +955,7 @@ class FakeFailingSessionLLMClient:
             return json.dumps({"category_id": "02", "reason": "需要预测"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:  # complexity gate
+        if "current_question" in payload:  # complexity gate
             if payload["current_question"] == "Q2 复杂取数":
                 raise RuntimeError("simulated judge failure")
             return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
@@ -1000,7 +995,7 @@ class FakeVerifyCascadeLLMClient:
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+        if "current_question" in payload:
             return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
         question = payload["question"]
         if system_prompt == _resolve("verify_complex"):
@@ -1039,7 +1034,7 @@ class FakeVerifyMidRoundErrorLLMClient:
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
-        if "复杂金融问句必须同时满足" in system_prompt and "单独的问句" not in system_prompt:
+        if "current_question" in payload:
             return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
         question = payload["question"]
         if system_prompt == _resolve("verify_complex"):
@@ -1107,6 +1102,8 @@ def _write_config(
             verify:
               enabled: true
               prompt_id: verify_complex
+              max_rounds_hard: 3
+              max_rounds_normal: 2
             {post_block}
             llm:
               enabled: {str(llm_enabled).lower()}
