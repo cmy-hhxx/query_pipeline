@@ -22,9 +22,11 @@ from query_pipeline.config.models import (
     InputConfig,
     JudgeConfig,
     LLMConfig,
+    LoggingConfig,
     OutputConfig,
     PipelineConfig,
     PostConfig,
+    PrecheckConfig,
     RuleGateConfig,
     SegmentationConfig,
     TranslateConfig,
@@ -40,12 +42,6 @@ def _find_env_file() -> Path:
     return Path.cwd() / ".env"
 
 
-def _setup_logging(log_file: Path, *, verbose: bool) -> None:
-    from query_pipeline.logging_setup import setup_logging
-
-    setup_logging(log_file, verbose=verbose)
-
-
 def run(
     input_path: str | Path,
     output_dir: str | Path | None = None,
@@ -59,7 +55,11 @@ def run(
     verify_rounds_hard: int | None = None,
     verify_rounds_normal: int | None = None,
     work_dir: str | Path | None = None,
+    log_dir: str | Path | None = None,
+    batch_id: str | None = None,
     llm_enabled: bool = True,
+    precheck_enabled: bool = True,
+    precheck_min_chain_coverage: float | None = None,
     min_tool_calls: int | None = None,
     min_unique_tools: int | None = None,
     reject_rules: bool = True,
@@ -80,7 +80,14 @@ def run(
         dedup_threshold / verify_rounds_hard / verify_rounds_normal: knobs
             with pipeline defaults when omitted.
         work_dir: scratch dir for caches/checkpoints (default: the output dir).
+        log_dir: ordinary/business log root (default: ``<output_dir>/logs``).
+        batch_id: optional stable batch identity; omit to generate one.
         llm_enabled: False runs rules only (empty output is expected).
+        precheck_enabled: run the data precheck stage before any LLM work
+            (critical issues abort the run; disable only when you know the
+            input is fine).
+        precheck_min_chain_coverage: minimum chain coverage on eligible turns
+            (default 0.5); pass 0.0 to allow chain-less (end2end) input.
         verbose: debug logging.
 
     Returns:
@@ -95,18 +102,15 @@ def run(
         os.environ["OPENAI_BASE_URL"] = base_url
 
     src = Path(input_path).expanduser().resolve()
-    if not src.exists():
-        raise FileNotFoundError(f"input file not found: {src}")
 
     if output_dir is None:
         output_dir = Path("outputs") / src.parent.name
-    # 日志、输出 jsonl、中间产物、缓存/checkpoint 全部放在同一目录，便于审计。
     if work_dir is None:
         work_dir = output_dir
 
-    out = Path(output_dir)
-    work = Path(work_dir)
-    _setup_logging(out / "run.log", verbose=verbose)
+    out = Path(output_dir).expanduser()
+    work = Path(work_dir).expanduser()
+    logs = Path(log_dir).expanduser() if log_dir is not None else out / "logs"
 
     # 门槛默认按格式区分（session 7/1/2，chat 3/1/2——chat 工具调用分布平坦，
     # >=7 次仅覆盖 ~1%）：未显式传入的旋钮保持 None，由 rule_gate 阶段按嗅探到的
@@ -124,6 +128,10 @@ def run(
         output=OutputConfig(dir=out),
         work_dir=work,
         stages=stages,
+        precheck=PrecheckConfig(
+            enabled=precheck_enabled,
+            min_chain_coverage=0.5 if precheck_min_chain_coverage is None else precheck_min_chain_coverage,
+        ),
         segmentation=SegmentationConfig(enabled=True),
         rule_gate=rule_gate,
         judge=JudgeConfig(),
@@ -135,7 +143,7 @@ def run(
             enabled=llm_enabled,
             model=model,
             concurrency=concurrency,
-            cache=work / "logs" / "llm_cache.jsonl",
+            cache=work / "runtime" / "cache" / "llm_cache.jsonl",
         ),
         post=PostConfig(
             enabled=post_enabled,
@@ -145,8 +153,13 @@ def run(
             ),
             translate=TranslateConfig(enabled=True),
         ),
-        checkpoint=CheckpointConfig(enabled=True, dir=work / "logs" / "checkpoints"),
+        checkpoint=CheckpointConfig(enabled=True, dir=work / "runtime" / "checkpoints"),
         debug=DebugConfig(dump_intermediates=True),
+        logging=LoggingConfig(
+            dir=logs,
+            batch_id=batch_id,
+            level="DEBUG" if verbose else "INFO",
+        ),
     )
     summary = run_pipeline(config)
     import json

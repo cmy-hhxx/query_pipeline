@@ -5,6 +5,7 @@ description = "Config-driven question cleaning, dedup, and classification pipeli
 authors = [{ name = "cmy", email = "cmyhhxx@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
+    "filelock>=3.16",
     "jinja2>=3.1",
     "openai>=2.0",
     "pydantic>=2.10",

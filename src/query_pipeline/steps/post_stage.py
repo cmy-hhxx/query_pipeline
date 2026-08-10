@@ -39,8 +39,15 @@ async def run_post_stage(
             cache_path=cfg.cache_path,
             checkpoint=checkpoint,
             cache_lock=cache_lock,
+            on_complete=(
+                ctx.business_writer.write
+                if ctx.stream_business_rows and ctx.business_writer is not None
+                else None
+            ),
         )
     else:
         counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
+        if ctx.stream_business_rows and ctx.business_writer is not None:
+            ctx.business_writer.write_many(ctx.rows)
     ctx.stats.update(counts)
     return ctx

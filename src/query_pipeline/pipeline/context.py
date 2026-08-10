@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from query_pipeline.config.models import PipelineConfig
+
+if TYPE_CHECKING:
+    from query_pipeline.io.business_log import BusinessLogWriter
 
 
 @dataclass
@@ -15,6 +18,8 @@ class PipelineContext:
     sessions: list[Any] = field(default_factory=list)
     segments: dict[str, list[Any]] = field(default_factory=dict)
     candidates: dict[str, list[int]] = field(default_factory=dict)
+    business_writer: BusinessLogWriter | None = None
+    stream_business_rows: bool = False
 
     @property
     def work_dir(self) -> Path:
@@ -25,9 +30,7 @@ class PipelineContext:
         return self.config.output.dir
 
     def path(self, name: str) -> Path:
-        # 中间过程数据统一落在 logs/ 下：交付物（cleaned_queries/summary/run.log）
-        # 留在输出目录顶层，调试数据与缓存/checkpoint 归 logs/。
-        return self.work_dir / "logs" / name
+        return self.work_dir / "runtime" / "diagnostics" / name
 
     def prune_debug_artifacts(self, *names: str) -> None:
         # When intermediates aren't dumped, don't let a prior run's debug artifact
@@ -44,6 +47,7 @@ class RunSummary:
     name: str
     stats: dict[str, Any]
     output_files: dict[str, str]
+    logs: dict[str, Any]
 
     def model_dump_json(self, *, indent: int | None = None, ensure_ascii: bool = False) -> str:
         import json
@@ -54,6 +58,7 @@ class RunSummary:
                 "name": self.name,
                 "stats": self.stats,
                 "output_files": self.output_files,
+                "logs": self.logs,
             },
             ensure_ascii=ensure_ascii,
             indent=indent,

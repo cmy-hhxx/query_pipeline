@@ -1,21 +1,21 @@
 /* BASE — 设计变量、全局重置、基础排版 */
 
 :root {
-  /* 中性表面 */
-  --bg: #fafaf7;
+  /* 冷静的数据工作台表面 */
+  --bg: #f7f9fc;
   --surface: #ffffff;
-  --surface-soft: #f5f5f1;
-  --surface-sunken: #efefea;
+  --surface-soft: #f3f6f9;
+  --surface-sunken: #eaf0f5;
 
   /* 文本 */
-  --ink: #18181b;
-  --ink-soft: #3f3f46;
-  --muted: #52525b;
-  --muted-2: #a1a1aa;
+  --ink: #172033;
+  --ink-soft: #3d4b60;
+  --muted: #657287;
+  --muted-2: #9aa6b6;
 
   /* 边线 */
-  --line: #e7e5e0;
-  --line-strong: #d4d4d8;
+  --line: #dfe6ee;
+  --line-strong: #c8d2de;
 
   /* 状态语义（reject/accept/llm 各自一个干净色） */
   --reject: #b9452f;
@@ -28,20 +28,20 @@
   --accept-soft: #ecf4ee;
 
   /* LLM 节点强调色 */
-  --llm: #5b4ad6;
-  --llm-soft: #f1efff;
+  --llm: #5753c8;
+  --llm-soft: #f1f1ff;
 
   /* 主交互 */
-  --accent: #18181b;
-  --focus: #5b4ad6;
+  --accent: #172033;
+  --focus: #5753c8;
 
   /* 间距与排版 */
   --max: 1140px;
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
-  --shadow-1: 0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 1px rgba(24, 24, 27, 0.03);
-  --shadow-2: 0 1px 2px rgba(24, 24, 27, 0.04), 0 4px 14px rgba(24, 24, 27, 0.06);
+  --shadow-1: 0 1px 2px rgba(23, 32, 51, 0.03), 0 5px 16px rgba(23, 32, 51, 0.035);
+  --shadow-2: 0 2px 4px rgba(23, 32, 51, 0.04), 0 10px 24px rgba(23, 32, 51, 0.07);
 
   /* 字号尺度（8 档，整页统一用这套，不再各自另写 px/em）
      display  = 主标题
@@ -77,8 +77,8 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system,
+    BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
   font-size: var(--fs-h3);
   line-height: var(--lh-loose);
   -webkit-font-smoothing: antialiased;
@@ -105,7 +105,7 @@ h1, h2, h3, h4 {
 h1 {
   font-size: var(--fs-display);
   line-height: var(--lh-tight);
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
   font-weight: 800;
 }
 

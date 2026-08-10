@@ -132,7 +132,15 @@ def _migrate_judge_checkpoint(cp: "Checkpoint") -> None:
 
 
 def content_key(*parts: str) -> str:
-    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    """Content-addressed checkpoint key.
+
+    Parts are length-prefixed before hashing: a ``"\n"`` (or any byte) inside one
+    part must never collide with a different boundary split (e.g. parts
+    ``("a\nb", "c")`` vs ``("a", "b\nc")`` previously hashed identically and
+    could silently reuse a wrong verdict/checkpoint entry across rows).
+    """
+    material = "".join(f"{len(part)}:{part}" for part in parts)
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"c:{digest}"
 
 

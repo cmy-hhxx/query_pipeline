@@ -12,47 +12,38 @@
     </div>
     <ol class="flow-main">
       <li class="flow-node code">
-        <span class="flow-index">preclean</span>
         <strong>输入清洗</strong>
         <small>格式对齐 · 去重</small>
       </li>
       <li class="flow-node llm">
-        <span class="flow-index">segment</span>
         <strong>会话分段</strong>
         <small>LLM · 主题切段</small>
       </li>
       <li class="flow-node code">
-        <span class="flow-index">rule_gate</span>
         <strong>候选筛选</strong>
         <small>规则 · 噪声拒绝</small>
       </li>
       <li class="flow-node llm">
-        <span class="flow-index">judge</span>
         <strong>语义判定</strong>
         <small>LLM · 三步漏斗</small>
       </li>
       <li class="flow-node llm">
-        <span class="flow-index">verify</span>
         <strong>独立复判</strong>
         <small>LLM · 级联从严</small>
       </li>
       <li class="flow-node code">
-        <span class="flow-index">simple_gate</span>
-        <strong>简单问句兜底</strong>
-        <small>规则 · 确定性模式拒绝</small>
+        <strong>简单问句</strong>
+        <small>短决策/承接</small>
       </li>
       <li class="flow-node code">
-        <span class="flow-index">answer_gate</span>
-        <strong>回答质量门</strong>
-        <small>规则 · 完整性 / 拒绝 / 截断</small>
+        <strong>质量门</strong>
+        <small>完整性/拒/截</small>
       </li>
       <li class="flow-node both">
-        <span class="flow-index">post</span>
-        <strong>去重与翻译</strong>
+        <strong>去重翻译</strong>
         <small>规则 + LLM</small>
       </li>
       <li class="flow-node accepted">
-        <span class="flow-index">✓</span>
         <strong>进入样本</strong>
         <small>accepted</small>
       </li>
@@ -63,6 +54,9 @@
       </div>
       <div class="flow-branch branch-verify">
         <span class="branch-label"><b>复判相悖</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-simple">
+        <span class="branch-label"><b>短决策 / 承接</b>丢弃</span>
       </div>
       <div class="flow-branch branch-answer">
         <span class="branch-label"><b>回答不合格</b>丢弃</span>
@@ -144,7 +138,7 @@
     <div class="step-card">
       <div class="step-card-head">
         <span class="step-num">simple_gate</span>
-        <span class="step-name">简单问句兜底</span>
+        <span class="step-name">简单问句</span>
       </div>
       <div class="step-tags"><span class="stage-tag code">规则</span></div>
       <div class="step-rule">只查 hard 行：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。</div>
@@ -153,7 +147,7 @@
     <div class="step-card">
       <div class="step-card-head">
         <span class="step-num">answer_gate</span>
-        <span class="step-name">回答质量门</span>
+        <span class="step-name">质量门</span>
       </div>
       <div class="step-tags"><span class="stage-tag code">规则</span></div>
       <div class="step-rule">剔除未跑完的轮次（last_event_type ≠ runFinished）、空回答、拒绝话术、长度不足 50 字、以逗号冒号破折号结尾的截断回答。</div>

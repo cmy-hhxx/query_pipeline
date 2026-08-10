@@ -1,7 +1,54 @@
 /* RESPONSIVE — 中等屏 / 打印 */
 
-/* 中等屏：流程图节点收窄 */
-@media (max-width: 980px) {
+/* 窄屏改为三列阅读，不产生横向滚动。 */
+@media (max-width: 720px) {
+  .flow-chart { padding: 18px; }
+
+  .flow-io {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .flow-main,
+  .flow-drops {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 8px;
+    row-gap: 8px;
+  }
+
+  .flow-node {
+    min-height: 108px;
+    padding: 12px 9px 10px;
+  }
+
+  .flow-node:not(:last-child)::after,
+  .flow-drops::before,
+  .flow-branch::before {
+    content: none;
+  }
+
+  .flow-drops {
+    margin-top: 24px;
+    padding-top: 0;
+  }
+
+  .branch-judge,
+  .branch-answer { grid-column: 1; }
+  .branch-verify,
+  .branch-post { grid-column: 2; }
+  .branch-simple { grid-column: 3; }
+  .branch-answer,
+  .branch-post { grid-row: 2; }
+
+  .flow-branch {
+    min-height: 38px;
+    padding: 7px 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .flow-node { transition: none; }
 }
 
 @media print {

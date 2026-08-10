@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from query_pipeline.audit import _load_rows, audit_rows, render
+from query_pipeline.cli import main as cli_main
 
 
 class FakeClient:
@@ -65,6 +66,28 @@ class AuditTest(unittest.TestCase):
         results = self._audit(rows)
         self.assertEqual([r["audit_errors"] for r in results], [0, 0])
         self.assertIn("PASS", render(results, max_ratio=0.05))
+
+    def test_cli_writes_ordinary_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "complex_queries.jsonl"
+            source.write_text(json.dumps(_row("t1", "正常问题")) + "\n", encoding="utf-8")
+            with patch("query_pipeline.audit.LLMClient", FakeClient):
+                code = cli_main(
+                    [
+                        "audit",
+                        str(source),
+                        "--log-dir",
+                        str(tmp_path / "logs"),
+                        "--batch-id",
+                        "audit-batch",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            log_path = tmp_path / "logs" / "ordinary" / "audit" / "audit-batch.log"
+            rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(rows[0]["command"], "audit")
+            self.assertEqual(rows[-1]["message"], "command_finished")
 
     def test_partial_failure_raises_error_ratio(self) -> None:
         # 一半行无法判定：错误率 50% > 5% → FAIL，即使非复杂率很低

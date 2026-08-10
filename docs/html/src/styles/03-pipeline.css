@@ -14,11 +14,12 @@
 /* —— 流程图 —— */
 
 .flow-chart {
+  --flow-gap: 10px;
   position: relative;
   margin: 0;
-  padding: 24px;
+  padding: 26px 28px 24px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-1);
   overflow: hidden;
@@ -29,9 +30,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
-  padding-bottom: 16px;
-  border-bottom: 1px dashed var(--line-strong);
+  margin-bottom: 24px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
 
@@ -49,14 +50,14 @@
   color: var(--muted);
   font-size: var(--fs-eyebrow);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
 .flow-io-value {
   color: var(--ink);
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: 650;
 }
 
 .flow-io-format {
@@ -73,125 +74,123 @@
   text-transform: uppercase;
 }
 
-/* 桌面端：水平 grid 排版 */
+/* 主线与退出轨道复用同一组等宽列，始终保持垂直对齐。 */
 .flow-main {
-  --flow-gap: 14px;
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: var(--flow-gap);
   margin: 0;
   padding: 0;
   list-style: none;
+  width: 100%;
+  min-width: 0;
+  counter-reset: flow-stage;
 }
 
 .flow-node {
   position: relative;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  align-content: stretch;
-  justify-items: center;
-  gap: 4px;
-  min-height: 100px;
-  padding: 14px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 118px;
+  min-width: 0;
+  padding: 13px 11px 11px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: var(--surface);
-  text-align: center;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  text-align: left;
+  transition: transform 120ms ease;
+  counter-increment: flow-stage;
 }
 
 .flow-node:hover {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-2);
 }
 
 .flow-node.llm {
-  border-color: color-mix(in oklch, var(--llm), white 30%);
-  background: var(--llm-soft);
+  border-color: color-mix(in oklch, var(--llm), white 57%);
+  background: #f6f6ff;
 }
 .flow-node.code {
-  border-color: var(--line-strong);
+  border-color: var(--line);
   background: var(--surface-soft);
 }
 .flow-node.both {
-  border-color: var(--line-strong);
-  background: linear-gradient(
-    135deg,
-    var(--surface-soft) 50%,
-    var(--llm-soft) 50%
-  );
+  border-color: color-mix(in oklch, var(--llm), var(--line) 72%);
+  background: linear-gradient(135deg, var(--surface-soft), var(--llm-soft));
 }
 .flow-node.accepted {
-  border-color: color-mix(in oklch, var(--accept), white 25%);
-  background: var(--accept-soft);
+  border-color: color-mix(in oklch, var(--accept), white 56%);
+  background: #f0f8f2;
 }
 
-/* 节点之间画箭头 */
+/* 单一箭头字形避免“线段 + 三角形”带来的拼贴感。 */
 .flow-node:not(:last-child)::after {
-  content: "";
+  content: "→";
   position: absolute;
   top: 50%;
   right: calc(var(--flow-gap) * -0.5);
-  width: var(--flow-gap);
-  height: 0;
-  border-top: 1.5px solid var(--line-strong);
-  z-index: 0;
-}
-.flow-node:not(:last-child)::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: calc(var(--flow-gap) * -0.5 - 4px);
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-top: 5px solid transparent;
-  border-bottom: 5px solid transparent;
-  border-left: 7px solid var(--line-strong);
+  transform: translate(50%, -50%);
+  color: #8ea0b8;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
   z-index: 1;
 }
+.flow-node:not(:last-child)::before {
+  content: none;
+}
 
-.flow-index {
+.flow-node strong {
+  display: block;
+  color: var(--ink);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+}
+
+.flow-node strong::before {
+  content: counter(flow-stage, decimal-leading-zero);
+  display: block;
+  margin-bottom: 10px;
   color: var(--muted);
   font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
     "Courier New", monospace;
-  font-size: var(--fs-eyebrow);
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 
-.flow-node.llm .flow-index { color: var(--llm); }
-.flow-node.accepted .flow-index { color: var(--accept); }
-
-.flow-node strong {
-  color: var(--ink);
-  font-size: var(--fs-meta);
-  font-weight: 700;
-  line-height: var(--lh-tight);
-}
+.flow-node.llm strong::before { color: var(--llm); }
+.flow-node.accepted strong::before { color: var(--accept); }
 
 .flow-node small {
+  display: block;
+  margin-top: auto;
   color: var(--muted);
-  font-size: var(--fs-eyebrow);
-  line-height: var(--lh-tight);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-base);
 }
 
 /* —— 流程分支（失败去向）—— */
-/* 4 个去向 chip 跟随主流程共用一个 8 列 grid（grid-column: 4/5/6/7），与第 4-7 主流程节点垂直对齐；
-   chip 之间保留主流程节点一整个宽度的留白（用整列空 slot + 居中的 chip 实现呼吸感）；
-   主流程 → chip 用顶端一根 dashed 中轴线 + 每个 chip 顶部一段 28px dashed 引线。 */
+/* 每个退出口都正对触发它的阶段（4—8），避免看图时来回寻找来源。 */
 
 .flow-drops {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   column-gap: var(--flow-gap);
-  margin-top: 56px;
-  padding-top: 28px;
+  margin-top: 42px;
+  padding-top: 24px;
   position: relative;
+  width: 100%;
+  min-width: 0;
 }
 
-/* 主流程 → 去向区域 顶端 dashed 引导线，跨越全部 8 列 */
+/* 主流程以下的一条退出轨道，垂直引线从各自的判定阶段落下。 */
 .flow-drops::before {
   content: "";
   position: absolute;
@@ -199,37 +198,36 @@
   left: 0;
   right: 0;
   height: 0;
-  border-top: 1.5px dashed var(--line-strong);
+  border-top: 1px dashed var(--line-strong);
   pointer-events: none;
 }
 
-/* chip：直角矩形 + 顶部 28px 垂直 dashed 引线 */
 .flow-branch {
   position: relative;
   text-align: left;
-  padding: 8px 10px;
-  background: var(--surface-soft);
+  padding: 8px 9px 8px 10px;
+  background: #fffafa;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--ink-soft);
   font-size: var(--fs-eyebrow);
+  font-weight: 600;
   line-height: var(--lh-base);
-  /* chip 宽度 = 单列宽度的 96%，水平居中；左右各留 2% 列宽的空白 */
-  width: 96%;
-  justify-self: center;
-  white-space: nowrap;
+  width: 100%;
+  min-height: 42px;
+  white-space: normal;
+  text-wrap: balance;
 }
 
-/* chip 顶部引线：每条 chip 顶部一条 28px 垂直 dashed，向上接到中轴线 */
 .flow-branch::before {
   content: "";
   position: absolute;
-  top: -28px;
+  top: -24px;
   left: 50%;
   transform: translateX(-50%);
   width: 0;
-  height: 28px;
-  border-left: 1.5px dashed var(--line-strong);
+  height: 24px;
+  border-left: 1px dashed var(--line-strong);
   pointer-events: none;
 }
 
@@ -238,19 +236,15 @@
 }
 
 .flow-branch .branch-label b {
-  display: inline-block;
-  margin-right: 4px;
   color: var(--reject);
   font-weight: 700;
 }
 
-.branch-judge .branch-label b:first-of-type { color: var(--reject); }
-.branch-judge .branch-label b:last-of-type { color: var(--failed); }
-
 .branch-judge  { grid-column: 4; }
 .branch-verify { grid-column: 5; }
-.branch-answer { grid-column: 6; }
-.branch-post   { grid-column: 7; }
+.branch-simple { grid-column: 6; }
+.branch-answer { grid-column: 7; }
+.branch-post   { grid-column: 8; }
 
 /* —— 步骤表：步骤 / 方式 / 做什么 —— */
 

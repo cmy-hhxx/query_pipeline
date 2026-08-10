@@ -49,7 +49,9 @@ async def run_verify_stage(
 
     hard rows must stay complex in every round; normal rows must stay
     non-complex. LLM failures drop the row (fail-closed, admission bar is
-    high) and are checkpointed so a resumed run replays the same verdict.
+    high) but are NOT checkpointed — a transient outage must not poison the
+    checkpoint and permanently replay the drop on later healthy runs (judge
+    stage uses the same retry-next-run rule for llm_failed sessions).
     """
     cfg = ctx.config
     ctx.prune_debug_artifacts("verified.jsonl")
@@ -141,9 +143,13 @@ async def run_verify_stage(
             if parsed.is_complex != expected:
                 break
             keep = round_no == max_rounds
-        # Fail-closed: errored rows are dropped (keep=False) and checkpointed so a
-        # resumed run replays the drop instead of re-verifying.
-        await checkpoint.mark(key, keep=keep, reason=reason, error=error, rounds=rounds)
+        # Fail-closed: errored rows are dropped (keep=False) but NOT checkpointed —
+        # a transient LLM outage would otherwise replay the drop forever on healthy
+        # re-runs (same input/config), silently emptying the output. Only final
+        # verdicts (kept / deterministically rejected) are persisted; failed rows
+        # are retried next run, with earlier healthy rounds replayed from llm_cache.
+        if error is None:
+            await checkpoint.mark(key, keep=keep, reason=reason, rounds=rounds)
         return {"keep": keep, "reason": reason, "error": error, "rounds": rounds}
 
     results = await run_concurrent(ctx.rows, worker, description="LLM verify")

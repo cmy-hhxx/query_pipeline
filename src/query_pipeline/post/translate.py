@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ async def translate_rows(
     cache_path: Path,
     checkpoint: Checkpoint | None = None,
     cache_lock: asyncio.Lock | None = None,
+    on_complete: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, int]:
     system_prompt = resolve_prompt("translate")
     lock = cache_lock or asyncio.Lock()
@@ -49,6 +51,16 @@ async def translate_rows(
     # is single-threaded/cooperative, so the increments can never interleave. No lock needed.
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
+    completion_errors: list[Exception] = []
+
+    def complete(row: dict[str, Any]) -> None:
+        if on_complete is None:
+            return
+        try:
+            on_complete(row)
+        except Exception as exc:  # preserved and re-raised after concurrent workers settle
+            completion_errors.append(exc)
+            raise
 
     def put(row: dict[str, Any], translation: str | None, *, failed: bool = False) -> None:
         # translation 是顶层唯一字段：只有非中文问句翻译成功才填译文；
@@ -72,11 +84,18 @@ async def translate_rows(
         if record is not None:
             put(row, record["translation"])
             counts["translate_skipped" if record["skipped"] else "translated"] += 1
+            complete(row)
             return True
         if not needs_translation(text):
             put(row, None)  # 原文已是中文：不需要翻译 → null
             counts["translate_skipped"] += 1
-            await checkpoint.mark(key, translation=None, skipped=True)
+            try:
+                await checkpoint.mark(key, translation=None, skipped=True)
+            except OSError as exc:
+                # 行已处理完，checkpoint 失败只影响下次重跑（llm_cache/规则可复用）：
+                # 不得把已计数行再补记 failed（双计数）。
+                logger.warning("translate checkpoint mark failed: %s", exc)
+            complete(row)
             return True
         user_prompt = "请翻译以下用户问句，只输出严格 JSON：\n" + json.dumps(
             {"text": text}, ensure_ascii=False, separators=(",", ":")
@@ -104,8 +123,13 @@ async def translate_rows(
                     lock=lock,
                 )
             put(row, translation)
+            try:
+                await checkpoint.mark(key, translation=translation, skipped=False)
+            except OSError as exc:
+                # 同 skipped 分支：行已翻译完成，checkpoint 失败不得触发双计数
+                # （旧行为：OSError 穿透到 run_concurrent 兜底网 → translated + failed 同增）。
+                logger.warning("translate checkpoint mark failed: %s", exc)
             counts["translated"] += 1
-            await checkpoint.mark(key, translation=translation, skipped=False)
         except (ValueError, RuntimeError):
             # 翻译失败：已有译文必须保留——无条件覆盖为 null 会让"缓存丢失后重跑
             # 失败"静默抹掉上次成功译文，且 QC 因 translate_failed 标记放行，
@@ -114,14 +138,18 @@ async def translate_rows(
             if not isinstance(row.get("translation"), str) or not row["translation"].strip():
                 put(row, None, failed=True)
             counts["translate_failed"] += 1
+        complete(row)
         return True
 
     results = await run_concurrent(rows, worker, description="LLM translate")
+    if completion_errors:
+        raise completion_errors[0]
     for row, result in zip(rows, results):
         if result is None:  # 兜底网捕获的意外异常（如 cache 磁盘 OSError）
             if not isinstance(row.get("translation"), str) or not row["translation"].strip():
                 put(row, None, failed=True)  # 已成功的行不覆盖译文，只补记失败
             counts["translate_failed"] += 1
+            complete(row)
     return counts
 
 

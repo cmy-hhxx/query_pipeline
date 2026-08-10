@@ -25,5 +25,5 @@ def qc_dir(dataset: str, date: str, root: Path | None = None) -> Path:
 
 
 def llm_cache_path(dataset: str, root: Path | None = None) -> Path:
-    # 复用管线 LLM 缓存（outputs/<dataset>/logs/llm_cache.jsonl）
-    return (root or project_root()) / "outputs" / dataset / "logs" / "llm_cache.jsonl"
+    # Reuse the pipeline cache under its runtime state directory.
+    return (root or project_root()) / "outputs" / dataset / "runtime" / "cache" / "llm_cache.jsonl"

@@ -153,7 +153,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
             self.assertEqual([r["trace_id"] for r in rows], ["trace1"])
 
-            verified = _read_jsonl(tmp_path / "work" / "logs" / "verified.jsonl")
+            verified = _read_jsonl(
+                tmp_path / "work" / "runtime" / "diagnostics" / "verified.jsonl"
+            )
             self.assertEqual([v["trace_id"] for v in verified], ["trace1"])
             self.assertEqual(verified[0]["is_complex"], True)
 
@@ -200,7 +202,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
             self.assertEqual([r["input"]["text"] for r in rows], ["帮我分析贵州茅台的估值并给出买卖建议"])
 
-            verified = _read_jsonl(tmp_path / "work" / "logs" / "verified.jsonl")
+            verified = _read_jsonl(
+                tmp_path / "work" / "runtime" / "diagnostics" / "verified.jsonl"
+            )
             self.assertEqual([v["trace_id"] for v in verified], ["trace0", "trace1", "trace2"])
             by_q = {v["question"]: v for v in verified}
             self.assertTrue(by_q["帮我分析贵州茅台的估值并给出买卖建议"]["is_complex"])
@@ -215,8 +219,9 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_verify_multi_round_error_mid_round_fail_closed(self) -> None:
         # Round 2 of the "flaky" question raises: fail-closed drops the row
-        # (verify_failed=1) and checkpoints the failure, so a re-run replays
-        # both rows from the checkpoint with zero LLM calls.
+        # (verify_failed=1) but does NOT checkpoint the failure — a re-run
+        # retries it (round 1 replays from llm_cache, round 2 calls the LLM
+        # again). A transient outage must not permanently poison the output.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             names = ("web_search", "finquery", "compute")
@@ -261,8 +266,9 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary2 = run_pipeline(cfg)
             self.assertEqual(summary2.stats["verify_kept"], 1)
             self.assertEqual(summary2.stats["verify_failed"], 1)
-            # both rows replay from the checkpoint (errored rows are sticky fail-closed)
-            self.assertEqual(len(clients2[0].calls), 0)
+            # the errored row is retried: exactly one LLM call (round 2 of the
+            # flaky question; round 1 and the healthy row replay from llm_cache)
+            self.assertEqual(len(clients2[0].calls), 1)
 
             rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
             self.assertEqual(
@@ -299,7 +305,7 @@ class SessionPipelineContractTest(unittest.TestCase):
                 run_pipeline(cfg)
             cache_path = tmp_path / "work" / "llm_cache.jsonl"
             self._corrupt_cache_entry(cache_path, "value_gate:", {"is_valuable": "not-a-bool"})
-            (tmp_path / "work" / "logs" / "checkpoints" / "judge.jsonl").unlink()
+            (tmp_path / "work" / "runtime" / "checkpoints" / "judge.jsonl").unlink()
 
             class RecordingFunnelClient(FakeSessionLLMClient):
                 def __init__(self, config: object) -> None:
@@ -341,7 +347,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             cache_path = tmp_path / "work" / "llm_cache.jsonl"
             self._corrupt_cache_entry(cache_path, "verify:", {"is_complex": "garbage"})
             for name in ("judge.jsonl", "verify.jsonl"):
-                (tmp_path / "work" / "logs" / "checkpoints" / name).unlink()
+                (tmp_path / "work" / "runtime" / "checkpoints" / name).unlink()
 
             class RecordingVerifyClient(FakeSessionLLMClient):
                 def __init__(self, config: object) -> None:
@@ -496,8 +502,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["verify_kept"], 1)
 
-    def test_end_to_end_chat_empty_answer_no_row(self) -> None:
-        # Empty trailing answer (text_answer/raw_answer both empty) is ineligible: no row.
+    def test_end_to_end_chat_empty_answer_fails_precheck(self) -> None:
+        # An all-ineligible chat batch is rejected before any LLM runtime is initialized.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             case = {
@@ -517,11 +523,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", [case])
             cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, input_format="chat"))
 
-            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
-                summary = run_pipeline(cfg)
-
-            self.assertEqual(summary.stats["candidates"], 0)
-            self.assertEqual(summary.stats["complex_rows"], 0)
+            with self.assertRaisesRegex(ValueError, "no_eligible_turns"):
+                run_pipeline(cfg)
 
     def test_unexpected_candidate_error_does_not_fail_run(self) -> None:
         # 兜底网返回 None（如 cache 磁盘 OSError）：单候选按 llm_failed 计，
@@ -599,7 +602,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             tmp_path = Path(tmp)
             session = {"thread_id": "t1", "context": [42, "not-a-dict"]}
             _write_jsonl(tmp_path / "input.jsonl", [session])
-            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+            # 畸形 context 正是 precheck 要拦的场景；本测试只验证 empty_sessions 计数 → 显式关闭预检
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True, precheck_enabled=False))
 
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
                 summary = run_pipeline(cfg)
@@ -657,7 +661,9 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["total_sessions"], 1)
             self.assertEqual(summary.stats["input_bad_lines"], 1)
-            bad_lines = _read_jsonl(tmp_path / "work" / "logs" / "bad_lines.jsonl")
+            bad_lines = _read_jsonl(
+                tmp_path / "work" / "runtime" / "diagnostics" / "bad_lines.jsonl"
+            )
             self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
 
     def test_chat_non_dict_judge_data_lands_in_bad_lines(self) -> None:
@@ -687,7 +693,9 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["total_sessions"], 5)
             self.assertEqual(summary.stats["input_bad_lines"], 1)
-            bad_lines = _read_jsonl(tmp_path / "work" / "logs" / "bad_lines.jsonl")
+            bad_lines = _read_jsonl(
+                tmp_path / "work" / "runtime" / "diagnostics" / "bad_lines.jsonl"
+            )
             self.assertTrue(any(r.get("reason") == "adapt_failed" for r in bad_lines))
 
 def _funnel_response(system_prompt: str, payload: dict[str, Any]) -> str | None:
@@ -928,6 +936,7 @@ def _write_config(
     post_enabled: bool = False,
     input_format: str = "session",
     step1_enabled: bool | None = None,
+    precheck_enabled: bool = True,
 ) -> Path:
     config_path = tmp_path / "config.yaml"
     is_chat = input_format == "chat"
@@ -960,6 +969,8 @@ def _write_config(
               normal_queries: normal_queries.jsonl
               summary: summary.json
             work_dir: work
+            precheck:
+              enabled: {str(precheck_enabled).lower()}
             segmentation:
               enabled: {seg_on}
             rule_gate:

@@ -125,6 +125,8 @@ class CliE2ETest(unittest.TestCase):
                     "--date", "9999",
                     "--input", str(source),
                     "--qc-dir", str(qc),
+                    "--log-dir", str(tmp / "logs"),
+                    "--batch-id", "qc-batch",
                     "--no-llm",
                 ]
             )
@@ -135,10 +137,21 @@ class CliE2ETest(unittest.TestCase):
             overview_data = json.loads((qc / "overview.json").read_text(encoding="utf-8"))
             self.assertEqual(overview_data["status_counts"]["fail"], 1)
             self.assertIn("## 状态概览", (qc / "report.md").read_text(encoding="utf-8"))
+            ordinary = tmp / "logs" / "ordinary" / "qc" / "qc-batch.log"
+            log_rows = [json.loads(line) for line in ordinary.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(log_rows[0]["command"], "qc")
+            self.assertEqual(log_rows[-1]["message"], "command_finished")
 
     def test_missing_input_returns_nonzero(self) -> None:
-        rc = cli_main(
-            ["run", "--dataset", "aime", "--date", "9999", "--input", "/nonexistent/x.jsonl", "--no-llm"]
-        )
-        self.assertEqual(rc, 1)
-
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = cli_main(
+                [
+                    "run",
+                    "--dataset", "aime",
+                    "--date", "9999",
+                    "--input", "/nonexistent/x.jsonl",
+                    "--log-dir", str(Path(tmp) / "logs"),
+                    "--no-llm",
+                ]
+            )
+            self.assertEqual(rc, 1)

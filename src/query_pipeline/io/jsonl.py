@@ -13,7 +13,8 @@ from typing import Any
 _UNUSUAL_LINE_TERMINATORS = str.maketrans({"\u2028": " ", "\u2029": " "})
 
 
-def _dumps(record: dict[str, Any]) -> str:
+def dumps_jsonl(record: dict[str, Any]) -> str:
+    """Serialize one record with the canonical project JSONL representation."""
     out = {k: v for k, v in record.items() if not k.startswith("_")}
     return json.dumps(out, ensure_ascii=False, separators=(",", ":")).translate(
         _UNUSUAL_LINE_TERMINATORS
@@ -72,11 +73,11 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as handle:
         for record in records:
-            handle.write(_dumps(record) + "\n")
+            handle.write(dumps_jsonl(record) + "\n")
     os.replace(tmp, path)
 
 
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(_dumps(record) + "\n")
+        handle.write(dumps_jsonl(record) + "\n")

@@ -10,18 +10,14 @@ from typing import Any
 from dotenv import load_dotenv
 
 from query_pipeline.config.models import LLMConfig
-from query_pipeline.logging_setup import beijing_converter
 from query_pipeline.io.jsonl import read_jsonl_with_bad_lines, write_jsonl
 from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
+from query_pipeline.logging_setup import logging_session
 from query_pipeline.quality import aggregate, judge as judge_mod, report, rules
 from query_pipeline.quality.paths import llm_cache_path, project_root, qc_dir, source_path
 
 logger = logging.getLogger(__name__)
-
-
-# 与管线一致：整个日志系统统一北京时间（含第三方库）。
-setattr(logging.Formatter, "converter", staticmethod(beijing_converter))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,7 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--concurrency", type=int, default=64, help="LLM 并发数")
     run.add_argument("--input", type=Path, help="输出 jsonl 路径覆盖（默认 outputs/<dataset>/cleaned_queries.jsonl）")
     run.add_argument("--qc-dir", type=Path, help="QC 产物目录覆盖（默认 outputs/<dataset>/qc/<date>）")
-    run.add_argument("--cache", type=Path, help="LLM 缓存文件覆盖（默认 outputs/<dataset>/logs/llm_cache.jsonl）")
+    run.add_argument("--cache", type=Path, help="LLM 缓存文件覆盖（默认 outputs/<dataset>/runtime/cache/llm_cache.jsonl）")
+    run.add_argument("--log-dir", type=Path, help="普通日志根目录（默认 <qc-dir>/logs）")
+    run.add_argument("--batch-id", help="稳定批次号（默认自动生成）")
     run.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -77,14 +75,30 @@ def _run_llm_phase(
 
 def run_quality(args: argparse.Namespace) -> int:
     root = project_root()
-    load_dotenv(root / ".env", override=False)
-
     source = (args.input or source_path(args.dataset, root)).resolve()
+    out_dir = (args.qc_dir or qc_dir(args.dataset, args.date, root)).resolve()
+    cache_path = (args.cache or llm_cache_path(args.dataset, root)).resolve()
+    log_dir = (args.log_dir or out_dir / "logs").resolve()
+    with logging_session(
+        log_dir,
+        command="qc",
+        batch_id=args.batch_id,
+        verbose=args.verbose,
+    ):
+        return _run_quality(args, root, source, out_dir, cache_path)
+
+
+def _run_quality(
+    args: argparse.Namespace,
+    root: Path,
+    source: Path,
+    out_dir: Path,
+    cache_path: Path,
+) -> int:
+    load_dotenv(root / ".env", override=False)
     if not source.exists():
         print(f"错误：找不到输出文件 {source}")
         return 1
-    out_dir = (args.qc_dir or qc_dir(args.dataset, args.date, root)).resolve()
-    cache_path = (args.cache or llm_cache_path(args.dataset, root)).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     records, skipped = read_jsonl_with_bad_lines(source, out_dir / "bad_lines.jsonl")
@@ -152,10 +166,6 @@ def run_quality(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     if args.command == "run":
         return run_quality(args)
     return 2

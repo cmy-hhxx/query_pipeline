@@ -15,7 +15,7 @@ from query_pipeline.pipeline.stages import DEFAULT_STAGES, REGISTRY, get_stage, 
 
 class RegistryTest(unittest.TestCase):
     def test_default_stages_registered(self) -> None:
-        self.assertEqual(set(DEFAULT_STAGES), {"preclean", "segment", "rule_gate", "judge", "verify", "simple_gate", "answer_gate", "post"})
+        self.assertEqual(set(DEFAULT_STAGES), {"precheck", "preclean", "segment", "rule_gate", "judge", "verify", "simple_gate", "answer_gate", "post"})
         for name in DEFAULT_STAGES:
             self.assertIn(name, REGISTRY)
 

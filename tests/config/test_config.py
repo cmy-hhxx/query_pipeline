@@ -68,6 +68,10 @@ class ConfigContractTest(unittest.TestCase):
                       cache: logs/llm_cache.jsonl
                     checkpoint:
                       dir: logs/checkpoints
+                    logging:
+                      dir: custom-logs
+                      batch_id: upstream-batch
+                      level: debug
                     """
                 ).strip()
                 + "\n",
@@ -77,7 +81,10 @@ class ConfigContractTest(unittest.TestCase):
             self.assertEqual(cfg.work_dir, (tmp_path / "scratch").resolve())
             self.assertEqual(cfg.llm.cache, (tmp_path / "scratch" / "logs" / "llm_cache.jsonl").resolve())
             self.assertEqual(cfg.checkpoint.dir, (tmp_path / "scratch" / "logs" / "checkpoints").resolve())
-            # 默认值（未显式设置）同样落在 work_dir/logs/
+            self.assertEqual(cfg.logging.dir, (tmp_path / "custom-logs").resolve())
+            self.assertEqual(cfg.logging.batch_id, "upstream-batch")
+            self.assertEqual(cfg.logging.level, "DEBUG")
+            # Defaults move to typed runtime directories; explicit overrides above remain untouched.
             (tmp_path / "config2.yaml").write_text(
                 textwrap.dedent(
                     """
@@ -96,6 +103,12 @@ class ConfigContractTest(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg2 = load_pipeline_config(tmp_path / "config2.yaml")
-            self.assertEqual(cfg2.llm.cache, (tmp_path / "scratch" / "logs" / "llm_cache.jsonl").resolve())
-            self.assertEqual(cfg2.checkpoint.dir, (tmp_path / "scratch" / "logs" / "checkpoints").resolve())
-
+            self.assertEqual(
+                cfg2.llm.cache,
+                (tmp_path / "scratch" / "runtime" / "cache" / "llm_cache.jsonl").resolve(),
+            )
+            self.assertEqual(
+                cfg2.checkpoint.dir,
+                (tmp_path / "scratch" / "runtime" / "checkpoints").resolve(),
+            )
+            self.assertEqual(cfg2.logging.dir, (tmp_path / "out" / "logs").resolve())

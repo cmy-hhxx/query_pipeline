@@ -202,7 +202,9 @@ class PostStagePipelineTest(unittest.TestCase):
             self.assertEqual(rows[0]["translation"], "利率上升如何影响债券价格？")
             self.assertEqual(rows[0]["meta"]["reason"], "需要预测")
 
-            deduped = list(read_jsonl(tmp_path / "work" / "logs" / "deduped.jsonl"))
+            deduped = list(
+                read_jsonl(tmp_path / "work" / "runtime" / "diagnostics" / "deduped.jsonl")
+            )
             self.assertEqual(len(deduped), 1)
             self.assertEqual(deduped[0]["trace_id"], "s2trace1")
             self.assertEqual(deduped[0]["dedup_of_trace_id"], "s1trace1")

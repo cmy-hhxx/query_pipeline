@@ -174,6 +174,9 @@ class CheckpointUnitTest(unittest.TestCase):
     def test_content_key(self) -> None:
         self.assertEqual(content_key("a", "b"), content_key("a", "b"))
         self.assertNotEqual(content_key("a", "b"), content_key("a", "c"))
+        # 长度前缀编码：字段内换行不得与字段边界碰撞（旧实现 "\n".join 有歧义）
+        self.assertNotEqual(content_key("a", "b\nc"), content_key("a\nb", "c"))
+        self.assertNotEqual(content_key("q1", "a\nb"), content_key("q1\na", "b"))
 
 class SessionResumeTest(unittest.TestCase):
     def test_session_stage_resumes_after_network_failure(self) -> None:
@@ -188,7 +191,7 @@ class SessionResumeTest(unittest.TestCase):
             summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
-            cp_path = tmp_path / "work" / "logs" / "checkpoints" / "judge.jsonl"
+            cp_path = tmp_path / "work" / "runtime" / "checkpoints" / "judge.jsonl"
             self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
             # Run 2: only t1's judge re-runs; t0/t2 replay from checkpoint.
@@ -219,23 +222,22 @@ class VerifyResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            # Run 1: verify for V1 fails (fail-open keeps the row and checkpoints
-            # the failure); V0/V2 are checkpointed cleanly.
+            # Run 1: verify for V1 fails (fail-closed drops the row, and the
+            # failure is NOT checkpointed); V0/V2 are checkpointed cleanly.
             summary1, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
             self.assertEqual(summary1.stats["verify_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 3)
 
-            # Run 2: all three replay from checkpoints; V1's recorded failure
-            # replays too (fail-open is sticky), so zero re-verify LLM calls and
-            # the same output.
+            # Run 2: V0/V2 replay from checkpoints (zero LLM); V1's failure is
+            # retried and succeeds — a transient failure must not be sticky.
             summary2, client2 = run_pipeline_with_fakes(cfg)
-            self.assertEqual(summary2.stats["verify_kept"], 2)
-            self.assertEqual(summary2.stats["verify_failed"], 1)
+            self.assertEqual(summary2.stats["verify_kept"], 3)
+            self.assertEqual(summary2.stats["verify_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
             self.assertEqual(
                 [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
-                [],
+                ["V1 complex query"],
             )
 
 class TranslateResumeTest(unittest.TestCase):
@@ -367,7 +369,7 @@ class CheckpointInvalidationTest(unittest.TestCase):
             self.assertEqual(summary2.stats["verify_rejected"], 1)
             self.assertEqual(summary2.stats["verify_kept"], 0)
             # verify checkpoint 出现第二个键（normal 难度）
-            cp = _read_jsonl(tmp_path / "work" / "logs" / "checkpoints" / "verify.jsonl")
+            cp = _read_jsonl(tmp_path / "work" / "runtime" / "checkpoints" / "verify.jsonl")
             keys = {r["key"] for r in cp if r.get("type") != "meta"}
             self.assertEqual(len(keys), 2)
 

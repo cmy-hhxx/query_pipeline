@@ -34,6 +34,22 @@ class SegmentationConfig(ConfigModel):
     enabled: bool = True
 
 
+class PrecheckConfig(ConfigModel):
+    """数据预检：run 在 LLM 阶段之前快速扫描输入，严重问题即中止（fail fast）。"""
+    enabled: bool = True
+    # 合格 turn 的 chain 覆盖率低于该比例 → critical（session/chat 均适用）
+    min_chain_coverage: float = 0.5
+    # 坏行占比超过该比例 → critical（以下仅 warning）
+    max_bad_line_ratio: float = 0.01
+
+    @field_validator("min_chain_coverage", "max_bad_line_ratio")
+    @classmethod
+    def validate_ratio(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("precheck ratio must be in [0, 1]")
+        return value
+
+
 class RuleGateConfig(ConfigModel):
     enabled: bool = True
     reject_rules: bool = True
@@ -72,7 +88,7 @@ class LLMConfig(ConfigModel):
     max_retries: int = 5
     timeout_seconds: float = 90.0
     response_format: str = "json_object"
-    cache: Path | None = None  # None -> <work_dir>/logs/llm_cache.jsonl
+    cache: Path | None = None  # None -> <work_dir>/runtime/cache/llm_cache.jsonl
 
 
 class VerifyConfig(ConfigModel):
@@ -125,11 +141,34 @@ class PostConfig(ConfigModel):
 
 class CheckpointConfig(ConfigModel):
     enabled: bool = True
-    dir: Path | None = None  # None -> <work_dir>/logs/checkpoints
+    dir: Path | None = None  # None -> <work_dir>/runtime/checkpoints
 
 
 class DebugConfig(ConfigModel):
     dump_intermediates: bool = True
+
+
+class LoggingConfig(ConfigModel):
+    dir: Path | None = None  # None -> <output.dir>/logs
+    batch_id: str | None = None
+    level: str = "INFO"
+
+    @field_validator("level")
+    @classmethod
+    def validate_level(cls, value: str) -> str:
+        level = value.strip().upper()
+        if level not in {"INFO", "DEBUG"}:
+            raise ValueError("logging.level must be 'INFO' or 'DEBUG'")
+        return level
+
+    @field_validator("batch_id")
+    @classmethod
+    def validate_batch_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from query_pipeline.logging_setup import validate_batch_id
+
+        return validate_batch_id(value)
 
 
 class PipelineConfig(ConfigModel):
@@ -137,18 +176,23 @@ class PipelineConfig(ConfigModel):
 
     @property
     def cache_path(self) -> Path:
-        """LLM 缓存实际路径（默认 <work_dir>/logs/llm_cache.jsonl）。"""
-        return self.llm.cache or (self.work_dir or Path("logs")) / "logs" / "llm_cache.jsonl"
+        """LLM cache path (default: <work_dir>/runtime/cache/llm_cache.jsonl)."""
+        return self.llm.cache or (self.work_dir or self.output.dir) / "runtime" / "cache" / "llm_cache.jsonl"
 
     @property
     def checkpoint_dir(self) -> Path:
-        """阶段 checkpoint 实际目录（默认 <work_dir>/logs/checkpoints）。"""
-        return self.checkpoint.dir or (self.work_dir or Path("logs")) / "logs" / "checkpoints"
+        """Stage checkpoint path (default: <work_dir>/runtime/checkpoints)."""
+        return self.checkpoint.dir or (self.work_dir or self.output.dir) / "runtime" / "checkpoints"
+
+    @property
+    def log_dir(self) -> Path:
+        return self.logging.dir or self.output.dir / "logs"
 
     input: InputConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
     work_dir: Path | None = None  # None -> output.dir（产物、日志、缓存同目录）
     stages: list[str] | None = None  # None -> pipeline default stage order
+    precheck: PrecheckConfig = Field(default_factory=PrecheckConfig)
     segmentation: SegmentationConfig = Field(default_factory=SegmentationConfig)
     rule_gate: RuleGateConfig = Field(default_factory=RuleGateConfig)
     judge: JudgeConfig = Field(default_factory=JudgeConfig)
@@ -157,3 +201,4 @@ class PipelineConfig(ConfigModel):
     post: PostConfig = Field(default_factory=PostConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
     debug: DebugConfig = Field(default_factory=DebugConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
