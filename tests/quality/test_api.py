@@ -64,7 +64,7 @@ class ApiTest(unittest.TestCase):
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(json.dumps(_row(), ensure_ascii=False) + "\n", encoding="utf-8")
 
-        qc = root / "outputs" / "aime" / "qc"
+        qc = root / "outputs" / "aime" / "qc" / "0807"
         qc.mkdir(parents=True, exist_ok=True)
         overview_data = {
             "dataset": "aime",
@@ -92,6 +92,20 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(detail["qc"]["status"], "pass")
             with self.assertRaises(KeyError):
                 record_detail("aime", "0807", "nope", root=root)
+
+    def test_qc_dir_is_date_scoped(self) -> None:
+        # date 是路径参数：不同日期的 QC 产物互不覆盖（旧实现 date 死参数，
+        # 0806/0807 两次运行写同一目录互相覆盖）。
+        from query_pipeline.quality.paths import qc_dir
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            d0806 = qc_dir("aime", "0806", root)
+            d0807 = qc_dir("aime", "0807", root)
+            self.assertNotEqual(d0806, d0807)
+            self.assertEqual(d0806.parent, d0807.parent)  # 同一数据集 qc/ 下
+            self.assertEqual(d0806.name, "0806")
+            self.assertEqual(d0807.name, "0807")
 
 class CliE2ETest(unittest.TestCase):
     def test_run_no_llm_produces_artifacts(self) -> None:

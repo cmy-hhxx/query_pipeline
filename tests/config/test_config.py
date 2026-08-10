@@ -41,3 +41,61 @@ class ConfigContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             VerifyConfig(max_rounds_hard=0)
 
+    def test_explicit_relative_cache_checkpoint_resolve_against_work_dir(self) -> None:
+        # 第四轮 #10：显式 cache/checkpoint 相对路径与默认值同一基座（work_dir）。
+        # 旧实现按 project root 解析：`llm.cache: logs/x.jsonl` + `work_dir: scratch`
+        # 会落到 <root>/logs 而非 scratch/logs——--work-dir 覆盖对显式配置失效。
+        import tempfile
+        import textwrap
+        from pathlib import Path
+
+        from query_pipeline.config.loader import load_pipeline_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "config.yaml").write_text(
+                textwrap.dedent(
+                    f"""
+                    name: test
+                    input:
+                      path: input.jsonl
+                      format: session
+                    output:
+                      dir: out
+                    work_dir: scratch
+                    llm:
+                      model: m
+                      cache: logs/llm_cache.jsonl
+                    checkpoint:
+                      dir: logs/checkpoints
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            cfg = load_pipeline_config(tmp_path / "config.yaml")
+            self.assertEqual(cfg.work_dir, (tmp_path / "scratch").resolve())
+            self.assertEqual(cfg.llm.cache, (tmp_path / "scratch" / "logs" / "llm_cache.jsonl").resolve())
+            self.assertEqual(cfg.checkpoint.dir, (tmp_path / "scratch" / "logs" / "checkpoints").resolve())
+            # 默认值（未显式设置）同样落在 work_dir/logs/
+            (tmp_path / "config2.yaml").write_text(
+                textwrap.dedent(
+                    """
+                    name: test
+                    input:
+                      path: input.jsonl
+                      format: session
+                    output:
+                      dir: out
+                    work_dir: scratch
+                    llm:
+                      model: m
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            cfg2 = load_pipeline_config(tmp_path / "config2.yaml")
+            self.assertEqual(cfg2.llm.cache, (tmp_path / "scratch" / "logs" / "llm_cache.jsonl").resolve())
+            self.assertEqual(cfg2.checkpoint.dir, (tmp_path / "scratch" / "logs" / "checkpoints").resolve())
+

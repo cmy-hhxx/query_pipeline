@@ -19,7 +19,7 @@ def record_detail(dataset: str, date: str, record_id: str, *, root: Path | None 
     """Drill into one record: the raw output row plus its QC result (if any)."""
     root = root or project_root()
     qc_out = qc_dir(dataset, date, root)
-    source = source_path(dataset, date, root)
+    source = source_path(dataset, root)
     overview_path = qc_out / "overview.json"
     if overview_path.exists():
         # Honor the actual source the run used (e.g. a --input override).

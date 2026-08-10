@@ -3,44 +3,53 @@
 
   <div class="flow-chart" role="img" aria-label="复杂金融问句清洗标注流程图">
     <div class="flow-io">
-      <span><b>输入</b><code>aime/input.jsonl · iwencai/chat.jsonl</code></span>
-      <span><b>最终产物</b><code>cleaned_queries.jsonl（hard + normal）</code></span>
+      <div>
+        <span class="flow-io-label">输入</span>
+        <span class="flow-io-value">多源对话日志</span>
+        <span class="flow-io-format">session · chat（自动识别）</span>
+      </div>
+      <div><span class="flow-io-label">最终产物</span><span class="flow-io-value">已分类的样本集</span></div>
     </div>
     <ol class="flow-main">
       <li class="flow-node code">
         <span class="flow-index">preclean</span>
         <strong>输入清洗</strong>
-        <small>格式嗅探 · 坏行 · 去重</small>
+        <small>格式对齐 · 去重</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">segment</span>
         <strong>会话分段</strong>
-        <small>LLM · 主题切 2–4 段</small>
+        <small>LLM · 主题切段</small>
       </li>
       <li class="flow-node code">
         <span class="flow-index">rule_gate</span>
         <strong>候选筛选</strong>
-        <small>规则 · 噪声拒绝 + 工具门槛</small>
+        <small>规则 · 噪声拒绝</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">judge</span>
         <strong>语义判定</strong>
-        <small>LLM · value→complexity→classify</small>
+        <small>LLM · 三步漏斗</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">verify</span>
         <strong>独立复判</strong>
-        <small>LLM · hard 5 轮 / normal 2 轮</small>
+        <small>LLM · 级联从严</small>
+      </li>
+      <li class="flow-node code">
+        <span class="flow-index">simple_gate</span>
+        <strong>简单问句兜底</strong>
+        <small>规则 · 确定性模式拒绝</small>
       </li>
       <li class="flow-node code">
         <span class="flow-index">answer_gate</span>
         <strong>回答质量门</strong>
-        <small>规则 · 完成态 / 非拒绝 / ≥50 字</small>
+        <small>规则 · 完整性 / 拒绝 / 截断</small>
       </li>
       <li class="flow-node both">
         <span class="flow-index">post</span>
         <strong>去重与翻译</strong>
-        <small>规则 + LLM · 模板合并 + 译简中</small>
+        <small>规则 + LLM</small>
       </li>
       <li class="flow-node accepted">
         <span class="flow-index">✓</span>
@@ -49,111 +58,114 @@
       </li>
     </ol>
     <div class="flow-drops" aria-label="流程分支结果">
-      <span class="flow-branch branch-judge"><b>value_rejected</b> 无保留价值<br><b>failed</b> LLM 失败丢弃</span>
-      <span class="flow-branch branch-verify"><b>rejected</b> 复判与难度相悖</span>
-      <span class="flow-branch branch-answer"><b>rejected</b> 回答不完整 / 拒绝话术</span>
-      <span class="flow-branch branch-post"><b>rejected</b> 重复样本合并</span>
+      <div class="flow-branch branch-judge">
+        <span class="branch-label"><b>无金融价值</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-verify">
+        <span class="branch-label"><b>复判相悖</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-answer">
+        <span class="branch-label"><b>回答不合格</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-post">
+        <span class="branch-label"><b>重复样本</b>合并</span>
+      </div>
     </div>
   </div>
 
-  <div class="funnel-note" aria-label="真实运行数据示例">
-    <h3>一次真实运行的数据漏斗（aime/0806，500 会话）</h3>
+  <div class="funnel-note" aria-label="数据规模漏斗估算">
+    <h3>
+      数据规模漏斗（按 10w 行估算）
+      <span class="funnel-format">仅 session 格式有「分段」步骤；chat 格式跳过，候选基数直接 = 记录数</span>
+    </h3>
     <ol class="funnel-steps">
-      <li><b>500</b><span>输入会话</span></li>
-      <li><b>674</b><span>分段</span></li>
-      <li><b>568</b><span>候选</span></li>
-      <li><b>457</b><span>有价值</span></li>
-      <li><b>274</b><span>复判通过</span></li>
-      <li><b>260</b><span>质量门通过</span></li>
-      <li><b>239</b><span>去重后输出</span></li>
+      <li><b>100k</b><span>输入行</span></li>
+      <li><b>135k</b><span>session 分段</span></li>
+      <li><b>114k</b><span>候选</span></li>
+      <li><b>91k</b><span>有金融价值</span></li>
+      <li><b>55k</b><span>复判通过</span></li>
+      <li><b>52k</b><span>质量门通过</span></li>
+      <li><b>48k</b><span>去重后输出</span></li>
     </ol>
-    <p class="funnel-sub">其中 complex 257 行（hard）+ normal 200 行（judge 产出）→ verify 通过 274 → answer_gate 拒绝 14 → dedup 合并 21 → 最终 239 行；翻译 195 条（中文占比 &lt; 30% 才译）。</p>
   </div>
 
-  <div class="step-layout">
-    <div class="step-grid">
-      <div class="step-table-head" aria-hidden="true">
-        <span>步骤</span>
-        <span>方式</span>
-        <span>判定 / 动作</span>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">preclean</span>
-          <span class="step-name">输入清洗</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">格式自动嗅探（session / chat）；坏行落盘；trace 去重；空会话过滤；适配统一 Session</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">segment</span>
-          <span class="step-name">会话分段</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">按主题切 <span class="threshold">2–4</span> 段；chat / 单句会话回退整段 <span class="threshold">whole_session</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">rule_gate</span>
-          <span class="step-name">候选筛选</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">噪声拒绝（模板残留 / 低价值 / 超长）+ 三信号 AND：工具调用 <span class="threshold">≥7</span>、步骤 <span class="threshold">≥1</span>、工具种 <span class="threshold">≥2</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">judge</span>
-          <span class="step-name">语义判定</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">漏斗三步：<span class="threshold">value_gate</span> 有无价值 → <span class="threshold">complexity_gate</span> 是否复杂 → <span class="threshold">classify</span> 归 9 类复杂 / 16 类普通；任一失败丢弃（fail-closed）</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">verify</span>
-          <span class="step-name">独立复判</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">带前文指代复核；hard <span class="threshold">5 轮</span> / normal <span class="threshold">2 轮</span> 级联从严，任一轮与难度相悖即弃；LLM 失败丢弃（fail-closed）</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">answer_gate</span>
-          <span class="step-name">回答质量门</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">结构信号 <span class="threshold">last_event_type=runFinished</span> + 内容信号：拒绝话术 / 截断标点 / 回答过短 <span class="threshold">&lt;50 字</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">post</span>
-          <span class="step-name">去重与翻译</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">同模板合并（非槽骨架一致）+ token-Jaccard <span class="threshold">≥ 0.80</span> 去重；中文占比 <span class="threshold">&lt;30%</span> 才 LLM 译简中，原文保留</div>
-      </div>
+  <div class="step-grid">
+    <div class="step-table-head" aria-hidden="true">
+      <span>步骤</span>
+      <span>方式</span>
+      <span>做什么</span>
     </div>
 
-    <aside class="artifact-box" aria-label="各步骤产物">
-      <h3>产物</h3>
-      <ol>
-        <li><span>preclean</span><code>logs/bad_lines.jsonl</code></li>
-        <li><span>segment</span><code>logs/segments.jsonl</code></li>
-        <li><span>rule_gate</span><code>logs/candidates.jsonl</code></li>
-        <li><span>judge</span><code>logs/judged.jsonl · llm_cache.jsonl</code></li>
-        <li><span>verify</span><code>logs/verified.jsonl</code></li>
-        <li><span>answer_gate</span><code>logs/answer_gate_rejected.jsonl</code></li>
-        <li><span>post</span><code>logs/deduped.jsonl</code></li>
-        <li><span>输出</span><code>cleaned_queries.jsonl · complex_queries.jsonl · normal_queries.jsonl · summary.json</code></li>
-      </ol>
-    </aside>
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">preclean</span>
+        <span class="step-name">输入清洗</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">统一不同来源的对话格式；过滤坏行、空会话；按 trace 去重。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">segment</span>
+        <span class="step-name">会话分段</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">让 LLM 按主题把长会话切成几个独立片段，单句会话保持整段。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">rule_gate</span>
+        <span class="step-name">候选筛选</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">扔掉模板残留、超长等明显噪声；要求片段必须真正动用了工具链。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">judge</span>
+        <span class="step-name">语义判定</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">三步漏斗：先看值不值得、再看够不够复杂、最后归到对应类别；任一步骤不通过即丢弃。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">verify</span>
+        <span class="step-name">独立复判</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">换一个独立视角再判一次；带前文指代复核；任何一轮与首次判定相悖即丢弃。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">simple_gate</span>
+        <span class="step-name">简单问句兜底</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">只查 hard 行：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">answer_gate</span>
+        <span class="step-name">回答质量门</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">剔除未跑完的轮次（last_event_type ≠ runFinished）、空回答、拒绝话术、长度不足 50 字、以逗号冒号破折号结尾的截断回答。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">post</span>
+        <span class="step-name">去重与翻译</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">合并同一模板下的近似样本；非中文回答翻译为简体中文，原文保留。</div>
+    </div>
   </div>
 </section>

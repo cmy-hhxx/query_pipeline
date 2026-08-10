@@ -30,6 +30,9 @@ def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
     if not cfg.output.dir.is_absolute():
         cfg.output.dir = (base / cfg.output.dir).resolve()
     # 默认化：work_dir 并入输出目录；缓存/断点统一在 logs/ 下。
+    # 显式相对路径也统一按 work_dir 解析（单一基座）：旧实现按 project root 解析，
+    # `llm.cache: logs/llm_cache.jsonl` + `work_dir: scratch` 会落到 <root>/logs
+    # 而非 scratch/logs——--work-dir 覆盖对显式 cache/checkpoint 配置失效。
     if cfg.work_dir is None:
         cfg.work_dir = cfg.output.dir
     elif not cfg.work_dir.is_absolute():
@@ -37,9 +40,9 @@ def _resolve_paths(cfg: PipelineConfig, base: Path) -> PipelineConfig:
     if cfg.checkpoint.dir is None:
         cfg.checkpoint.dir = cfg.work_dir / "logs" / "checkpoints"
     elif not cfg.checkpoint.dir.is_absolute():
-        cfg.checkpoint.dir = (base / cfg.checkpoint.dir).resolve()
+        cfg.checkpoint.dir = (cfg.work_dir / cfg.checkpoint.dir).resolve()
     if cfg.llm.cache is None:
         cfg.llm.cache = cfg.work_dir / "logs" / "llm_cache.jsonl"
     elif not cfg.llm.cache.is_absolute():
-        cfg.llm.cache = (base / cfg.llm.cache).resolve()
+        cfg.llm.cache = (cfg.work_dir / cfg.llm.cache).resolve()
     return cfg

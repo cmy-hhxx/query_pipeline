@@ -25,23 +25,23 @@ class LLMClient:
         self._semaphore = asyncio.Semaphore(max(1, config.concurrency))
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
-        async with self._semaphore:
-            return await self._complete_once(system_prompt=system_prompt, user_prompt=user_prompt)
-
-    async def _complete_once(self, *, system_prompt: str, user_prompt: str) -> str:
         last_error: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.config.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    response_format=cast(Any, {"type": self.config.response_format}),
-                    temperature=0,
-                    timeout=self.config.timeout_seconds,
-                )
+                # semaphore 只包单次 API 调用：退避 sleep 与 90s 超时若都在锁内
+                # （5 次 ≈ 7.5min），429/5xx 风暴时全部 permit 被睡觉/挂起请求占死，
+                # 健康请求队头阻塞、吞吐归零，风暴后逐个超时才恢复。
+                async with self._semaphore:
+                    response = await self.client.chat.completions.create(
+                        model=self.config.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        response_format=cast(Any, {"type": self.config.response_format}),
+                        temperature=0,
+                        timeout=self.config.timeout_seconds,
+                    )
                 if not response.choices:
                     raise ValueError("empty response choices")
                 content = response.choices[0].message.content

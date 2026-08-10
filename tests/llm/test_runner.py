@@ -30,6 +30,12 @@ class RunConcurrentTest(unittest.TestCase):
         results = asyncio.run(run_concurrent([1, 2], worker))
         self.assertEqual(results, [None, None])
 
+    def test_large_batch_chunked_order_preserved(self) -> None:
+        # 分块 dispatch：跨 chunk 边界（> _CHUNK_SIZE）时顺序与结果必须与单批一致。
+        items = list(range(2500))
+        results = asyncio.run(run_concurrent(items, lambda x: _sq(x)))
+        self.assertEqual(results, [x * x for x in items])
+
 
 async def _sq(x: int) -> int:
     await asyncio.sleep(0)

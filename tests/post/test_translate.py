@@ -128,7 +128,56 @@ class TranslateTest(unittest.TestCase):
             )
 
         self.assertIsNone(rows[0]["translation"])  # 翻译失败 → null（fail-open 保留行）
+        # 失败标记：QC meta 规则据此区分"翻译失败"（可接受）与"从未翻译"（判 fail）
+        self.assertTrue(rows[0]["meta"]["translate_failed"])
         self.assertEqual(counters, {"translated": 0, "translate_skipped": 0, "translate_failed": 1})
+
+    def test_failure_keeps_existing_translation(self) -> None:
+        # 第四轮 #5：已有译文的行重跑翻译失败 → 必须保留原文案，不得用 null
+        # 覆盖（否则 QC 因 translate_failed 标记放行，译文丢失被静默掩盖）。
+        rows = [_row("how to hedge against inflation", "r1")]
+        rows[0]["translation"] = "如何对冲通胀（上次成功译文）"
+
+        async def handler(system_prompt: str, user_prompt: str) -> str:
+            del system_prompt, user_prompt
+            raise RuntimeError("simulated LLM failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            counters = asyncio.run(
+                translate_rows(
+                    rows,
+                    client=FakeLLMClient(handler),
+                    llm_cfg=_llm_cfg(tmp),
+                    cache={},
+                    cache_path=Path(tmp) / "cache.jsonl",
+                )
+            )
+
+        self.assertEqual(rows[0]["translation"], "如何对冲通胀（上次成功译文）")
+        self.assertNotIn("translate_failed", rows[0]["meta"])  # 译文仍在，无需失败标记
+        self.assertEqual(counters, {"translated": 0, "translate_skipped": 0, "translate_failed": 1})
+
+    def test_failure_marker_only_for_failed_rows(self) -> None:
+        # 成功/跳过/缓存命中的行不得带 translate_failed 标记
+        rows = [_row("how to hedge", "r1"), _row("如何对冲通胀风险", "r2")]
+
+        async def handler(system_prompt: str, user_prompt: str) -> str:
+            del system_prompt, user_prompt
+            return json.dumps({"translation": "如何对冲"}, ensure_ascii=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(
+                translate_rows(
+                    rows,
+                    client=FakeLLMClient(handler),
+                    llm_cfg=_llm_cfg(tmp),
+                    cache={},
+                    cache_path=Path(tmp) / "cache.jsonl",
+                )
+            )
+
+        self.assertNotIn("translate_failed", rows[0]["meta"])
+        self.assertNotIn("translate_failed", rows[1]["meta"])
 
     def test_cache_round_trip_reuses_translation(self) -> None:
         rows = [_row("how to hedge against inflation", "r1")]

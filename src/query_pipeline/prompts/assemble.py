@@ -65,8 +65,23 @@ def parse_complex_few_shot(text: str) -> dict[str, ComplexCategorySpec]:
             # 否则该类别内容会静默并入前一类别并覆盖其同名 section。
             raise ValueError(f"malformed complex few-shot header: {line!r}")
         if line.startswith("#"):
-            continue  # 文档级标题（如 "## 9 类复杂金融问句"）不属于任何类别
+            # 文档级标题（`#`/`##`，如 "## 9 类复杂金融问句"）：终结当前类别
+            # （save + current=None）。只有匹配的类别头/EOF 能结束类别吸收是
+            # 模板污染根因：`## 02`（类别头少一个 #）会静默把 02 内容并入 01。
+            if current is not None:
+                specs[current] = ComplexCategorySpec(
+                    current, " ".join(definition).strip(), tuple(examples)
+                )
+                current = None
+                definition, examples, in_examples = [], [], False
+            continue
         if current is None:
+            if line:
+                # 文档级标题之后的正文不属于任何类别：fail-loud，不得静默丢弃
+                # 或并入上一类别。
+                raise ValueError(
+                    f"complex few-shot body outside any category (after a document heading): {line[:60]!r}"
+                )
             continue
         if _EXAMPLE_LIST.match(line):
             in_examples = True
@@ -125,8 +140,21 @@ def parse_normal_few_shot(text: str) -> dict[str, NormalCategorySpec]:
             # 否则该类别内容会静默并入前一类别并覆盖其同名 section。
             raise ValueError(f"malformed normal few-shot header: {line!r}")
         if line.startswith("#"):
-            continue  # 文档级标题（如 "# 决策步骤"）不属于任何类别
+            # 文档级标题（如 "# 决策步骤"）：终结当前类别（save + current=None）。
+            # 旧实现只跳过标题行，其后正文仍被并入上一类别的当前 section——
+            # 实测类别 16 的"易混类别"末尾混入后处理指令。
+            if current is not None:
+                save()
+                current = None
+                section, buffer = None, []
+            continue
         if current is None:
+            if line:
+                # 文档级标题之后的正文不属于任何类别：fail-loud，不得静默丢弃
+                # 或并入上一类别。
+                raise ValueError(
+                    f"normal few-shot body outside any category (after a document heading): {line[:60]!r}"
+                )
             continue
         sec = _SECTION.match(line)
         if sec:

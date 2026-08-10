@@ -66,7 +66,7 @@
   "model_version": "",              // 预留：生成模型版本，当前不填
   "release_id": "",                 // 预留：发布批次，当前不填
   "agent_mode": "",                 // 预留：agent 模式。chat 源 judge_data.meta.agent_mode 有值，当前不透传
-  "translation": null,              // 问句译文（post_stage translate 填充）。原文已是中文 → null（不需要翻译）；翻译失败 → null
+  "translation": null,              // 问句译文（post_stage translate 填充）。原文已是中文 → null（不需要翻译）；翻译失败 → null（带 meta.translate_failed 标记）
   "user_id": "",                    // 用户标识。session: turn.user_id；chat: judge_data.meta.user_id
   "difficulty_level": "hard",       // 样本难度：复杂问句 "hard"；有价值非复杂问句 "normal"。两类同文件输出
 
@@ -84,6 +84,8 @@
     "run_id": "run_id",              // session: turn.run_id（run UUID）；chat 源无此字段 → 空
     "last_event_type": "runFinished" // session: turn.last_event_type；回答质量门控要求 runFinished（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 会被过滤）；chat 源无此字段 → null
     // 逃生字段示例（当前不填，按需扩展；注意 translation 是顶层字段，不放在 meta）：
+    // "translate_failed": true,   // 翻译失败标记（translate 阶段写入）。QC meta 规则据此区分
+    //                             // "翻译失败"（fail-open，null 可接受）与"从未翻译"（无标记 → fail）
     // "ground_truth": "真实答案", "citations": [], "agent_mode": "...", ...
   }
 }

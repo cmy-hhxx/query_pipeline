@@ -1,111 +1,154 @@
-/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类） */
+/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类，并排左右双列） */
+
 .taxonomy {
   order: 3;
-  margin-top: clamp(52px, 8vw, 88px);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.taxonomy > h2 {
-  margin: 0;
-  padding: 0 0 10px;
-  border-bottom: 2px solid var(--ink);
-  font-size: 24px;
-  line-height: 1.2;
+
+.taxonomy > h2 { margin: 0; }
+
+.tax-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
 }
-.tax-intro {
-  margin: 14px 0 0;
-  color: var(--ink-soft);
-  font-size: 13px;
-  line-height: 1.6;
+
+.tax-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.tax-intro code {
-  font-size: 12px;
-}
+
 .tax-subhead {
-  margin: 30px 0 12px;
-  font-size: 16px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.tax-subhead::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
 .tax-table-head,
 .tax-card {
   display: grid;
   grid-template-columns:
-    minmax(210px, 1.25fr)
-    minmax(110px, 0.75fr)
-    minmax(220px, 1.4fr)
-    minmax(300px, 2fr);
-  gap: 0;
-  align-items: stretch;
+    32px
+    minmax(0, 1.2fr)
+    minmax(0, 1.5fr)
+    minmax(0, 1.6fr);
+  gap: 10px;
+  align-items: start;
 }
+
 .tax-table-head {
+  padding: 0 2px 4px;
   border-bottom: 1px solid var(--line-strong);
-  background: var(--surface-soft);
+  margin-bottom: 1px;
 }
+
 .tax-table-head span {
-  padding: 8px 12px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
+
 .tax-grid {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   margin: 0;
 }
-.tax-grid + .tax-subhead {
-  margin-top: 44px;
-}
+
 .tax-card {
-  grid-template-rows: none;
-  padding: 0;
-  border: 0;
+  padding: 4px 2px;
   border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
+  transition: background 120ms ease;
 }
-.tax-card > * {
-  min-width: 0;
-  padding: 14px 12px;
-}
+
+.tax-card:hover { background: var(--surface-soft); }
+
+.tax-card > * { min-width: 0; }
+
 .tax-head {
-  display: grid;
-  min-height: 0;
-  align-content: center;
-  align-items: baseline;
-  gap: 2px;
+  display: flex;
+  align-content: start;
+  padding-top: 0;
 }
+
 .tax-id {
+  display: inline-block;
+  width: fit-content;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
   color: var(--ink);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-.tax-slug {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.tax-name {
-  align-content: center;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.4;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: var(--lh-base);
 }
-.tax-key,
-.tax-example {
-  align-content: center;
-  margin: 0;
-  border-radius: 0;
-  background: transparent;
+
+.tax-name {
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding-top: 0;
+}
+
+.tax-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-content: start;
+  padding-top: 0;
+}
+
+.tax-chips span {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
   color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--fs-eyebrow);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  line-height: var(--lh-base);
 }
-.tax-key b,
-.tax-example b {
-  display: none;
+
+.tax-example {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-tight);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-top: 0;
 }

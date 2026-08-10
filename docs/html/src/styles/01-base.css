@@ -1,68 +1,169 @@
 /* BASE — 设计变量、全局重置、基础排版 */
+
 :root {
-  --bg: #fff;
-  --surface: #fff;
-  --surface-soft: #fff;
-  --ink: #111;
-  --ink-soft: #333;
-  --muted: #737373;
-  --line: #dedede;
-  --line-strong: #999;
-  --red: #9c1d1d;
-  --red-soft: #fff;
-  --red-line: #9c1d1d;
-  --amber: #737373;
-  --amber-soft: #fff;
-  --green: #111;
-  --green-soft: #fff;
-  --focus: #9c1d1d;
-  --max: 1120px;
+  /* 中性表面 */
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --surface-soft: #f5f5f1;
+  --surface-sunken: #efefea;
+
+  /* 文本 */
+  --ink: #18181b;
+  --ink-soft: #3f3f46;
+  --muted: #52525b;
+  --muted-2: #a1a1aa;
+
+  /* 边线 */
+  --line: #e7e5e0;
+  --line-strong: #d4d4d8;
+
+  /* 状态语义（reject/accept/llm 各自一个干净色） */
+  --reject: #b9452f;
+  --reject-soft: #fdf2ed;
+  --normal: #6b6357;
+  --normal-soft: #f5f3ee;
+  --failed: #a17316;
+  --failed-soft: #fbf5e6;
+  --accept: #2f6b3a;
+  --accept-soft: #ecf4ee;
+
+  /* LLM 节点强调色 */
+  --llm: #5b4ad6;
+  --llm-soft: #f1efff;
+
+  /* 主交互 */
+  --accent: #18181b;
+  --focus: #5b4ad6;
+
+  /* 间距与排版 */
+  --max: 1140px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-1: 0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 1px rgba(24, 24, 27, 0.03);
+  --shadow-2: 0 1px 2px rgba(24, 24, 27, 0.04), 0 4px 14px rgba(24, 24, 27, 0.06);
+
+  /* 字号尺度（8 档，整页统一用这套，不再各自另写 px/em）
+     display  = 主标题
+     h2       = section 主标题
+     h3       = section 内子标题 / 段落小标题
+     body     = 正文（段句、step-rule、prompt-code 等可读内容）
+     meta     = 数据 label、流程副标题（flow-io-value、step-name 等）
+     eyebrow  = mono / 小标签（flow-index、step-num、stage-tag、tax-id 等）
+     micro    = 数字/最次要补充（funnel label、tax-example 二级说明）
+     num      = 漏斗大数字
+     行高：tight(1.25)、base(1.5)、loose(1.65) 三档 */
+  --fs-display: clamp(32px, 4vw, 44px);
+  --fs-h2:      20px;
+  --fs-h3:      16px;
+  --fs-body:    14px;
+  --fs-meta:    13px;
+  --fs-eyebrow: 11px;
+  --fs-micro:   10.5px;
+  --fs-num:     clamp(20px, 2.2vw, 26px);
+  --lh-tight:   1.25;
+  --lh-base:    1.5;
+  --lh-loose:   1.65;
 }
-* {
-  box-sizing: border-box;
-}
+
+* { box-sizing: border-box; }
+
 html {
   scroll-behavior: smooth;
-  background: #fff;
+  background: var(--bg);
 }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Helvetica Neue", Helvetica, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-loose);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
 main {
   display: flex;
   width: min(var(--max), calc(100% - 48px));
   margin: 0 auto;
-  padding: clamp(36px, 6vw, 72px) 0 72px;
+  padding: clamp(40px, 6vw, 80px) 0 96px;
   flex-direction: column;
+  gap: clamp(22px, 3vw, 36px);
 }
-h1,
-h2,
-h3 {
+
+h1, h2, h3, h4 {
   color: var(--ink);
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
+  margin: 0;
 }
-code,
-pre,
-.tax-id,
-.tax-slug {
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+
+h1 {
+  font-size: var(--fs-display);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.03em;
+  font-weight: 800;
 }
+
+h2 {
+  font-size: var(--fs-h2);
+  line-height: var(--lh-tight);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+h2::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 0.9em;
+  background: var(--ink);
+  border-radius: 2px;
+  align-self: center;
+  transform: translateY(1px);
+}
+
+h3 {
+  font-size: var(--fs-h3);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+}
+
+p {
+  color: var(--ink-soft);
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-loose);
+}
+
+code, pre, .tax-id, .tax-slug, .threshold, .stage-tag {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+}
+
 code {
-  color: var(--ink);
-  background: transparent;
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.88em;
 }
-button {
-  font: inherit;
-}
+
+button { font: inherit; }
+
 button:focus-visible,
 summary:focus-visible {
-  outline: 3px solid color-mix(in oklch, var(--focus), transparent 72%);
+  outline: 3px solid color-mix(in oklch, var(--focus), transparent 70%);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--focus), transparent 80%);
+  color: var(--ink);
 }

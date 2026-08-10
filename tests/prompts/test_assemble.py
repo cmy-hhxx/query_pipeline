@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # repo root (tests/prompts/ -> project root)
 
-from query_pipeline.prompts import resolve_prompt
+from query_pipeline.prompts import PROMPTS, resolve_prompt
 from query_pipeline.taxonomy import templates_dir
 from query_pipeline.prompts.assemble import (
     build_complex_classify_prompt,
@@ -51,10 +55,6 @@ _NORMAL_SAMPLE = """\
 
 易混类别：
 - 03-stock-diagnosis-and-data-lookup: 03 是查数。
-
-# 决策步骤
-
-1. 阅读 query。
 """
 
 _BAD_SAMPLE = """\
@@ -100,6 +100,32 @@ class ParseNormalTest(unittest.TestCase):
             self.assertIn("定义", spec.sections)
             self.assertIn("易混类别", spec.sections)
 
+    def test_real_file_no_pollution_after_doc_heading(self) -> None:
+        # 回归：`# 决策步骤` 之后的正文曾静默并入类别 16 的"易混类别"，
+        # 生产 classify prompt 因此混入无关后处理指令。解析真实模板必须零污染。
+        text = (templates_dir() / "normal_few_shot.md").read_text(encoding="utf-8")
+        specs = parse_normal_few_shot(text)
+        cat16 = specs["16"].sections["易混类别"]
+        self.assertNotIn("needs_review", cat16)
+        self.assertNotIn("决策步骤", cat16)
+        self.assertNotIn("阅读 query", cat16)
+
+    def test_doc_heading_terminates_current_category(self) -> None:
+        # `#` 级标题终结当前类别（save），后续新类别头正常开启。
+        specs = parse_normal_few_shot(
+            "## 01-good | 名字\n定义：a\n# 中间文档标题\n## 02-better | 名字\n定义：b"
+        )
+        self.assertEqual(set(specs), {"01", "02"})
+        self.assertEqual(specs["01"].sections["定义"], "a")
+        self.assertEqual(specs["02"].sections["定义"], "b")
+
+    def test_body_after_doc_heading_raises(self) -> None:
+        # 文档级标题之后的正文不得静默并入上一类别（fail-loud）。
+        from query_pipeline.prompts.assemble import parse_normal_few_shot
+
+        with self.assertRaises(ValueError):
+            parse_normal_few_shot("## 01-good | 名字\n定义：a\n# 决策步骤\n1. 阅读 query")
+
 class FailLoudTest(unittest.TestCase):
     def test_malformed_normal_header_raises(self) -> None:
         # 缺 slug/name 的 `## 02`：必须抛错，不得静默并入前一类别
@@ -120,6 +146,18 @@ class FailLoudTest(unittest.TestCase):
         specs = parse_complex_few_shot("## 文档标题\n### 01 好\n特征：a")
         self.assertEqual(set(specs), {"01"})
 
+    def test_complex_missing_hash_does_not_absorb(self) -> None:
+        # 回归：`## 02`（类别头少一个 #）曾静默把 02 的内容并入 01
+        # （实证 "特征：a 特征：b"，02 消失）。文档级标题必须终结当前类别，
+        # 其后正文 fail-loud。
+        from query_pipeline.prompts.assemble import parse_complex_few_shot
+
+        with self.assertRaises(ValueError):
+            parse_complex_few_shot("### 01 好\n特征：a\n## 02\n特征：b")
+        # 无正文的文档级标题仅终结类别，不报错
+        specs = parse_complex_few_shot("### 01 好\n特征：a\n## 02")
+        self.assertEqual(set(specs), {"01"})
+
     def test_missing_spec_raises_in_builder(self) -> None:
         # taxonomy 有类别而 few_shot 缺 spec：build 必须 fail-loud
         from unittest.mock import patch
@@ -128,7 +166,7 @@ class FailLoudTest(unittest.TestCase):
 
         good = _read("normal_few_shot.md")
         # 删掉 16 的整个 section（保留其它类别）
-        truncated = good.split("# 决策步骤")[0].rsplit("## 15-", 1)[0]
+        truncated = good.rsplit("## 16-", 1)[0]
         with patch("query_pipeline.prompts.assemble._read", return_value=truncated):
             with self.assertRaises(ValueError):
                 build_normal_classify_prompt()
@@ -212,3 +250,36 @@ class PromptContractTest(unittest.TestCase):
         # screening caliber: pure filters are non-complex; validation+trend-point tasks stay 01
         self.assertIn("仅按显式条件过滤", judge_prompt)
         self.assertIn("validate the BAR columns", judge_prompt)
+
+
+class LazyPromptBuildTest(unittest.TestCase):
+    def test_import_does_not_touch_templates(self) -> None:
+        # 第四轮 #6：模板 fail-loud 不得在模块导入期发生——模板目录缺失/损坏时，
+        # import query_pipeline.prompts 与 --help 仍可用，只有真正 resolve 才报错。
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "templates"
+            empty.mkdir()
+            env = dict(os.environ, QUERY_PIPELINE_TEMPLATES=str(empty))
+            code = (
+                "import query_pipeline.prompts as p\n"
+                "print('import ok')\n"
+                "try:\n"
+                "    p.resolve_prompt('segment')\n"
+                "    print('resolve ok')\n"
+                "except FileNotFoundError as exc:\n"
+                "    print('resolve failed:', type(exc).__name__)\n"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, env=env, cwd=str(ROOT),
+            )
+            self.assertIn("import ok", proc.stdout, proc.stderr)
+            self.assertIn("resolve failed: FileNotFoundError", proc.stdout, proc.stderr)
+
+    def test_patch_dict_works_before_first_build(self) -> None:
+        # 惰性构建 + setdefault：patch.dict 预置的 prompt 优先，其余键由真实模板补齐。
+        from unittest.mock import patch
+
+        with patch("query_pipeline.prompts.PROMPTS", {**PROMPTS, "segment": "patched"}):
+            self.assertEqual(resolve_prompt("segment"), "patched")
+            self.assertIn("价值", resolve_prompt("value_gate"))

@@ -98,9 +98,19 @@ class RuleTest(unittest.TestCase):
         self.assertFalse(rules["chain"]["ok"])
 
     def test_answer_empty(self) -> None:
+        # 空回答由 answer 规则负责；truncation 与 answer_gate 同一判定（单源），
+        # 不再对同一缺陷重复报两条。
         rules = _rules_by_name(_row(text_answer="", raw_answer=""))
         self.assertFalse(rules["answer"]["ok"])
-        self.assertFalse(rules["truncation"]["ok"])
+        self.assertTrue(rules["truncation"]["ok"])
+
+    def test_truncation_no_question_passes(self) -> None:
+        # 第四轮 #7：无 input.text 的行以未完结标点结尾 → gate 放行（无问句无法
+        # 判断回答相对什么不完整），QC 必须一致放行（旧实现 QC 无条件判 fail）。
+        row = _row(text_answer="分析了很多指标，结论是，", raw_answer="分析了很多指标，结论是，")
+        row["input"] = None
+        rules = _rules_by_name(row)
+        self.assertTrue(rules["truncation"]["ok"])
 
     def test_answer_too_short(self) -> None:
         rules = _rules_by_name(_row(text_answer="太短", raw_answer="太短"))
@@ -138,6 +148,23 @@ class RuleTest(unittest.TestCase):
         row["translation"] = "是什么驱动了 GPIQ 的表现？"
         rules = _rules_by_name(row)
         self.assertTrue(rules["meta"]["ok"])
+
+    def test_english_question_translate_failed_fail_open(self) -> None:
+        # 翻译失败是故意 fail-open（translate.py 落 meta.translate_failed 标记）：
+        # null + 失败标记可接受；"从未翻译"（null 且无标记）仍判 fail。
+        row = _row(input={"text": "What drives GPIQ performance?"})
+        row["translation"] = None
+        row["meta"] = {"reason": "r", "translate_failed": True}
+        rules = _rules_by_name(row)
+        self.assertTrue(rules["meta"]["ok"])
+
+    def test_english_question_never_translated_fails(self) -> None:
+        # 无失败标记的非中文行 translation=null：必须判 fail（管线没跑 translate 或漏翻）
+        row = _row(input={"text": "What drives GPIQ performance?"})
+        row["translation"] = None
+        row["meta"] = {"reason": "r"}
+        rules = _rules_by_name(row)
+        self.assertFalse(rules["meta"]["ok"])
 
 class DatasetRuleTest(unittest.TestCase):
     def test_constant_field_detected(self) -> None:

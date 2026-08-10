@@ -36,8 +36,11 @@ async def run_judge_stage(
 ) -> PipelineContext:
     """Semantic gates + classification per candidate: value -> complexity -> classify.
 
-    LLM failures drop the candidate (fail-closed). Session-level checkpointing
-    resumes completed sessions without re-calling the LLM.
+    LLM failures drop the candidate (fail-closed). Resume is cache-driven: every
+    funnel label is persisted to llm_cache, so a re-run replays completed sessions
+    with zero LLM calls. The session checkpoint stores only small stats — rows and
+    judged (MB-level chains) are deterministic rebuilds from the cache and are
+    never persisted (a 500-session checkpoint grew to 91MB before this).
     """
     cfg = ctx.config
     ctx.prune_debug_artifacts("segments.jsonl", "candidates.jsonl", "judged.jsonl")
@@ -87,12 +90,14 @@ async def run_judge_stage(
     async def process(session) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
         key = session_content_key(session)
         record = checkpoint.get(key)
-        if record is not None and {"rows", "stats", "judged"} <= set(record):
-            return record["rows"], record["stats"], record["judged"]
         try:
+            # 已完成会话也重新走 _process_session：funnel 全部命中 llm_cache，
+            # 不产生 LLM 调用；rows/judged 由缓存确定性重建（checkpoint 不再存
+            # 全量 rows——含 MB 级 chain，500 会话即 91MB，且每次 run 全量解析进内存）。
             sess_rows, sess_stats, judged = await _process_session(ctx, client, cache, cache_lock, session)
-            if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
-                await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
+            # checkpoint 只落 stats（小）：完成记录 + 审计，不重复落盘。
+            if record is None and sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
+                await checkpoint.mark(key, stats=sess_stats)
         except Exception as exc:  # noqa: BLE001 checkpoint 磁盘异常等也按会话错误兜底
             sess_rows, sess_stats, judged = [], {"error": str(exc)[:200]}, []
         return sess_rows, sess_stats, judged

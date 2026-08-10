@@ -50,10 +50,18 @@ async def translate_rows(
     counts = {"translated": 0, "translate_skipped": 0, "translate_failed": 0}
     checkpoint = checkpoint or Checkpoint.disabled()
 
-    def put(row: dict[str, Any], translation: str | None) -> None:
+    def put(row: dict[str, Any], translation: str | None, *, failed: bool = False) -> None:
         # translation 是顶层唯一字段：只有非中文问句翻译成功才填译文；
         # 原文已是中文、或翻译失败 → null（见 templates/filter_out.jsonc）。
         row["translation"] = translation
+        if failed:
+            # 失败标记（meta 逃生字段）：QC 的 meta 规则据此区分"翻译失败"
+            # （fail-open 可接受）与"从未翻译"（null 且无标记 → fail）。
+            meta = row.get("meta")
+            if not isinstance(meta, dict):
+                meta = {}
+                row["meta"] = meta
+            meta["translate_failed"] = True
 
     async def worker(row: dict[str, Any]) -> bool:
         # 返回 True 表示处理完成（成功/跳过/失败均已计数）；
@@ -99,12 +107,21 @@ async def translate_rows(
             counts["translated"] += 1
             await checkpoint.mark(key, translation=translation, skipped=False)
         except (ValueError, RuntimeError):
-            put(row, None)  # 翻译失败：无译文 → null（fail-open 保留行，下轮重试）
+            # 翻译失败：已有译文必须保留——无条件覆盖为 null 会让"缓存丢失后重跑
+            # 失败"静默抹掉上次成功译文，且 QC 因 translate_failed 标记放行，
+            # 译文丢失被掩盖。仅当本行没有译文时才置 null + 失败标记
+            # （fail-open 保留行，下轮重试）。
+            if not isinstance(row.get("translation"), str) or not row["translation"].strip():
+                put(row, None, failed=True)
             counts["translate_failed"] += 1
         return True
 
     results = await run_concurrent(rows, worker, description="LLM translate")
-    counts["translate_failed"] += sum(1 for r in results if r is None)  # 兜底网异常
+    for row, result in zip(rows, results):
+        if result is None:  # 兜底网捕获的意外异常（如 cache 磁盘 OSError）
+            if not isinstance(row.get("translation"), str) or not row["translation"].strip():
+                put(row, None, failed=True)  # 已成功的行不覆盖译文，只补记失败
+            counts["translate_failed"] += 1
     return counts
 
 

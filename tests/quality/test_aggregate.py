@@ -87,6 +87,30 @@ class AggregateTest(unittest.TestCase):
         self.assertNotEqual(aggregate.record_key(a), aggregate.record_key(b))
         self.assertEqual(aggregate.record_key(a), "case_a|t1")
 
+    def test_record_key_disambiguates_duplicate_trace_ids(self) -> None:
+        # 第四轮 #2：同 (source_case_id|trace_id) 的重复行必须键唯一——
+        # per_record / sample_set / judge_results 都是 dict，键塌缩会让第二行
+        # 覆盖第一行的规则结果、judge 判定与 sampled 标志。
+        a = _row(trace_id="t1", source_case_id="case_a")
+        b = _row(trace_id="t1", source_case_id="case_a")
+        a["_line_number"] = 3
+        b["_line_number"] = 7
+        self.assertNotEqual(aggregate.record_key(a), aggregate.record_key(b))
+        # 无 _line_number 的手造行保持旧键格式
+        c = _row(trace_id="t1", source_case_id="case_a")
+        self.assertEqual(aggregate.record_key(c), "case_a|t1")
+
+    def test_duplicate_trace_ids_keep_independent_results(self) -> None:
+        # 重复行各自判定：r1 规则失败（fail）、r2 规则通过（pass），互不覆盖。
+        r1 = _row(trace_id="t1", category="99-bad")
+        r2 = _row(trace_id="t1")
+        r1["_line_number"] = 1
+        r2["_line_number"] = 2
+        records = [r1, r2]
+        per_record = {aggregate.record_key(r): check_record(r) for r in records}
+        results = aggregate.build_results(records, per_record, set(), {})
+        self.assertEqual([r["status"] for r in results], ["fail", "pass"])
+
     def test_overview_counts_and_flagged(self) -> None:
         records = [_row(trace_id="t1"), _row(trace_id="t2", category="99-bad")]
         per_record = {aggregate.record_key(r): check_record(r) for r in records}

@@ -7,199 +7,348 @@
     <title>复杂金融问句清洗与标注管线</title>
     <style>
 /* BASE — 设计变量、全局重置、基础排版 */
+
 :root {
-  --bg: #fff;
-  --surface: #fff;
-  --surface-soft: #fff;
-  --ink: #111;
-  --ink-soft: #333;
-  --muted: #737373;
-  --line: #dedede;
-  --line-strong: #999;
-  --red: #9c1d1d;
-  --red-soft: #fff;
-  --red-line: #9c1d1d;
-  --amber: #737373;
-  --amber-soft: #fff;
-  --green: #111;
-  --green-soft: #fff;
-  --focus: #9c1d1d;
-  --max: 1120px;
+  /* 中性表面 */
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --surface-soft: #f5f5f1;
+  --surface-sunken: #efefea;
+
+  /* 文本 */
+  --ink: #18181b;
+  --ink-soft: #3f3f46;
+  --muted: #52525b;
+  --muted-2: #a1a1aa;
+
+  /* 边线 */
+  --line: #e7e5e0;
+  --line-strong: #d4d4d8;
+
+  /* 状态语义（reject/accept/llm 各自一个干净色） */
+  --reject: #b9452f;
+  --reject-soft: #fdf2ed;
+  --normal: #6b6357;
+  --normal-soft: #f5f3ee;
+  --failed: #a17316;
+  --failed-soft: #fbf5e6;
+  --accept: #2f6b3a;
+  --accept-soft: #ecf4ee;
+
+  /* LLM 节点强调色 */
+  --llm: #5b4ad6;
+  --llm-soft: #f1efff;
+
+  /* 主交互 */
+  --accent: #18181b;
+  --focus: #5b4ad6;
+
+  /* 间距与排版 */
+  --max: 1140px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-1: 0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 1px rgba(24, 24, 27, 0.03);
+  --shadow-2: 0 1px 2px rgba(24, 24, 27, 0.04), 0 4px 14px rgba(24, 24, 27, 0.06);
+
+  /* 字号尺度（8 档，整页统一用这套，不再各自另写 px/em）
+     display  = 主标题
+     h2       = section 主标题
+     h3       = section 内子标题 / 段落小标题
+     body     = 正文（段句、step-rule、prompt-code 等可读内容）
+     meta     = 数据 label、流程副标题（flow-io-value、step-name 等）
+     eyebrow  = mono / 小标签（flow-index、step-num、stage-tag、tax-id 等）
+     micro    = 数字/最次要补充（funnel label、tax-example 二级说明）
+     num      = 漏斗大数字
+     行高：tight(1.25)、base(1.5)、loose(1.65) 三档 */
+  --fs-display: clamp(32px, 4vw, 44px);
+  --fs-h2:      20px;
+  --fs-h3:      16px;
+  --fs-body:    14px;
+  --fs-meta:    13px;
+  --fs-eyebrow: 11px;
+  --fs-micro:   10.5px;
+  --fs-num:     clamp(20px, 2.2vw, 26px);
+  --lh-tight:   1.25;
+  --lh-base:    1.5;
+  --lh-loose:   1.65;
 }
-* {
-  box-sizing: border-box;
-}
+
+* { box-sizing: border-box; }
+
 html {
   scroll-behavior: smooth;
-  background: #fff;
+  background: var(--bg);
 }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Helvetica Neue", Helvetica, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-loose);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
 main {
   display: flex;
   width: min(var(--max), calc(100% - 48px));
   margin: 0 auto;
-  padding: clamp(36px, 6vw, 72px) 0 72px;
+  padding: clamp(40px, 6vw, 80px) 0 96px;
   flex-direction: column;
+  gap: clamp(22px, 3vw, 36px);
 }
-h1,
-h2,
-h3 {
+
+h1, h2, h3, h4 {
   color: var(--ink);
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
+  margin: 0;
 }
-code,
-pre,
-.tax-id,
-.tax-slug {
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+
+h1 {
+  font-size: var(--fs-display);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.03em;
+  font-weight: 800;
 }
+
+h2 {
+  font-size: var(--fs-h2);
+  line-height: var(--lh-tight);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+h2::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 0.9em;
+  background: var(--ink);
+  border-radius: 2px;
+  align-self: center;
+  transform: translateY(1px);
+}
+
+h3 {
+  font-size: var(--fs-h3);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+}
+
+p {
+  color: var(--ink-soft);
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-loose);
+}
+
+code, pre, .tax-id, .tax-slug, .threshold, .stage-tag {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+}
+
 code {
-  color: var(--ink);
-  background: transparent;
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.88em;
 }
-button {
-  font: inherit;
-}
+
+button { font: inherit; }
+
 button:focus-visible,
 summary:focus-visible {
-  outline: 3px solid color-mix(in oklch, var(--focus), transparent 72%);
+  outline: 3px solid color-mix(in oklch, var(--focus), transparent 70%);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--focus), transparent 80%);
+  color: var(--ink);
 }
 
 /* HEADER — 页面标题区与输出去向图例 */
+
 .topline {
   order: 1;
-  display: block;
-  padding: 0;
-  border: 0;
-}
-h1 {
-  margin: 0 0 28px;
-  font-size: clamp(32px, 4.3vw, 48px);
-  line-height: 1.08;
-}
-.legend {
-  display: grid;
-  grid-template-columns: 112px repeat(4, minmax(0, 1fr));
-  gap: 0;
-  width: 100%;
-  border-top: 1px dashed var(--ink);
-  border-bottom: 1px dashed var(--ink);
-  background: #fff;
-}
-.legend-title {
   display: flex;
-  align-items: center;
-  padding: 14px 12px 14px 0;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 700;
-}
-.badge {
-  display: grid;
-  min-height: 0;
-  align-content: center;
-  align-items: center;
-  gap: 1px;
-  border: 0;
-  border-left: 0;
-  border-radius: 0;
-  background: #fff;
-  padding: 12px 14px;
-  white-space: normal;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 700;
-}
-.badge b {
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 11px;
-  line-height: 1.25;
-}
-.badge span {
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 500;
-}
-.badge.reject,
-.badge.non-complex,
-.badge.failed,
-.badge.accept {
-  background: transparent;
-}
-.badge.reject b {
-  color: var(--red);
-}
-.badge.non-complex b {
-  color: var(--muted);
-}
-.badge.failed b {
-  color: var(--amber);
-}
-.badge.accept b {
-  color: var(--green);
+  flex-direction: column;
+  gap: 16px;
 }
 
-/* PIPELINE — 清洗流程图、7 阶段决策表、产物栏、数据漏斗 */
+.topline > p,
+.topline .subtitle {
+  color: var(--ink-soft);
+  font-size: var(--fs-h3);
+  line-height: var(--lh-base);
+  max-width: 720px;
+  margin: -8px 0 4px;
+}
+
+/* 图例：水平 flex，chip + 文字说明 */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+}
+
+.legend-title {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-right: 12px;
+  margin-right: 4px;
+  border-right: 1px solid var(--line);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  transition: background 120ms ease;
+}
+
+.badge b {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.badge span {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+}
+
+.badge.reject {
+  background: var(--reject-soft);
+  color: var(--reject);
+}
+.badge.reject b { color: var(--reject); }
+
+.badge.non-complex {
+  background: var(--normal-soft);
+  color: var(--normal);
+}
+.badge.non-complex b { color: var(--normal); }
+
+.badge.failed {
+  background: var(--failed-soft);
+  color: var(--failed);
+}
+.badge.failed b { color: var(--failed); }
+
+.badge.accept {
+  background: var(--accept-soft);
+  color: var(--accept);
+}
+.badge.accept b { color: var(--accept); }
+
+/* PIPELINE — 清洗流程图、8 阶段决策表、数据漏斗 */
+
 .pipeline {
   order: 2;
-  margin-top: clamp(44px, 7vw, 72px);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
 }
+
 .pipeline > h2 {
   margin: 0;
-  padding: 0 0 10px;
-  border-bottom: 2px solid var(--ink);
-  font-size: 24px;
-  line-height: 1.2;
 }
+
+/* —— 流程图 —— */
+
 .flow-chart {
   position: relative;
   margin: 0;
-  padding: 24px 0 20px;
-  overflow-x: auto;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
-  scrollbar-color: var(--line-strong) transparent;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
 }
-.flow-io,
-.flow-main,
-.flow-drops {
-  min-width: 1080px;
-}
+
 .flow-io {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed var(--line-strong);
+  flex-wrap: wrap;
 }
-.flow-io span {
+
+.flow-io > div {
   display: inline-flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-base);
+  color: var(--ink-soft);
+  min-width: 0;
 }
-.flow-io b {
-  color: var(--ink);
-  font-size: 11px;
-}
-.flow-io code {
+
+.flow-io-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
+
+.flow-io-value {
+  color: var(--ink);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+}
+
+.flow-io-format {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* 桌面端：水平 grid 排版 */
 .flow-main {
-  --flow-gap: 18px;
+  --flow-gap: 14px;
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: var(--flow-gap);
@@ -207,634 +356,676 @@ h1 {
   padding: 0;
   list-style: none;
 }
+
 .flow-node {
   position: relative;
   display: grid;
-  min-height: 92px;
-  align-content: center;
+  grid-template-rows: auto 1fr auto;
+  align-content: stretch;
   justify-items: center;
-  gap: 2px;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
+  gap: 4px;
+  min-height: 100px;
+  padding: 14px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--surface);
-  padding: 12px 6px;
   text-align: center;
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
+
+.flow-node:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+
 .flow-node.llm {
-  border-color: var(--red-line);
+  border-color: color-mix(in oklch, var(--llm), white 30%);
+  background: var(--llm-soft);
+}
+.flow-node.code {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+.flow-node.both {
+  border-color: var(--line-strong);
+  background: linear-gradient(
+    135deg,
+    var(--surface-soft) 50%,
+    var(--llm-soft) 50%
+  );
 }
 .flow-node.accepted {
-  border-color: var(--green);
-  background: var(--green-soft);
+  border-color: color-mix(in oklch, var(--accept), white 25%);
+  background: var(--accept-soft);
 }
+
+/* 节点之间画箭头 */
 .flow-node:not(:last-child)::after {
   content: "";
   position: absolute;
   top: 50%;
-  left: 100%;
+  right: calc(var(--flow-gap) * -0.5);
   width: var(--flow-gap);
-  border-top: 1px solid var(--ink);
+  height: 0;
+  border-top: 1.5px solid var(--line-strong);
+  z-index: 0;
 }
 .flow-node:not(:last-child)::before {
   content: "";
   position: absolute;
-  z-index: 1;
-  top: calc(50% - 3px);
-  left: calc(100% + var(--flow-gap) - 5px);
+  top: 50%;
+  right: calc(var(--flow-gap) * -0.5 - 4px);
+  transform: translateY(-50%);
   width: 0;
   height: 0;
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
-  border-left: 5px solid var(--ink);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid var(--line-strong);
+  z-index: 1;
 }
+
 .flow-index {
   color: var(--muted);
-  font-family: inherit;
-  font-size: 9.5px;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-.flow-node.llm .flow-index {
-  color: var(--red);
-}
-.flow-node.accepted .flow-index {
-  color: var(--green);
-}
+
+.flow-node.llm .flow-index { color: var(--llm); }
+.flow-node.accepted .flow-index { color: var(--accept); }
+
 .flow-node strong {
   color: var(--ink);
-  font-size: 13px;
-  line-height: 1.25;
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  line-height: var(--lh-tight);
 }
+
 .flow-node small {
   color: var(--muted);
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 8.5px;
-  line-height: 1.35;
+  font-size: var(--fs-eyebrow);
+  line-height: var(--lh-tight);
 }
+
+/* —— 流程分支（失败去向）—— */
+/* 4 个去向 chip 跟随主流程共用一个 8 列 grid（grid-column: 4/5/6/7），与第 4-7 主流程节点垂直对齐；
+   chip 之间保留主流程节点一整个宽度的留白（用整列空 slot + 居中的 chip 实现呼吸感）；
+   主流程 → chip 用顶端一根 dashed 中轴线 + 每个 chip 顶部一段 28px dashed 引线。 */
+
 .flow-drops {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 18px;
-  min-height: 74px;
-  margin-top: 28px;
+  column-gap: var(--flow-gap);
+  margin-top: 56px;
+  padding-top: 28px;
+  position: relative;
 }
+
+/* 主流程 → 去向区域 顶端 dashed 引导线，跨越全部 8 列 */
+.flow-drops::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1.5px dashed var(--line-strong);
+  pointer-events: none;
+}
+
+/* chip：直角矩形 + 顶部 28px 垂直 dashed 引线 */
 .flow-branch {
   position: relative;
-  align-self: start;
-  border-top: 1px dashed var(--line-strong);
-  padding: 8px 3px 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-  text-align: center;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-soft);
+  font-size: var(--fs-eyebrow);
+  line-height: var(--lh-base);
+  /* chip 宽度 = 单列宽度的 96%，水平居中；左右各留 2% 列宽的空白 */
+  width: 96%;
+  justify-self: center;
+  white-space: nowrap;
 }
+
+/* chip 顶部引线：每条 chip 顶部一条 28px 垂直 dashed，向上接到中轴线 */
 .flow-branch::before {
   content: "";
   position: absolute;
-  bottom: 100%;
+  top: -28px;
   left: 50%;
+  transform: translateX(-50%);
+  width: 0;
   height: 28px;
-  border-left: 1px dashed var(--line-strong);
+  border-left: 1.5px dashed var(--line-strong);
+  pointer-events: none;
 }
-.flow-branch b {
-  color: var(--red);
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 9px;
-}
-.branch-judge {
-  grid-column: 4;
-}
-.branch-judge b:first-child {
-  color: var(--muted);
-}
-.branch-judge b:last-of-type {
-  color: var(--amber);
-}
-.branch-verify {
-  grid-column: 5;
-}
-.branch-answer {
-  grid-column: 6;
-}
-.branch-post {
-  grid-column: 7;
-}
-.step-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 24px;
-  align-items: start;
-  margin-top: 28px;
-}
-.step-grid {
+
+.flow-branch .branch-label {
   display: block;
-  margin-top: 0;
 }
+
+.flow-branch .branch-label b {
+  display: inline-block;
+  margin-right: 4px;
+  color: var(--reject);
+  font-weight: 700;
+}
+
+.branch-judge .branch-label b:first-of-type { color: var(--reject); }
+.branch-judge .branch-label b:last-of-type { color: var(--failed); }
+
+.branch-judge  { grid-column: 4; }
+.branch-verify { grid-column: 5; }
+.branch-answer { grid-column: 6; }
+.branch-post   { grid-column: 7; }
+
+/* —— 步骤表：步骤 / 方式 / 做什么 —— */
+
+.step-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 .step-table-head,
 .step-card {
   display: grid;
-  grid-template-columns: minmax(180px, 1.1fr)
-          110px
-          minmax(280px, 2fr);
-  gap: 0;
-  align-items: center;
+  grid-template-columns: minmax(180px, 1.1fr) 140px minmax(280px, 2fr);
+  gap: 24px;
+  align-items: start;
 }
+
 .step-table-head {
-  border-top: 2px solid var(--ink);
+  padding: 0 4px 12px;
   border-bottom: 1px solid var(--line-strong);
-  background: var(--surface-soft);
+  margin-bottom: 8px;
 }
+
 .step-table-head span {
-  padding: 8px 12px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
+
 .step-card {
-  grid-template-rows: none;
-  gap: 0;
-  padding: 0;
-  border: 0;
+  padding: 18px 4px;
   border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
+  transition: background 120ms ease;
 }
-.step-card > * {
-  min-width: 0;
-  padding: 15px 12px;
-}
+
+.step-card:hover { background: var(--surface-soft); }
+
+.step-card > * { min-width: 0; }
+
 .step-card-head {
-  display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-.step-num {
-  display: block;
-  width: auto;
-  height: auto;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-}
-.step-name {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 700;
-}
-.step-tags {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
-.stage-tag,
-.stage-tag.code,
-.stage-tag.llm {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 10px;
-}
-.stage-tag {
-  display: inline-flex;
   align-items: center;
+  gap: 10px;
+}
+
+.step-num {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-.stage-tag.code {
-  color: var(--muted);
-}
-.stage-tag.llm {
-  color: var(--red);
-}
-.step-rule {
-  color: var(--ink-soft);
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-.threshold {
-  display: inline;
-  border-radius: 2px;
-  background: var(--surface-soft);
-  padding: 2px 4px;
+
+.step-name {
   color: var(--ink);
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 11px;
-  white-space: normal;
-}
-.artifact-box {
-  border: 1px solid var(--ink);
-  background: #fff;
-}
-.artifact-box h3 {
-  margin: 0;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--ink);
-  font-size: 13px;
-  letter-spacing: 0;
-}
-.artifact-box ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.artifact-box li {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  min-height: 51px;
-  padding: 12px;
-  border-bottom: 1px solid var(--line);
-}
-.artifact-box li:last-child {
-  border-bottom: 0;
-}
-.artifact-box li > span {
-  color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-body);
   font-weight: 700;
-}
-.artifact-box code {
-  color: var(--ink-soft);
-  font-size: 10.5px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+  letter-spacing: -0.01em;
 }
 
-/* —— 真实运行数据漏斗 —— */
+.step-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-self: start;
+  padding-top: 2px;
+}
+
+.stage-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.stage-tag.code {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+}
+
+.stage-tag.llm {
+  background: var(--llm-soft);
+  color: var(--llm);
+}
+
+.step-rule {
+  color: var(--ink-soft);
+  font-size: var(--fs-body);
+  line-height: var(--lh-base);
+}
+
+.threshold {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* —— 数据漏斗 —— */
+
 .funnel-note {
-  margin-top: 26px;
-  border: 1px dashed var(--line-strong);
-  padding: 14px 18px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
+
 .funnel-note h3 {
-  margin: 0 0 12px;
-  font-size: 13px;
-  letter-spacing: 0;
+  margin: 0 0 16px;
+  font-size: var(--fs-body);
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
 }
+
+.funnel-format {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 500;
+  color: var(--ink-soft);
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+}
+
 .funnel-steps {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 0;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .funnel-steps li {
   position: relative;
-  padding: 6px 4px;
+  padding: 14px 8px 12px;
   text-align: center;
-  border-right: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
 }
-.funnel-steps li:last-child {
-  border-right: 0;
-}
+
 .funnel-steps li:not(:last-child)::after {
   content: "";
   position: absolute;
   top: 50%;
-  right: -3px;
-  width: 6px;
-  height: 6px;
-  border-top: 1px solid var(--line-strong);
-  border-right: 1px solid var(--line-strong);
+  right: -6px;
+  width: 8px;
+  height: 8px;
+  border-top: 1.5px solid var(--muted-2);
+  border-right: 1.5px solid var(--muted-2);
   transform: translateY(-50%) rotate(45deg);
-}
-.funnel-steps b {
-  display: block;
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--ink);
-}
-.funnel-steps span {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-}
-.funnel-sub {
-  margin: 10px 0 0;
-  font-size: 12px;
-  color: var(--ink-soft);
-  line-height: 1.6;
+  z-index: 1;
+  background: var(--bg);
 }
 
-/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类） */
+.funnel-steps li:last-child {
+  background: var(--accept-soft);
+  border-color: color-mix(in oklch, var(--accept), white 35%);
+}
+
+.funnel-steps li:last-child b { color: var(--accept); }
+.funnel-steps li:last-child span { color: var(--accept); font-weight: 600; }
+
+.funnel-steps b {
+  display: block;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-num);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+.funnel-steps span {
+  display: block;
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* TAXONOMY — 双分类体系（复杂 9 类 + 普通 16 类，并排左右双列） */
+
 .taxonomy {
   order: 3;
-  margin-top: clamp(52px, 8vw, 88px);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.taxonomy > h2 {
-  margin: 0;
-  padding: 0 0 10px;
-  border-bottom: 2px solid var(--ink);
-  font-size: 24px;
-  line-height: 1.2;
+
+.taxonomy > h2 { margin: 0; }
+
+.tax-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
 }
-.tax-intro {
-  margin: 14px 0 0;
-  color: var(--ink-soft);
-  font-size: 13px;
-  line-height: 1.6;
+
+.tax-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.tax-intro code {
-  font-size: 12px;
-}
+
 .tax-subhead {
-  margin: 30px 0 12px;
-  font-size: 16px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.tax-subhead::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
 .tax-table-head,
 .tax-card {
   display: grid;
   grid-template-columns:
-    minmax(210px, 1.25fr)
-    minmax(110px, 0.75fr)
-    minmax(220px, 1.4fr)
-    minmax(300px, 2fr);
-  gap: 0;
-  align-items: stretch;
+    32px
+    minmax(0, 1.2fr)
+    minmax(0, 1.5fr)
+    minmax(0, 1.6fr);
+  gap: 10px;
+  align-items: start;
 }
+
 .tax-table-head {
+  padding: 0 2px 4px;
   border-bottom: 1px solid var(--line-strong);
-  background: var(--surface-soft);
+  margin-bottom: 1px;
 }
+
 .tax-table-head span {
-  padding: 8px 12px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
+
 .tax-grid {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   margin: 0;
 }
-.tax-grid + .tax-subhead {
-  margin-top: 44px;
-}
+
 .tax-card {
-  grid-template-rows: none;
-  padding: 0;
-  border: 0;
+  padding: 4px 2px;
   border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
+  transition: background 120ms ease;
 }
-.tax-card > * {
-  min-width: 0;
-  padding: 14px 12px;
-}
+
+.tax-card:hover { background: var(--surface-soft); }
+
+.tax-card > * { min-width: 0; }
+
 .tax-head {
-  display: grid;
-  min-height: 0;
-  align-content: center;
-  align-items: baseline;
-  gap: 2px;
+  display: flex;
+  align-content: start;
+  padding-top: 0;
 }
+
 .tax-id {
+  display: inline-block;
+  width: fit-content;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
   color: var(--ink);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-.tax-slug {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.tax-name {
-  align-content: center;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.4;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
   font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: var(--lh-base);
 }
-.tax-key,
-.tax-example {
-  align-content: center;
-  margin: 0;
-  border-radius: 0;
-  background: transparent;
+
+.tax-name {
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding-top: 0;
+}
+
+.tax-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-content: start;
+  padding-top: 0;
+}
+
+.tax-chips span {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
   color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--fs-eyebrow);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  line-height: var(--lh-base);
 }
-.tax-key b,
-.tax-example b {
-  display: none;
+
+.tax-example {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-tight);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-top: 0;
 }
 
 /* PROMPT — 提示词面板、复制按钮 */
+
 .prompt-panel {
   order: 4;
-  margin-top: 26px;
+  margin: 0;
   overflow: hidden;
-  border: 1px dashed var(--ink);
-  border-radius: 0;
-  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
-.taxonomy + .prompt-panel {
-  margin-top: 42px;
-}
+
 .prompt-panel summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 58px;
-  padding: 14px 16px;
+  min-height: 44px;
+  padding: 10px 18px;
   cursor: pointer;
   list-style: none;
+  user-select: none;
 }
-.prompt-panel summary::-webkit-details-marker {
-  display: none;
-}
+
+.prompt-panel summary::-webkit-details-marker { display: none; }
+
+.prompt-panel summary:hover { background: var(--surface-soft); }
+
 .summary-title strong {
   display: block;
-  margin-bottom: 0;
-  font-size: 15px;
+  margin-bottom: 2px;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
+
 .summary-title code {
-  font-size: 12px;
-  font-weight: 600;
+  display: none; /* 兜底：隐藏 prompt section 标题里的英文标识符，由 build.py 真正负责产出干净文本 */
 }
+
+.summary-title code::before {
+  display: none;
+}
+
 .prompt-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
+
 .copy-button {
-  min-height: 32px;
-  border: 1px solid var(--red);
-  border-radius: 2px;
-  background: var(--red);
-  color: var(--bg);
-  padding: 6px 11px;
-  font-size: 12px;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  font-size: var(--fs-meta);
+  font-weight: 600;
   cursor: pointer;
+  transition: all 120ms ease;
 }
+
+.copy-button::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  position: relative;
+  background: linear-gradient(currentColor, currentColor) top/6px 1.5px no-repeat;
+}
+
 .copy-button:hover {
-  background: #741414;
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--surface);
+  transform: translateY(-1px);
 }
+
+.copy-button:active {
+  transform: translateY(0);
+}
+
 .copy-status {
-  min-width: 52px;
-  color: var(--muted);
-  font-size: 12px;
+  min-width: 56px;
+  color: var(--accept);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
 }
+
 .prompt-code {
   margin: 0;
   overflow: auto;
-  max-height: 520px;
-  border-top: 1px dashed var(--line-strong);
-  background: var(--surface-soft);
-  padding: 18px;
-  color: var(--ink);
-  font-size: 12px;
-  line-height: 1.75;
+  max-height: 480px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunken);
+  padding: 16px 20px;
+  color: var(--ink-soft);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-base);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* RESPONSIVE — 响应式（≤860px）与打印样式 */
-@media (max-width: 860px) {
-  main {
-    width: min(100% - 28px, var(--max));
-    padding-top: 28px;
-  }
-  h1 {
-    margin-bottom: 22px;
-    font-size: clamp(30px, 9vw, 42px);
-  }
-  .legend {
-    grid-template-columns: 1fr;
-  }
-  .legend-title {
-    padding: 10px 0 8px;
-  }
-  .badge {
-    grid-template-columns: 118px 1fr;
-    gap: 12px;
-    border-top: 1px dashed var(--line-strong);
-    border-left: 0;
-    padding: 10px 0;
-  }
-  .pipeline {
-    margin-top: 48px;
-  }
-  .flow-io,
-  .flow-main,
-  .flow-drops {
-    min-width: 1010px;
-  }
-  .step-layout {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-  .step-table-head,
-  .tax-table-head {
-    display: none;
-  }
-  .step-card {
-    display: grid;
-    grid-template-columns: 1fr;
-    padding: 16px 0;
-  }
-  .step-card > * {
-    padding: 4px 0;
-  }
-  .step-card-head {
-    margin-bottom: 5px;
-  }
-  .step-tags,
-  .step-rule {
-    display: grid;
-    grid-template-columns: 70px 1fr;
-    gap: 8px;
-  }
-  .step-tags::before,
-  .step-rule::before {
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .step-tags::before {
-    content: "方式";
-  }
-  .step-rule::before {
-    content: "动作";
-  }
-  .tax-card {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-    padding: 15px 0;
-  }
-  .tax-card > * {
-    padding: 2px 0;
-  }
-  .tax-head {
-    grid-template-columns: 34px 1fr;
-    align-items: baseline;
-  }
-  .tax-name {
-    font-size: 15px;
-  }
-  .tax-key b,
-  .tax-example b {
-    display: inline;
-    margin-right: 6px;
-  }
-  .funnel-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .funnel-steps li {
-    border: 1px solid var(--line);
-    border-radius: 2px;
-  }
-  .funnel-steps li::after {
-    display: none;
-  }
-  .prompt-panel summary {
-    display: grid;
-    gap: 10px;
-  }
-  .prompt-actions {
-    justify-content: start;
-  }
+/* RESPONSIVE — 中等屏 / 打印 */
+
+/* 中等屏：流程图节点收窄 */
+@media (max-width: 980px) {
 }
+
 @media print {
-  body {
-    background: var(--surface);
-  }
+  body { background: var(--surface); }
   main {
     width: 100%;
     padding: 0;
+    gap: 16px;
   }
-  .flow-chart {
-    overflow: visible;
-  }
-  .flow-io,
-  .flow-main,
-  .flow-drops {
-    min-width: 0;
+  .flow-chart,
+  .funnel-note,
+  .prompt-panel {
+    box-shadow: none;
+    border-color: var(--line-strong);
   }
   .copy-button,
   .copy-status {
     display: none;
+  }
+  .flow-node:not(:last-child)::after,
+  .flow-node:not(:last-child)::before {
+    border-color: var(--ink);
   }
 }
     </style>
@@ -857,44 +1048,53 @@ h1 {
 
   <div class="flow-chart" role="img" aria-label="复杂金融问句清洗标注流程图">
     <div class="flow-io">
-      <span><b>输入</b><code>aime/input.jsonl · iwencai/chat.jsonl</code></span>
-      <span><b>最终产物</b><code>cleaned_queries.jsonl（hard + normal）</code></span>
+      <div>
+        <span class="flow-io-label">输入</span>
+        <span class="flow-io-value">多源对话日志</span>
+        <span class="flow-io-format">session · chat（自动识别）</span>
+      </div>
+      <div><span class="flow-io-label">最终产物</span><span class="flow-io-value">已分类的样本集</span></div>
     </div>
     <ol class="flow-main">
       <li class="flow-node code">
         <span class="flow-index">preclean</span>
         <strong>输入清洗</strong>
-        <small>格式嗅探 · 坏行 · 去重</small>
+        <small>格式对齐 · 去重</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">segment</span>
         <strong>会话分段</strong>
-        <small>LLM · 主题切 2–4 段</small>
+        <small>LLM · 主题切段</small>
       </li>
       <li class="flow-node code">
         <span class="flow-index">rule_gate</span>
         <strong>候选筛选</strong>
-        <small>规则 · 噪声拒绝 + 工具门槛</small>
+        <small>规则 · 噪声拒绝</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">judge</span>
         <strong>语义判定</strong>
-        <small>LLM · value→complexity→classify</small>
+        <small>LLM · 三步漏斗</small>
       </li>
       <li class="flow-node llm">
         <span class="flow-index">verify</span>
         <strong>独立复判</strong>
-        <small>LLM · hard 5 轮 / normal 2 轮</small>
+        <small>LLM · 级联从严</small>
+      </li>
+      <li class="flow-node code">
+        <span class="flow-index">simple_gate</span>
+        <strong>简单问句兜底</strong>
+        <small>规则 · 确定性模式拒绝</small>
       </li>
       <li class="flow-node code">
         <span class="flow-index">answer_gate</span>
         <strong>回答质量门</strong>
-        <small>规则 · 完成态 / 非拒绝 / ≥50 字</small>
+        <small>规则 · 完整性 / 拒绝 / 截断</small>
       </li>
       <li class="flow-node both">
         <span class="flow-index">post</span>
         <strong>去重与翻译</strong>
-        <small>规则 + LLM · 模板合并 + 译简中</small>
+        <small>规则 + LLM</small>
       </li>
       <li class="flow-node accepted">
         <span class="flow-index">✓</span>
@@ -903,287 +1103,295 @@ h1 {
       </li>
     </ol>
     <div class="flow-drops" aria-label="流程分支结果">
-      <span class="flow-branch branch-judge"><b>value_rejected</b> 无保留价值<br><b>failed</b> LLM 失败丢弃</span>
-      <span class="flow-branch branch-verify"><b>rejected</b> 复判与难度相悖</span>
-      <span class="flow-branch branch-answer"><b>rejected</b> 回答不完整 / 拒绝话术</span>
-      <span class="flow-branch branch-post"><b>rejected</b> 重复样本合并</span>
+      <div class="flow-branch branch-judge">
+        <span class="branch-label"><b>无金融价值</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-verify">
+        <span class="branch-label"><b>复判相悖</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-answer">
+        <span class="branch-label"><b>回答不合格</b>丢弃</span>
+      </div>
+      <div class="flow-branch branch-post">
+        <span class="branch-label"><b>重复样本</b>合并</span>
+      </div>
     </div>
   </div>
 
-  <div class="funnel-note" aria-label="真实运行数据示例">
-    <h3>一次真实运行的数据漏斗（aime/0806，500 会话）</h3>
+  <div class="funnel-note" aria-label="数据规模漏斗估算">
+    <h3>
+      数据规模漏斗（按 10w 行估算）
+      <span class="funnel-format">仅 session 格式有「分段」步骤；chat 格式跳过，候选基数直接 = 记录数</span>
+    </h3>
     <ol class="funnel-steps">
-      <li><b>500</b><span>输入会话</span></li>
-      <li><b>674</b><span>分段</span></li>
-      <li><b>568</b><span>候选</span></li>
-      <li><b>457</b><span>有价值</span></li>
-      <li><b>274</b><span>复判通过</span></li>
-      <li><b>260</b><span>质量门通过</span></li>
-      <li><b>239</b><span>去重后输出</span></li>
+      <li><b>100k</b><span>输入行</span></li>
+      <li><b>135k</b><span>session 分段</span></li>
+      <li><b>114k</b><span>候选</span></li>
+      <li><b>91k</b><span>有金融价值</span></li>
+      <li><b>55k</b><span>复判通过</span></li>
+      <li><b>52k</b><span>质量门通过</span></li>
+      <li><b>48k</b><span>去重后输出</span></li>
     </ol>
-    <p class="funnel-sub">其中 complex 257 行（hard）+ normal 200 行（judge 产出）→ verify 通过 274 → answer_gate 拒绝 14 → dedup 合并 21 → 最终 239 行；翻译 195 条（中文占比 &lt; 30% 才译）。</p>
   </div>
 
-  <div class="step-layout">
-    <div class="step-grid">
-      <div class="step-table-head" aria-hidden="true">
-        <span>步骤</span>
-        <span>方式</span>
-        <span>判定 / 动作</span>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">preclean</span>
-          <span class="step-name">输入清洗</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">格式自动嗅探（session / chat）；坏行落盘；trace 去重；空会话过滤；适配统一 Session</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">segment</span>
-          <span class="step-name">会话分段</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">按主题切 <span class="threshold">2–4</span> 段；chat / 单句会话回退整段 <span class="threshold">whole_session</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">rule_gate</span>
-          <span class="step-name">候选筛选</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">噪声拒绝（模板残留 / 低价值 / 超长）+ 三信号 AND：工具调用 <span class="threshold">≥7</span>、步骤 <span class="threshold">≥1</span>、工具种 <span class="threshold">≥2</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">judge</span>
-          <span class="step-name">语义判定</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">漏斗三步：<span class="threshold">value_gate</span> 有无价值 → <span class="threshold">complexity_gate</span> 是否复杂 → <span class="threshold">classify</span> 归 9 类复杂 / 16 类普通；任一失败丢弃（fail-closed）</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">verify</span>
-          <span class="step-name">独立复判</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">带前文指代复核；hard <span class="threshold">5 轮</span> / normal <span class="threshold">2 轮</span> 级联从严，任一轮与难度相悖即弃；LLM 失败丢弃（fail-closed）</div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">answer_gate</span>
-          <span class="step-name">回答质量门</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span></div>
-        <div class="step-rule">结构信号 <span class="threshold">last_event_type=runFinished</span> + 内容信号：拒绝话术 / 截断标点 / 回答过短 <span class="threshold">&lt;50 字</span></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-card-head">
-          <span class="step-num">post</span>
-          <span class="step-name">去重与翻译</span>
-        </div>
-        <div class="step-tags"><span class="stage-tag code">规则 · code</span><span class="stage-tag llm">语义 · LLM</span></div>
-        <div class="step-rule">同模板合并（非槽骨架一致）+ token-Jaccard <span class="threshold">≥ 0.80</span> 去重；中文占比 <span class="threshold">&lt;30%</span> 才 LLM 译简中，原文保留</div>
-      </div>
+  <div class="step-grid">
+    <div class="step-table-head" aria-hidden="true">
+      <span>步骤</span>
+      <span>方式</span>
+      <span>做什么</span>
     </div>
 
-    <aside class="artifact-box" aria-label="各步骤产物">
-      <h3>产物</h3>
-      <ol>
-        <li><span>preclean</span><code>logs/bad_lines.jsonl</code></li>
-        <li><span>segment</span><code>logs/segments.jsonl</code></li>
-        <li><span>rule_gate</span><code>logs/candidates.jsonl</code></li>
-        <li><span>judge</span><code>logs/judged.jsonl · llm_cache.jsonl</code></li>
-        <li><span>verify</span><code>logs/verified.jsonl</code></li>
-        <li><span>answer_gate</span><code>logs/answer_gate_rejected.jsonl</code></li>
-        <li><span>post</span><code>logs/deduped.jsonl</code></li>
-        <li><span>输出</span><code>cleaned_queries.jsonl · complex_queries.jsonl · normal_queries.jsonl · summary.json</code></li>
-      </ol>
-    </aside>
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">preclean</span>
+        <span class="step-name">输入清洗</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">统一不同来源的对话格式；过滤坏行、空会话；按 trace 去重。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">segment</span>
+        <span class="step-name">会话分段</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">让 LLM 按主题把长会话切成几个独立片段，单句会话保持整段。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">rule_gate</span>
+        <span class="step-name">候选筛选</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">扔掉模板残留、超长等明显噪声；要求片段必须真正动用了工具链。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">judge</span>
+        <span class="step-name">语义判定</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">三步漏斗：先看值不值得、再看够不够复杂、最后归到对应类别；任一步骤不通过即丢弃。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">verify</span>
+        <span class="step-name">独立复判</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">换一个独立视角再判一次；带前文指代复核；任何一轮与首次判定相悖即丢弃。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">simple_gate</span>
+        <span class="step-name">简单问句兜底</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">只查 hard 行：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">answer_gate</span>
+        <span class="step-name">回答质量门</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">剔除未跑完的轮次（last_event_type ≠ runFinished）、空回答、拒绝话术、长度不足 50 字、以逗号冒号破折号结尾的截断回答。</div>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">post</span>
+        <span class="step-name">去重与翻译</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span><span class="stage-tag llm">LLM</span></div>
+      <div class="step-rule">合并同一模板下的近似样本；非中文回答翻译为简体中文，原文保留。</div>
+    </div>
   </div>
 </section>
 
 <section class="taxonomy" aria-label="双分类体系">
   <h2>双分类体系</h2>
-  <p class="tax-intro">复杂问句（hard）归 <b>9 类</b>，输出 <code>complex-topic/{id}-{slug}</code>；非复杂但有价值的问句（normal）归 <b>16 类</b>，输出 <code>{id}-{slug}</code>。两套 id 各自从 01 起编，靠 difficulty + 前缀区分。分类数据源：<code>templates/categories.md</code>（清单）+ <code>complex_few_shot.md / normal_few_shot.md</code>（定义与示例），改分类只动模板不动代码。</p>
 
-  <h3 class="tax-subhead">复杂 9 类 · difficulty=hard</h3>
-  <div class="tax-table-head" aria-hidden="true">
-    <span>编号 / slug</span>
-    <span>分类</span>
-    <span>特征</span>
-    <span>代表问句</span>
-  </div>
-  <div class="tax-grid">
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">complex-topic/01-data-metrics-calculation</span></div>
-            <div class="tax-name">复杂取数计算</div>
-            <div class="tax-key"><b>特征</b>需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述，或多步骤数据处理。核心是「算」——不是简单查一个数，而是通过计算框架得出结果。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。</div>
-            <div class="tax-example"><b>代表</b>「回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满…」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">complex-topic/02-forecasting-and-projection</span></div>
-            <div class="tax-name">预测类</div>
-            <div class="tax-key"><b>特征</b>以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果。关键信号词：「预测」「目标价」「能涨到多少」「什么时候」「概率」「极端场景」「剧本」。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。</div>
-            <div class="tax-example"><b>代表</b>「中际旭创未来1年股价能涨到多少？」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">complex-topic/03-analysis-research</span></div>
-            <div class="tax-name">分析研究</div>
-            <div class="tax-key"><b>特征</b>以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判。关键信号词：「分析」「研究」「为什么」「影响」「框架」「产业」「政策」。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。</div>
-            <div class="tax-example"><b>代表</b>「美伊何时能达成停火协议，结合历史战争事件分析市场走势。」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">complex-topic/04-opportunity-discovery</span></div>
-            <div class="tax-name">机会挖掘</div>
-            <div class="tax-key"><b>特征</b>以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：「找出」「挖掘」「龙头」「翻倍」「涨停」「机会」「热点」「哪只」。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。</div>
-            <div class="tax-example"><b>代表</b>「从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">complex-topic/05-asset-allocation</span></div>
-            <div class="tax-name">资产配置</div>
-            <div class="tax-key"><b>特征</b>以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：「配置」「组合」「仓位」「分配」「多少比例」「分散」「资产」「规划」。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。</div>
-            <div class="tax-example"><b>代表</b>「我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">complex-topic/06-investment-decision</span></div>
-            <div class="tax-name">账户诊断优化类</div>
-            <div class="tax-key"><b>特征</b>以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化。关键信号词：「持有」「持仓」「账户」「补仓」「减仓」「止损」「优化」「怎么处理」「帮我看看」。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。</div>
-            <div class="tax-example"><b>代表</b>「搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">complex-topic/07-strategy-evaluation</span></div>
-            <div class="tax-name">策略触发任务类</div>
-            <div class="tax-key"><b>特征</b>以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行。关键信号词：「如果……就」「当……时」「触发」「提醒」「alert」「条件」「规则」「异动」「监控」。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。</div>
-            <div class="tax-example"><b>代表</b>「这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">complex-topic/08-goal-execution</span></div>
-            <div class="tax-name">目标跟踪执行</div>
-            <div class="tax-key"><b>特征</b>以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认。关键信号词：「长期」「年化」「跟踪」「持续」「动态」「季度」「定期」「目标收益」。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。</div>
-            <div class="tax-example"><b>代表</b>「—」</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">complex-topic/09-action-output</span></div>
-            <div class="tax-name">动作类</div>
-            <div class="tax-key"><b>特征</b>以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等。关键信号词：「PPT」「Excel」「邮件」「dashboard」「报告」「导出」「生成」「建一个」「发」「写一个」。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。</div>
-            <div class="tax-example"><b>代表</b>「—」</div>
-          </div>
-  </div>
+  <div class="tax-columns">
+    <div class="tax-col">
+      <h3 class="tax-subhead">复杂 9 类 · hard</h3>
+      <div class="tax-table-head" aria-hidden="true">
+        <span>编号</span>
+        <span>分类</span>
+        <span>关键词</span>
+        <span>代表问句</span>
+      </div>
+      <div class="tax-grid">
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">01</span></div>
+          <div class="tax-name">复杂取数计算</div>
+          <div class="tax-chips"><span>多指标组合</span><span>回测策略</span><span>统计规律</span></div>
+          <div class="tax-example">回测基于 5 周均线的短线择时策略……</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">02</span></div>
+          <div class="tax-name">预测类</div>
+          <div class="tax-chips"><span>预测</span><span>目标价</span><span>概率</span><span>场景推演</span></div>
+          <div class="tax-example">中际旭创未来 1 年股价能涨到多少？</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">03</span></div>
+          <div class="tax-name">分析研究</div>
+          <div class="tax-chips"><span>多框架</span><span>产业链</span><span>政策传导</span></div>
+          <div class="tax-example">美伊何时停火，结合历史战争事件分析市场走势。</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">04</span></div>
+          <div class="tax-name">机会挖掘</div>
+          <div class="tax-chips"><span>事件驱动</span><span>板块轮动</span><span>龙头识别</span></div>
+          <div class="tax-example">从热点中找出未来 1–3 月可能翻倍的标的。</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">05</span></div>
+          <div class="tax-name">资产配置</div>
+          <div class="tax-chips"><span>组合构建</span><span>仓位比例</span><span>跨资产</span></div>
+          <div class="tax-example">200W 美金按 MVP 现代投资理论构建策略。</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">06</span></div>
+          <div class="tax-name">账户诊断优化</div>
+          <div class="tax-chips"><span>持仓诊断</span><span>买卖点</span><span>风控</span></div>
+          <div class="tax-example">龙虎榜砸盘王正在抛售哪些强势股？</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">07</span></div>
+          <div class="tax-name">策略触发任务</div>
+          <div class="tax-chips"><span>条件触发</span><span>异动监控</span><span>规则引擎</span></div>
+          <div class="tax-example">基本面有变动时提醒，并提示是否替换持仓。</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">08</span></div>
+          <div class="tax-name">目标跟踪执行</div>
+          <div class="tax-chips"><span>长周期目标</span><span>动态调仓</span><span>季度复盘</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">09</span></div>
+          <div class="tax-name">动作类</div>
+          <div class="tax-chips"><span>生成报告</span><span>导出文件</span><span>建仪表盘</span></div>
+          <div class="tax-example">—</div>
+        </div>
+      </div>
+    </div>
 
-  <h3 class="tax-subhead">普通 16 类 · difficulty=normal</h3>
-  <div class="tax-table-head" aria-hidden="true">
-    <span>编号 / slug</span>
-    <span>分类</span>
-    <span>定义</span>
-    <span>输出</span>
-  </div>
-  <div class="tax-grid">
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">01</span><span class="tax-slug">01-event-and-concept-stock-selection</span></div>
-            <div class="tax-name">事件与概念选股</div>
-            <div class="tax-key"><b>定义</b>事件、政策、概念、主题或产业链驱动的选股、标的映射、受益排序和梯队划分任务。核心是从外部事件/主题出发，判断哪些股票或产业链环节受益。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">02</span><span class="tax-slug">02-backtesting-data-extraction-and-calculation</span></div>
-            <div class="tax-name">回测取数计算</div>
-            <div class="tax-key"><b>定义</b>历史数据提取、指标计算、样本统计、概率估算或策略/事件表现回测任务。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">03</span><span class="tax-slug">03-stock-diagnosis-and-data-lookup</span></div>
-            <div class="tax-name">诊股查数</div>
-            <div class="tax-key"><b>定义</b>个股、板块、市场、宏观金融数据的查询、提取、对比分析或轻量诊断任务。核心是查明数据、事实、指标、行情或局部诊断结论。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">04</span><span class="tax-slug">04-analysis-evaluation-and-self-judgment</span></div>
-            <div class="tax-name">分析评价与自我判断</div>
-            <div class="tax-key"><b>定义</b>围绕股票、基金、ETF、指数、板块、宏观资产或投资观点，对某个聚焦问题进行分析评价、原因判断、价值判断、方法匹配或投资逻辑评估的任务。核心通常是回答一个明确的分析问题，不要求建立股票短期与长期、多视角的完整综合分析框架。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">05</span><span class="tax-slug">05-kyc-recommendation-suggestions</span></div>
-            <div class="tax-name">KYC推荐建议</div>
-            <div class="tax-key"><b>定义</b>需要结合用户目标、风险、资金、持仓、投资期限或真实处境的投资推荐、配置建议和交易决策支持。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">06</span><span class="tax-slug">06-compound-intent</span></div>
-            <div class="tax-name">复合意图</div>
-            <div class="tax-key"><b>定义</b>一句 query 中包含多个强子任务、跨多类信息源或需要复杂投研闭环的复合意图任务。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">07</span><span class="tax-slug">07-interactive-clarification</span></div>
-            <div class="tax-name">交互澄清</div>
-            <div class="tax-key"><b>定义</b>金融投资对话中的交互澄清、多轮承接、规则/前提纠错、实体识别和模糊口径定义任务。用户问题往往不能被直接可靠回答，需要先识别缺失变量、错误前提、真实标的或应采用的金融口径，再给出分层方案或后续引导。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">08</span><span class="tax-slug">08-information-and-knowledge-qa</span></div>
-            <div class="tax-name">资讯知识问答</div>
-            <div class="tax-key"><b>定义</b>金融资讯、政策、监管动态、产业事件、公司进展、市场异动、传闻、调研纪要和金融知识的直接解释、查询、比较或判断任务。答案重点是事实时效、证据质量、信息整合、影响链条和可信表达。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">09</span><span class="tax-slug">09-financial-performance-interpretation</span></div>
-            <div class="tax-name">财报业绩解读</div>
-            <div class="tax-key"><b>定义</b>财报、业绩公告、经营指标、会计口径或财务影响的解释、归因和持续性判断。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">10</span><span class="tax-slug">10-financial-common-sense-and-semantic-understanding</span></div>
-            <div class="tax-name">金融常识与语义理解</div>
-            <div class="tax-key"><b>定义</b>金融常识、金融语义、指标口径、交易规则、实体识别、错别字/黑话纠错和用户真实意图补全类问题。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">11</span><span class="tax-slug">11-instruction-following-ability</span></div>
-            <div class="tax-name">指令跟随能力</div>
-            <div class="tax-key"><b>定义</b>用户给出明确任务、问题类型、对象范围、排除条件、输出焦点或格式约束，答案成败主要取决于是否严格遵守。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">12</span><span class="tax-slug">12-financial-logical-reasoning</span></div>
-            <div class="tax-name">金融逻辑推理</div>
-            <div class="tax-key"><b>定义</b>投资判断、走势预测、个股选择、强势股筛选、板块内比较和风险情景推演类金融推理任务。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">13</span><span class="tax-slug">13-time-awareness-ability</span></div>
-            <div class="tax-name">时间感知能力</div>
-            <div class="tax-key"><b>定义</b>答案正确性高度依赖相对日期、周几、交易日历、市场休市、披露期、历史区间、未来日期、最新数据口径或 过期数据 纠错的任务。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">14</span><span class="tax-slug">14-complex-stock-selection</span></div>
-            <div class="tax-name">复杂选股</div>
-            <div class="tax-key"><b>定义</b>多条件、多阶段、跨口径或带排序/字段/排除条件的股票筛选任务。核心是完整理解筛选条件、金融口径和先后依赖，产出符合要求的候选股票池或排序结果。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">15</span><span class="tax-slug">15-stock-comprehensive-analysis-and-selection</span></div>
-            <div class="tax-name">股票综合分析与选股决策</div>
-            <div class="tax-key"><b>定义</b>围绕个股、多标的组合或市场进行多维综合分析，并形成投资判断、趋势判断、强弱判断、买卖/持有建议、风险边界或操作策略的任务。核心是整合基本面、技术面、资金面、消息面和风险，给出可解释的决策结论。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
-          <div class="tax-card">
-            <div class="tax-head"><span class="tax-id">16</span><span class="tax-slug">16-macro-information-qa</span></div>
-            <div class="tax-name">宏观信息问答</div>
-            <div class="tax-key"><b>定义</b>查询、整理或比较人口、卫生、教育、贫困、就业及其他宏观或社会经济统计指标的任务。核心是按指定国家、地区、城市、年份、指标定义和统计口径给出权威、可追溯的数值，并妥善处理缺失、估算、修订和跨对象可比性。</div>
-            <div class="tax-example"><b>输出</b>difficulty=normal · 与复杂类同文件输出</div>
-          </div>
+    <div class="tax-col">
+      <h3 class="tax-subhead">普通 16 类 · normal</h3>
+      <div class="tax-table-head" aria-hidden="true">
+        <span>编号</span>
+        <span>分类</span>
+        <span>关键词</span>
+        <span>代表问句</span>
+      </div>
+      <div class="tax-grid">
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">01</span></div>
+          <div class="tax-name">事件与概念选股</div>
+          <div class="tax-chips"><span>事件驱动</span><span>受益排序</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">02</span></div>
+          <div class="tax-name">回测取数计算</div>
+          <div class="tax-chips"><span>历史数据</span><span>概率估算</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">03</span></div>
+          <div class="tax-name">诊股查数</div>
+          <div class="tax-chips"><span>个股查询</span><span>行情数据</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">04</span></div>
+          <div class="tax-name">分析评价与自我判断</div>
+          <div class="tax-chips"><span>聚焦问题</span><span>价值判断</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">05</span></div>
+          <div class="tax-name">KYC 推荐建议</div>
+          <div class="tax-chips"><span>用户目标</span><span>配置建议</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">06</span></div>
+          <div class="tax-name">复合意图</div>
+          <div class="tax-chips"><span>多子任务</span><span>跨信息源</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">07</span></div>
+          <div class="tax-name">交互澄清</div>
+          <div class="tax-chips"><span>多轮承接</span><span>实体识别</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">08</span></div>
+          <div class="tax-name">资讯知识问答</div>
+          <div class="tax-chips"><span>时效事实</span><span>影响链条</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">09</span></div>
+          <div class="tax-name">财报业绩解读</div>
+          <div class="tax-chips"><span>财报</span><span>归因</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">10</span></div>
+          <div class="tax-name">金融常识与语义理解</div>
+          <div class="tax-chips"><span>常识</span><span>口径</span><span>纠错</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">11</span></div>
+          <div class="tax-name">指令跟随能力</div>
+          <div class="tax-chips"><span>明确任务</span><span>格式约束</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">12</span></div>
+          <div class="tax-name">金融逻辑推理</div>
+          <div class="tax-chips"><span>投资判断</span><span>风险推演</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">13</span></div>
+          <div class="tax-name">时间感知能力</div>
+          <div class="tax-chips"><span>相对日期</span><span>交易日历</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">14</span></div>
+          <div class="tax-name">复杂选股</div>
+          <div class="tax-chips"><span>多条件</span><span>跨口径</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">15</span></div>
+          <div class="tax-name">股票综合分析与选股决策</div>
+          <div class="tax-chips"><span>多维分析</span><span>风险边界</span></div>
+          <div class="tax-example">—</div>
+        </div>
+        <div class="tax-card">
+          <div class="tax-head"><span class="tax-id">16</span></div>
+          <div class="tax-name">宏观信息问答</div>
+          <div class="tax-chips"><span>宏观指标</span><span>跨地区</span></div>
+          <div class="tax-example">—</div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1191,7 +1399,7 @@ h1 {
         <details>
           <summary>
             <span class="summary-title">
-              <strong>分类提示词 <code>classify_complex / classify_normal</code> · 动态组装</strong>
+              <strong>分类提示词 · 动态组装</strong>
             </span>
             <span class="prompt-actions">
               <span class="copy-status" aria-live="polite"></span>
@@ -1212,7 +1420,16 @@ h1 {
           + templates/complex_few_shot.md（每类特征 + 示例，最多 1000 条）
           + templates/normal_few_shot.md（每类定义/适用场景/排除场景/边界规则/易混类别）
 
-改分类体系 = 改 templates/ 下的 md 文件，代码与提示词无需改动。</pre>
+改分类体系 = 改 templates/ 下的 md 文件，代码与提示词无需改动。
+
+实际组装后长这样（节选，hard 01 一段）：
+────────────────────────────────────
+01 复杂取数计算（hard/complex_queries/01_复杂取数计算）
+特征：需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述或多步骤数据处理，核心是「算」——通过计算框架得出可核验、可复算的数值、统计表、回测表现或条件筛选名单。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。仅按显式条件过滤/匹配/排序并输出名单、不含计算/统计/回测或多步处理 → 不复杂。
+示例：
+- 回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满90日，买入规则为向上突破5周均线次日开盘价买入……
+- 帮我统计，沪深主板所有股票第一天涨停，第二天收小阳十字星，并且成交量比第一天成交量要放大不低于二倍，第三天涨跌情况。
+────────────────────────────────────</pre>
         </details>
       </section>
 
@@ -1220,7 +1437,7 @@ h1 {
         <details>
           <summary>
             <span class="summary-title">
-              <strong>会话分段提示词 <code>segment</code> · LLM</strong>
+              <strong>会话分段提示词</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
@@ -1251,7 +1468,7 @@ JSON 格式：
         <details>
           <summary>
             <span class="summary-title">
-              <strong>价值门提示词 <code>value_gate</code> · LLM</strong>
+              <strong>价值门提示词</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
@@ -1280,7 +1497,7 @@ JSON 格式：
         <details>
           <summary>
             <span class="summary-title">
-              <strong>复杂度门提示词 <code>complexity_gate</code> · LLM</strong>
+              <strong>复杂度门提示词</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
@@ -1308,30 +1525,830 @@ JSON 格式：
         </details>
       </section>
 
-      <section class="prompt-panel" aria-label="独立复判提示词">
+      <section class="prompt-panel" aria-label="复杂判定提示词">
         <details>
           <summary>
             <span class="summary-title">
-              <strong>独立复判提示词 <code>verify_complex</code> · LLM（含已确认负例）</strong>
+              <strong>复杂判定提示词</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>
               <span class="copy-status" aria-live="polite"></span>
             </span>
           </summary>
-          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定**前文问题列表**（可能为空，仅用于消解指代）和**当前问句**，判断当前问句是否是一个&quot;复杂金融问句&quot;。
+          <pre class="prompt-code">你是一个金融 AI 评测问句标注专家。给定一段会话中、目标问句之前的所有用户问句（同一主题的上下文），以及目标问句本身，判断该目标问句是否是一个“复杂金融问句”；若是，则归入唯一类别。
+
+复杂金融问句定义：
+- 有明确金融资产、行业、主题、市场、账户、组合、策略或投资目标。
+- 包含时间范围、指标阈值、比较对象、策略条件、收益目标、仓位要求、风险控制等。
+- 需要多步骤分析、计算、筛选、回测、组合构建、交易计划、框架化判断、归因解释、预测、比较、决策或执行。
+- 不是单纯查一个行情、日期、公司字段、代码、名称或事实。
+- 不是闲聊、纠错、无实质任务、非金融问题，或明显低价值模板。
+- 简单诊股查数和取数计算不应判为复杂问句（指仅通过联网查数即可回答的问句）。
+- 字数很短且缺少额外条件或分析要求的“能不能买”“会涨吗”“目标价多少”通常不应判为复杂问句。
+
+不是复杂问句（以下类型无论出现在多复杂的会话中、上下文多丰富，一律判为不复杂）：
+- 纯陈述 / 状态播报 / 数据转述 / 计划告知：只汇报行情、持仓、价格、涨跌、已做的交易，或告知接下来的安排，不含任务（“价格现在是 18.73”“今天跌了 1.4%”“我把 X 卖了”“我打算明天买 X / 卖 Y”“财报出了，跌到 79 现在回到 82”）——即使提到具体标的，也只是告知信息。
+- 抱怨 / 质疑 / 复盘纠偏：只表达对前文回答的不满或纠正，不提出新任务（“你怎么没提醒我”“你老是变卦”“你的计算我不喜欢”）。
+- 承接性短指令 / 确认：单独不构成任务（“再来点”“继续”“看看 X”“可以吗”）。
+- 短预测 / 短决策 / 短评价：只含一个标的 + 泛化动作词，没有时间窗、指标、比较维度或分析要求（“X 会涨吗”“X 能到 ATH 吗”“X 该不该买”“X 怎么样”）→ 不复杂。
+- 纯动作 / 交付指令：只要求发送、跟踪、提醒、导出，无分析要求（“Deliver morning scan”“加 50 美元”）。
+
+9 个主类别（id 与中文名固定）：
+01 复杂取数计算：复杂取数计算：需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述或多步骤数据处理，核心是「算」——通过计算框架得出可核验、可复算的数值、统计表、回测表现或条件筛选名单。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。仅按显式条件过滤/匹配/排序并输出名单、不含计算/统计/回测或多步处理 → 不复杂。
+02 预测类：预测：以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果，核心是「未来会怎样」。关键信号词：预测、目标价、能涨到多少、什么时候、概率、极端场景、剧本。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。
+03 分析研究：分析研究：以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判，通过证据整合、行业公司理解和多维框架形成收敛结论。关键信号词：分析、研究、为什么、影响、框架、产业、政策。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。对既有策略、规则或回测的审计与评价（过拟合、收益归因、稳健性、实盘可用性、改进建议）也归 03。研究里出现投资判断不自动归 06。
+04 机会挖掘：机会挖掘：以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：找出、挖掘、龙头、翻倍、涨停、机会、热点、哪只。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。必须有事件/催化/预期差/时效驱动；无事件/催化/时效的纯条件选股归 01；仅按显式条件过滤且无分析要求 → 不复杂。
+05 资产配置：资产配置：以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：配置、组合、仓位、分配、多少比例、分散、资产、规划。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。只构建通用比例框架归 05；落到具体标的取舍归 06。
+06 账户诊断优化类：账户诊断优化：以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化，核心是「这笔/这些具体该怎么做」。关键信号词：持有、持仓、账户、补仓、减仓、止损、优化、怎么处理、帮我看看。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。仅在给定条件下列候选清单、筛选/比较股票、找机会，或比较策略优劣本身，不归 06。
+07 策略触发任务类：策略触发与设置：以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行，核心是「设置一个提醒/触发/监控」。关键信号词：如果……就、当……时、触发、提醒、alert、条件、规则、异动、监控。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。只设提醒/触发/监控归 07；把结果做成报告/邮件等交付物归 09；围绕长期目标的多轮管理归 08。
+08 目标跟踪执行：目标跟踪执行：以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认，核心是「长期帮我盯着并迭代」。关键信号词：长期、年化、跟踪、持续、动态、季度、定期、目标收益。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。
+09 动作类：动作输出：以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等，核心是「把结果做成某种形式/发出去」。关键信号词：PPT、Excel、邮件、dashboard、报告、导出、生成、建一个、发、写一个。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。单一提醒/触发器归 07；围绕长期目标的多轮管理归 08。
+
+类别判定优先级（从高到低依次判断，只取最匹配的一个）：
+有回测、量化筛选、多指标条件计算、统计规律挖掘、技术指标条件筛选 → 优先 01。
+主要问未来走势、目标价、概率、剧本、业绩或事件后表现 → 优先 02。
+主要解释原因、政策、产业、基本面、风险、宏观或资金面，或审计/评价既有策略、规则、回测方案（过拟合、收益归因、稳健性、实盘可用性） → 归 03。
+主要找机会、龙头、受益标的、热点、翻倍股 → 优先 04。
+主要做跨资产/跨产品的组合比例或分散化配置，且不要求在具体候选中作取舍 → 优先 05。
+围绕已有持仓或明确候选做买/卖/持/加/减的具体取舍决策 → 优先 06；仅按条件筛选、列候选清单、找机会或比较策略本身 → 不归 06（分别归 01/04/03）。
+设定触发条件、提醒、监控或规则（如果……就、当……时、触发、alert、异动、盯盘） → 优先 07。
+有长期目标、持续跟踪、动态调整、阶段复盘或通知确认等多轮闭环 → 优先 08。
+主要交付报告、PPT、Excel、邮件、dashboard、文件、导出或生成等交付物 → 优先 09。
+
+每类典型示例（判定时参照；措辞与示例不完全匹配不影响判定，按意图归类）：
+01 复杂取数计算：
+- 「回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满90日，买入规则为向上突破5周均线次日开盘价买入，卖出规则为向下突破或跌幅≥15%止损，交易成本含佣金0.03%+印花税0.05%+滑点0.1%，基准为沪深300全收益指数。」
+- 「我目前状态为空仓，可用资金114.3万，交易风格偏向短线高弹性博弈。在今天市场4400家普跌环境下已全仓清仓，核心目标是通过一到两笔交易获取约5%的确定性利润。请帮我筛选明天值得关注的股票池，条件：仅限创业板或科创板（20%弹性），流通市值30亿到150亿，今日跌幅&lt;2%或收红或有长下影线，股价站稳5日和10日均线，近3日上涨放量且今日缩量。输出前5只并附核心热门概念和今日换手率。」
+- 「请帮我筛选全市场A股ETF，排除货币ETF、债券ETF、黄金/贵金属/商品ETF、QDII/跨境ETF、杠杆/反向ETF。输出字段：代码、名称、近5日/20日/60日涨跌幅、今日涨跌幅。同时输出沪深300对应数据。按近5日涨跌幅从高到低排序，取前50名。」
+- 「港口航运，物流，运输板块内，目前票价&gt;4月21日票价且期间某一日涨幅≥5%，5月8日票价&gt;4月21日票价，5月10日-5月13日之间其中某一日票价处于4月22日到5月8日票价之间，满足条件的60及00开头非st股票，按4月21日到5月13日区间涨幅排序，展示完整名单。」
+- 「帮我统计，沪深主板所有股票第一天涨停，第二天收小阳十字星，并且成交量比第一天成交量要放大不低于二倍，第三天涨跌情况。」
+- 「股票每次发出减持公告后，第二天股价的表现。从历史统计看下。」
+- 「周K线图中：经长时间粘合后，5均线、20均线、60均线呈多头排列且向上发散的股票有哪些。」
+- 「2026年6月1日行业指数涨停家数前三的板块中，非ST且非300和301开头，主力资金净流入大于0，换手率大于1.2%，量比大于1.2%，5日资金净流入大于0的股票。」
+- 「选出在AI行业未来10年关键卡脖子和关键环节有高毛利的龙头企业且目前市值200亿以内的股票且在产业链顶端，独占行业50%以上核心利润的企业。」
+- 「validate the BAR columns and suggest at what value and BAR the trend changes from entry.」
+02 预测类：
+- 「中际旭创未来1年股价能涨到多少？」
+- 「159851走势分析，未来走势预测，什么时候突破前高。」
+- 「洛阳钼业现在处于磨底期，大概多久，磨底期结束以后，进入上升区间离主升浪需要多久。」
+- 「针对日本两家六氟化钨企业断供原因，全球市场需求缺口，分析中船特气估值大概未来几年到什么估值。」
+- 「根据胜宏科技、长电科技的基本面，技术面以及大盘情况，外围情况等全方位信息，预测这两个票一个月内走势。」
+- 「华电能源最近的处境和5.14以来的连日阴跌有什么异同，它会复刻后面连板的行情吗，几率多大，有什么条件。」
+- 「把山东墨龙接下来1-3天的&quot;强弱分界线（关键价位）+三种明日剧本（强/弱/震荡）&quot;也列出来。」
+- 「结合白云山的历史价格走势，预测一下未来白云山的价格走势。需要考虑所属板块影响、机构资金的情绪、公司基本经营情况、公司产品。」
+- 「根据江顺科技今天股价波动，资金流入流出，近期新闻等情况，分析并推演明天的股价波动趋势，并判断概率分布。」
+- 「综合筹码峰、量价关系、K线形态、技术面，通过日线周线月线分析，拓斯达、三峡新材、雷曼光电，短期和中期内上涨概率百分比。」
+- 「现在我们来极端预测条件，如果由于技术发展，锂电池被其他如钠电、锂电池回收等技术取代，锂矿需求直接没有了，对盐湖股份的影响有多大？」
+- 「帮我分析下这只海格通信股票可能出现的5种暴跌场景，每种都要说清楚触发条件、历史类似案例、发生概率多大。」
+- 「光线传媒自从年初大涨后，已经连续跌，目前应该很低了吧，帮我结合股票分析以及接下来他暑期宣发的影片，做一个后期走势分析。」
+- 「投资周期半年，国际复材、国瓷材料、中国巨石，哪个实现收益率百分之五十的概率更大。」
+- 「合锻智能股价今天创了新高，未来股价最可能涨到什么位置？请结合类似行情股票合理推测，并给出所有可能性和概率，触发条件。」
+03 分析研究：
+- 「美伊何时能达成停火协议，结合历史战争事件分析市场走势。」
+- 「我是一名专门研究龙头的操盘手，依照游资&quot;92科比&quot;的情绪周期所有理论细节，精准分析出现在市场赚钱效应方向，当前市场最适合（龙头、补涨、切换、空仓）中哪个方向。需选出总龙头（启动价&lt;10元、股性极佳、资金合力强、换手5%-15%、人气排名前10）、补涨龙（关联度最高、价格&lt;10元、市值&lt;200亿、底部涨幅&lt;50%等7大标准）、切换方向（旧题材退潮+新超级题材出现）、中军标的（市值&gt;500亿、日成交&gt;50亿、机构持仓&gt;30%）。」
+- 「当前影响市场的主要潜在风险有哪些？请从宏观、政策、行业等角度，分析这些风险对共封装光学(CPO)短期和中期可能造成的冲击。」
+- 「那现在电子布、树脂、覆铜板涨价，PCB中游什么时候能开始股价上涨？需要在这些上游元件之后吗？具体几月份什么日期，届时他们股价会大涨吗？比如沪电、胜宏等，专业分析并解释。最后生益科技除了覆铜板它还能做PCB电路板吗？能两个方向盘通吃吗？」
+- 「你现在是金融领域的顶级专家，请总结分析截至此刻24小时内A股市场、海外市场发生了什么大事，列明100条影响股市最核心的最新消息，覆盖A股＋海外宏观＋行业新闻＋龙虎榜/资金面。从当前主线行业筛选符合&quot;底部放量（近60日低点附近，量比＞1.5，当日成交额&gt;20日均成交额）+龙头股&quot;特征的10支股票进行量化评分，给出短线/中线/长线精准推荐，浓缩成一页极简交易决策清单。每结论标注依据，存疑时声明&quot;无法可靠结论&quot;。」
+- 「请联网筛选未来30-90天最可能被A股提前交易的&quot;预期差+景气突变+右侧早期启动/拐点确认&quot;机会。需先建立候选池全集再逐层剔除，覆盖近3日强势板块/涨停扩散/真实催化/涨价/供需缺口/政策/订单方向，按市场环境评分、预期差类型、产业链受益层级、赔率、反方证伪等框架输出正式确认池/启动候选池/预启动观察池/事件驱动池/强趋势观察/风向标的分层结果，需标注首次启动时间、量价阶段、关键价位、催化日历和反方3问。」
+- 「第一步：逆向拆解瓶颈——以产业专家视角拆解航空航天（大飞机/商业航天/低空装备）BOM物料清单，锁定扩产周期长、技术壁垒高的物理级产业链瓶颈环节。第二步：锁定非对称标的——筛选市值5亿~50亿机构覆盖少的中小盘隐形冠军。第三步：穿透财务拐点——核查近两季度毛利率拐点和CapEx扩产匹配。第四步：AI红队证伪——从技术替代、下游自研、供应链断裂三个维度穷尽暴雷风险。第五步：制定止损熔断机制——制作6个月关键里程碑清单。」
+- 「机器人赛道的上中下游+产业延伸链，制成A股市场股票投资计划详细深度分析研报。需评估并标记出S级/首选级/次选级，制作三个级别股票总清单（含序列号、名称、代码、主营产品和技术优势、核心逻辑），S级需单独深度研究，各细分产业链关键环节不许遗漏任何达到评估标准的上市公司。」
+- 「审计一个多因子策略，检查过拟合、数据泄露、收益归因和实盘可用性，并给出改进建议。」
+- 「解释某策略近期失效的原因并修复。」
+04 机会挖掘：
+- 「从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。」
+- 「昨天为什么光伏电池企业尾盘突然出现涨停潮，谁先启动的？谁先涨停的？哪个票会有持续性？」
+- 「帮我推导一下目前科技板块的炒作路径会是怎样的，推导出明天和下周最有交易价值的产业链个股。」
+- 「高志凯预言说26年底到27年初会有一波金融危机，如果从这个视角去布局板块和个股。」
+- 「从今年到现在，有哪些产品一直在涨价，涨价的底层原因是什么？根据产品上涨幅度和后续上涨空间列出关联概念股，并列出核心涨价龙头股。」
+- 「2026年是厄尔尼诺大年，这个夏天次生灾害应该会非常多，这个对后续股票市场有什么影响，哪些相关联的股票会有上涨预期，底层逻辑是什么？」
+- 「结合今日市场盘面情况，整理出5条从盘后开始到现在最重要的国内外资讯，定义出他们对明日A股市场重要度及原因，列出每条消息紧密相关的核心标的。」
+- 「今天首板的主板个股，不是受二连板以上个股带动，依靠独立逻辑涨停的有哪几个？涨停逻辑是什么。」
+- 「板块方向上这两天AI产业链的上游细分材料比较强，铜粉，靶材等，以及涨价方向的六氟化钨，大硅片，MLCC等。」
+- 「结合近期热炒的AI产业链的上游细分材料，以及涨价方向的六氟化钨、大硅片、MLCC，找出未来中报预增披露期间最受益的核心个股，并给出解释。」
+- 「检索人形机器人领域的所有研报分析以及市场评价和筹码形态，给出合适标的的投资建议。」
+- 「分析一下近5年妖股的特征，选取当前符合条件的股票。」
+- 「多晶硅去年7月到12月涨价时哪些个股跟的最多，最近多晶硅一看多商品期权合约大涨74%，资金会继续跟着炒作哪些股票？」
+05 资产配置：
+- 「我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。」
+- 「100万资金跨市场配置，A股、港股、大宗商品相关ETF如何均衡布局？」
+- 「有资金35万，二季度配置点啥ETF和股票标的组合年化收益8%。」
+- 「目前25岁单身，收入稳定无家庭负担，有闲置资金20万，想高效做财富快速积累，应该怎么制定投资策略。」
+- 「你好，我想做一个资产配置，但我对风险很敏感，属于保守型投资者。我特别说明：坚决不投股票和股票型基金，只接受债券、货币基金这类低风险产品。」
+- 「我有50万闲置资金想配置，但我风险承受能力比较低，不想碰高风险产品。另外我之前买过货币基金，收益太低不想考虑这类产品。我每月还有5千房贷要还，流动性需要考虑。你能帮我规划吗？」
+- 「我目前资产一千五，风险偏好保守偏稳健，投资期限一周，希望兼顾增长与安全，请帮我拆解预期收益5%-6%的目标，并给出A股资产配置的类别比例（如股票、债券、现金的具体占比）。」
+- 「我目前资产100w，风险偏好保守偏稳健，投资期限3年，希望兼顾增长与安全，请帮我拆解预期年化收益5%-6%的目标，并给出在湖南板块资产配置的类别比例（如股票、现金的具体占比），其中需要包括金杯电工、科力远、方盛制药的资产配置策略。」
+- 「我每月固定能结余3000元左右，想同时实现强制储蓄+稳健定投理财，兼顾安全性和小幅增值，适合配置哪些低中风险理财品种、怎么分配比例最合适？」
+- 「我这种45岁左右的中年二孩家庭，闲置资金600万左右，有房贷教育双重支出压力，需要资产保值+抗通胀，平衡攻守属性，如何做资产配置？」
+- 「我计划3-5年中长期财富积累，结合分批投入模式，请帮我制定大类资产投资方案。」
+- 「假设接下来国内财政刺激加码、基建和地产政策边际放松，我该优先看上游资源、工程机械、建材，还是先看券商和银行？请结合过去几轮稳增长周期中各板块启动顺序、弹性、持续性和回撤特征来判断。」
+06 账户诊断优化类：
+- 「搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。」
+- 「今天是2026年5月3日周日，我是一个资深的量化基金管理人，也是股票分析师。我想重新配置我的股票账户的仓位，截止到2026年5月3日，我的账户总资产3万元，其中：ST双成持仓400股市值3432元，中国黄金持仓100股市值894元，黄金ETF持仓100股市值967元，航天ETF持仓9500股市值10460元，芯片ETF持仓10000股市值9830元，我想在2026年5月6日至2026年5月30日内目标有15%以上的盈利。请给我建仓步骤的建议，包括买入或卖出的价位和量。」
+- 「我的持仓全是科技类ETF，仓位偏高波动大，如何降低回撤、优化资产结构？」
+- 「手里持有3只个股宁德时代、中际旭创和紫金矿业；2只行业ETF煤炭etf和通信etf，总仓位8成，要不要降仓加配债券基金和现金？」
+- 「上周1398元买的1手（100股）贵州茅台，占近16%仓位，现在五粮液的原因白酒板块节后开盘会大回调，我应该如何操作。」
+- 「截止至2026年4月30日收盘价，近期资金面，消息面等各方面综合比较东信和平、新国都、千红制药、创源股份、姚记科技、视觉中国，哪些票适合补仓，补仓价是多少。」
+- 「华工科技、光迅科技、生益科技、东山精密，长线持有，如何组合建仓。给出建议。」
+- 「手中的胜宏科技、江波龙、天新怎么处理比较合理。」
+- 「我持有中国卫星和四维图新，一涨一跌，目前满仓，如何调整个股仓位。」
+- 「江苏银行、宁波银行、杭州银行、青岛银行为主仓位，以唐山港、佐力药业、159201为辅仓位。这个组合行吗？」
+- 「我持有中天科技、拓维信息、长电科技、鸣志电器、航发动力、小商品城、宁波高发、深科技、昆仑万维、中科创达、云天化、农发种业、天齐锂业、金辰股份这些股票，帮我看是否合理，给仓位和风控建议，以及如何组合优化。」
+- 「50万资金，目前持有有色7.5万，沪深300ETF2万，药明康德4万，剩余资金如何配置，如何建仓。」
+- 「给ETHUSDT推荐入场价、分批买入计划和仓位大小。」
+07 策略触发任务类：
+- 「这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。」
+- 「帮我选几只最具有潜力能股价翻倍的票，我放入自选股，等股价下跌时候进入，我设置一个下跌到价位提醒。」
+- 「好的到时候美的集团快分红提醒我。」
+- 「那等中兴通讯适合加仓的时候你能主动提醒我吗。」
+- 「山子高科出现第三次大宗交易提醒我。」
+- 「工业富联，话说你能不能给我实时观察这个票，出现异动时提醒我。」
+- 「双欣材料退市前一天停牌，可以提醒我吗。」
+- 「在自选股今天盘中出现分时走势二次冲高回落后确认的买入点提醒我。」
+- 「中国电建收盘站上5.50元且近3日主力资金连续净流入且MACD翻红时提醒我。」
+- 「MACD在0轴上方金叉，收盘价站上20日均线，成交量大于20日均量1.5倍，RSI(14)&lt;70。以这个条件为规则，每天帮我筛选可以操作的股票出来。每天下午四点提醒我复盘。」
+08 目标跟踪执行：
+- 「我的目标是年化20%，基于每天市场数据帮我动态调整持仓，调整前发WhatsApp消息让我确认。」
+- 「我想长期持有，目标5-10倍收益，可以每季度再平衡。」
+- 「帮我跟踪我的持仓组合，每周生成一份表现报告，如果某只股票跌破止损线自动提醒。」
+- 「给这个投资计划设定3/6/12个月的里程碑检查点，每次检查后给出调仓建议并发邮件确认。」
+09 动作类：
+- 「给我建一个价格alert。」
+- 「把分析结果转成PPT并发邮件。」
+- 「写一个Excel或dashboard展示这些标的表现。」
+- 「生成一份PDF研究报告，包含图表和核心结论，发到我的邮箱。」
+- 「把这些选股结果导出成表格文件。」
+
+重点判别（避免 06 过判，同时收紧筛候选口径）：
+- “帮我筛出/找出/列几只符合……条件的股票/期权/交易”，若只是按价格上限、资金额度、持有周期、收益目标等显式条件过滤并输出候选名单、无事件/时机/催化/分析/计算/取舍要求 → 判不复杂。例如 “Any call options you think will give me profit in 1-3 weeks with Jan/27 exp?” → 不复杂（纯条件筛选短句）。仅当问句自身带有事件/时机/催化驱动、或要求分析/比较/计算/多步处理时，才归 04（事件/时机/收益驱动）或 01（纯量化条件）判复杂。
+- 数据校验 + 定位趋势转折点/计算任务（如 “validate the BAR columns and suggest at what value the trend changes”）→ 归 01，是复杂问句，不是格式调整。
+- “哪个策略更好 / 这个策略或回测能不能用 / 该选哪种做法”（对策略、规则或回测的审计与评价） → 归 03，是复杂问句，但不是 06。
+- 只有“我持有 X，要不要止损/减仓 / 在 A、B 两个已识别候选间分配资金 / 对已识别的具体标的是否买入”这类围绕已有持仓或具体候选的取舍 → 归 06。
+- 不要因为问句出现在活跃的交易/持仓会话里就默认归 06；找候选、列清单 ≠ 做取舍决策。
+- 围绕已有持仓或明确候选的买/卖/持/加/减决策，仅当问句自身带有额外条件或分析要求（止损位、收益目标、比较维度、时间窗口、仓位/金额约束、理由或回测）时才判复杂。
+- 若只是“X 该不该买/卖/持”“hold or sell”“能不能买，只要 yes/no”“会涨吗”这类短决策——即使带持仓量、成本、缺口、行权价、到期日等参数，只要不要求分析过程或比较取舍——就不算复杂问句。
+
+07/08/09 边界（避免混淆）：
+- 设定“条件→动作”规则：如果……就 / 当……时 / 触发 / 提醒 / alert / 异动 / 监控盯盘 → 归 07。
+- 围绕长期收益目标持续跟踪、动态调仓、阶段复盘、通知确认的多轮闭环 → 归 08。
+- 把结果做成交付物：报告、PPT、Excel、PDF、邮件、dashboard、文件、导出、生成、发送 → 归 09。
+- 同时含触发规则与交付物时，按主要意图取一类。
+
+判定流程（严格按顺序，不要跳步）：
+- 第 1 步：只判断目标问句自身是否承载一个需要多步分析/计算/筛选/回测/组合构建/框架化判断/预测/比较/决策/执行的金融任务。是陈述、抱怨、确认、纯动作或单步查数 → is_complex=false，category_id=null，直接结束。
+- 第 2 步：仅当第 1 步通过，才按类别优先级规则选择唯一类别。类别匹配永远不能反过来当作“它是复杂问句”的证据。
+
+上下文使用边界：
+- prior_questions 仅用于消解指代（“它”“这些”“Q2”）和补全缺失的标的/条件；不能把一句陈述、确认或短指令“升级”成复杂问句。
+- 目标问句自身必须包含明确的金融任务；即使它出现在复杂会话中，自身不承载任务就判 is_complex=false。
+
+输出要求：
+- 只输出一个可解析的裸 JSON 对象，不要输出 Markdown、代码块或说明。
+- 字段：{&quot;is_complex&quot;: bool, &quot;category_id&quot;: &quot;01&quot; 或 null, &quot;reason&quot;: &quot;中文短句，说明判为复杂/不复杂的主要理由&quot;}
+
+JSON 格式：
+{&quot;is_complex&quot;: true, &quot;category_id&quot;: &quot;03&quot;, &quot;reason&quot;: &quot;需要综合分析产业链并给出投资判断&quot;}</pre>
+        </details>
+      </section>
+
+      <section class="prompt-panel" aria-label="复杂分类提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>复杂分类提示词（9 类，含 few-shot 定义与示例）</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一个金融问句分类器。给定一个**已判定为复杂金融问句**的问句（附前文问题列表，仅用于消解指代），从下列 9 类中选择**唯一**类别。
+
+要求：
+- 只按问句意图归类，不按关键词机械匹配。
+- 若多个类别都沾边，选择最决定答案正确性的那一类。
+- 只输出严格 JSON，不要 Markdown：{&quot;category_id&quot;: &quot;01&quot;, &quot;reason&quot;: &quot;中文短句，说明归类理由&quot;}
+- category_id 必须是下列 9 类之一。
+
+01 复杂取数计算（complex-topic/01-data-metrics-calculation）
+特征：特征：需要多指标/多条件组合筛选、回测策略、统计规律挖掘、技术形态的量化描述，或多步骤数据处理。核心是「算」——不是简单查一个数，而是通过计算框架得出结果。常见要素：均线/换手率/量比/涨跌幅等指标阈值组合、回测区间与买卖规则、跨时间段的统计对比、多因子叠加。
+示例：
+- 回测一个基于5周均线的短线择时策略，比较其与沪深300指数的超额收益。回测区间2021年1月1日至2026年4月30日，股票池全部A股剔除ST/北交所/上市不满90日，买入规则为向上突破5周均线次日开盘价买入，卖出规则为向下突破或跌幅≥15%止损，交易成本含佣金0.03%+印花税0.05%+滑点0.1%，基准为沪深300全收益指数。
+- 我目前状态为空仓，可用资金114.3万，交易风格偏向短线高弹性博弈。在今天市场4400家普跌环境下已全仓清仓，核心目标是通过一到两笔交易获取约5%的确定性利润。请帮我筛选明天值得关注的股票池，条件：仅限创业板或科创板（20%弹性），流通市值30亿到150亿，今日跌幅&lt;2%或收红或有长下影线，股价站稳5日和10日均线，近3日上涨放量且今日缩量。输出前5只并附核心热门概念和今日换手率。
+- 请帮我筛选全市场A股ETF，排除货币ETF、债券ETF、黄金/贵金属/商品ETF、QDII/跨境ETF、杠杆/反向ETF。输出字段：代码、名称、近5日/20日/60日涨跌幅、今日涨跌幅。同时输出沪深300对应数据。按近5日涨跌幅从高到低排序，取前50名。
+- 港口航运，物流，运输板块内，目前票价&gt;4月21日票价且期间某一日涨幅≥5%，5月8日票价&gt;4月21日票价，5月10日-5月13日之间其中某一日票价处于4月22日到5月8日票价之间，满足条件的60及00开头非st股票，按4月21日到5月13日区间涨幅排序，展示完整名单。
+- 帮我统计，沪深主板所有股票第一天涨停，第二天收小阳十字星，并且成交量比第一天成交量要放大不低于二倍，第三天涨跌情况。
+- 股票每次发出减持公告后，第二天股价的表现。从历史统计看下。
+- 周K线图中：经长时间粘合后，5均线、20均线、60均线呈多头排列且向上发散的股票有哪些。
+- 2026年6月1日行业指数涨停家数前三的板块中，非ST且非300和301开头，主力资金净流入大于0，换手率大于1.2%，量比大于1.2%，5日资金净流入大于0的股票。
+- 选出在AI行业未来10年关键卡脖子和关键环节有高毛利的龙头企业且目前市值200亿以内的股票且在产业链顶端，独占行业50%以上核心利润的企业。
+
+02 预测类（complex-topic/02-forecasting-and-projection）
+特征：特征：以时间维度推演为核心——预测未来股价/业绩/事件走向，或推演不同场景下的结果。关键信号词：「预测」「目标价」「能涨到多少」「什么时候」「概率」「极端场景」「剧本」。常见要素：目标价位、时间窗口、概率分布、多场景推演、极端条件假设。
+示例：
+- 中际旭创未来1年股价能涨到多少？
+- 159851走势分析，未来走势预测，什么时候突破前高。
+- 洛阳钼业现在处于磨底期，大概多久，磨底期结束以后，进入上升区间离主升浪需要多久。
+- 针对日本两家六氟化钨企业断供原因，全球市场需求缺口，分析中船特气估值大概未来几年到什么估值。
+- 根据胜宏科技、长电科技的基本面，技术面以及大盘情况，外围情况等全方位信息，预测这两个票一个月内走势。
+- 华电能源最近的处境和5.14以来的连日阴跌有什么异同，它会复刻后面连板的行情吗，几率多大，有什么条件。
+- 把山东墨龙接下来1-3天的&quot;强弱分界线（关键价位）+三种明日剧本（强/弱/震荡）&quot;也列出来。
+- 结合白云山的历史价格走势，预测一下未来白云山的价格走势。需要考虑所属板块影响、机构资金的情绪、公司基本经营情况、公司产品。
+- 根据江顺科技今天股价波动，资金流入流出，近期新闻等情况，分析并推演明天的股价波动趋势，并判断概率分布。
+- 综合筹码峰、量价关系、K线形态、技术面，通过日线周线月线分析，拓斯达、三峡新材、雷曼光电，短期和中期内上涨概率百分比。
+- 现在我们来极端预测条件，如果由于技术发展，锂电池被其他如钠电、锂电池回收等技术取代，锂矿需求直接没有了，对盐湖股份的影响有多大？
+- 帮我分析下这只海格通信股票可能出现的5种暴跌场景，每种都要说清楚触发条件、历史类似案例、发生概率多大。
+- 光线传媒自从年初大涨后，已经连续跌，目前应该很低了吧，帮我结合股票分析以及接下来他暑期宣发的影片，做一个后期走势分析。
+- 投资周期半年，国际复材、国瓷材料、中国巨石，哪个实现收益率百分之五十的概率更大。
+- 合锻智能股价今天创了新高，未来股价最可能涨到什么位置？请结合类似行情股票合理推测，并给出所有可能性和概率，触发条件。
+
+03 分析研究（complex-topic/03-analysis-research）
+特征：特征：以深度理解为目标——多维度框架分析、产业链/政策/宏观深度研究、因果关系解释、综合研判。关键信号词：「分析」「研究」「为什么」「影响」「框架」「产业」「政策」。常见要素：基本面/技术面/情绪面/资金面等多框架、产业上下游拆解、政策传导逻辑、历史对比。
+示例：
+- 美伊何时能达成停火协议，结合历史战争事件分析市场走势。
+- 我是一名专门研究龙头的操盘手，依照游资&quot;92科比&quot;的情绪周期所有理论细节，精准分析出现在市场赚钱效应方向，当前市场最适合（龙头、补涨、切换、空仓）中哪个方向。需选出总龙头（启动价&lt;10元、股性极佳、资金合力强、换手5%-15%、人气排名前10）、补涨龙（关联度最高、价格&lt;10元、市值&lt;200亿、底部涨幅&lt;50%等7大标准）、切换方向（旧题材退潮+新超级题材出现）、中军标的（市值&gt;500亿、日成交&gt;50亿、机构持仓&gt;30%）。
+- 当前影响市场的主要潜在风险有哪些？请从宏观、政策、行业等角度，分析这些风险对共封装光学(CPO)短期和中期可能造成的冲击。
+- 那现在电子布、树脂、覆铜板涨价，PCB中游什么时候能开始股价上涨？需要在这些上游元件之后吗？具体几月份什么日期，届时他们股价会大涨吗？比如沪电、胜宏等，专业分析并解释。最后生益科技除了覆铜板它还能做PCB电路板吗？能两个方向盘通吃吗？
+- 你现在是金融领域的顶级专家，请总结分析截至此刻24小时内A股市场、海外市场发生了什么大事，列明100条影响股市最核心的最新消息，覆盖A股＋海外宏观＋行业新闻＋龙虎榜/资金面。从当前主线行业筛选符合&quot;底部放量（近60日低点附近，量比＞1.5，当日成交额&gt;20日均成交额）+龙头股&quot;特征的10支股票进行量化评分，给出短线/中线/长线精准推荐，浓缩成一页极简交易决策清单。每结论标注依据，存疑时声明&quot;无法可靠结论&quot;。
+- 请联网筛选未来30-90天最可能被A股提前交易的&quot;预期差+景气突变+右侧早期启动/拐点确认&quot;机会。需先建立候选池全集再逐层剔除，覆盖近3日强势板块/涨停扩散/真实催化/涨价/供需缺口/政策/订单方向，按市场环境评分、预期差类型、产业链受益层级、赔率、反方证伪等框架输出正式确认池/启动候选池/预启动观察池/事件驱动池/强趋势观察/风向标的分层结果，需标注首次启动时间、量价阶段、关键价位、催化日历和反方3问。
+- 第一步：逆向拆解瓶颈——以产业专家视角拆解航空航天（大飞机/商业航天/低空装备）BOM物料清单，锁定扩产周期长、技术壁垒高的物理级产业链瓶颈环节。第二步：锁定非对称标的——筛选市值5亿~50亿机构覆盖少的中小盘隐形冠军。第三步：穿透财务拐点——核查近两季度毛利率拐点和CapEx扩产匹配。第四步：AI红队证伪——从技术替代、下游自研、供应链断裂三个维度穷尽暴雷风险。第五步：制定止损熔断机制——制作6个月关键里程碑清单。
+- 机器人赛道的上中下游+产业延伸链，制成A股市场股票投资计划详细深度分析研报。需评估并标记出S级/首选级/次选级，制作三个级别股票总清单（含序列号、名称、代码、主营产品和技术优势、核心逻辑），S级需单独深度研究，各细分产业链关键环节不许遗漏任何达到评估标准的上市公司。
+
+04 机会挖掘（complex-topic/04-opportunity-discovery）
+特征：特征：以发现交易机会为目标——事件驱动、热点主题、板块轮动、龙头识别、潜在高弹性标的。关键信号词：「找出」「挖掘」「龙头」「翻倍」「涨停」「机会」「热点」「哪只」。常见要素：事件催化+受益标的映射、板块龙头识别、涨停原因分析、资金流向跟踪、主题扩散路径。
+示例：
+- 从目前热点中找出未来1-3月可能翻倍的标的，并说明逻辑。
+- 昨天为什么光伏电池企业尾盘突然出现涨停潮，谁先启动的？谁先涨停的？哪个票会有持续性？
+- 帮我推导一下目前科技板块的炒作路径会是怎样的，推导出明天和下周最有交易价值的产业链个股。
+- 高志凯预言说26年底到27年初会有一波金融危机，如果从这个视角去布局板块和个股。
+- 从今年到现在，有哪些产品一直在涨价，涨价的底层原因是什么？根据产品上涨幅度和后续上涨空间列出关联概念股，并列出核心涨价龙头股。
+- 2026年是厄尔尼诺大年，这个夏天次生灾害应该会非常多，这个对后续股票市场有什么影响，哪些相关联的股票会有上涨预期，底层逻辑是什么？
+- 结合今日市场盘面情况，整理出5条从盘后开始到现在最重要的国内外资讯，定义出他们对明日A股市场重要度及原因，列出每条消息紧密相关的核心标的。
+- 今天首板的主板个股，不是受二连板以上个股带动，依靠独立逻辑涨停的有哪几个？涨停逻辑是什么。
+- 板块方向上这两天AI产业链的上游细分材料比较强，铜粉，靶材等，以及涨价方向的六氟化钨，大硅片，MLCC等。
+- 结合近期热炒的AI产业链的上游细分材料，以及涨价方向的六氟化钨、大硅片、MLCC，找出未来中报预增披露期间最受益的核心个股，并给出解释。
+- 检索人形机器人领域的所有研报分析以及市场评价和筹码形态，给出合适标的的投资建议。
+- 分析一下近5年妖股的特征，选取当前符合条件的股票。
+- 多晶硅去年7月到12月涨价时哪些个股跟的最多，最近多晶硅一看多商品期权合约大涨74%，资金会继续跟着炒作哪些股票？
+
+05 资产配置（complex-topic/05-asset-allocation）
+特征：特征：以资金分配为核心——组合构建、仓位比例设计、跨资产/跨市场配置、投资期限匹配、个性化约束（年龄/收入/风险偏好/流动性需求）。关键信号词：「配置」「组合」「仓位」「分配」「多少比例」「分散」「资产」「规划」。常见要素：资金规模、投资期限、风险偏好、资产类别选择、比例分配。
+示例：
+- 我有200W美金，我想买一些存储相关得标的，我希望你根据MVP现代投资理论给出我具体策略构建逻辑。
+- 100万资金跨市场配置，A股、港股、大宗商品相关ETF如何均衡布局？
+- 有资金35万，二季度配置点啥ETF和股票标的组合年化收益8%。
+- 目前25岁单身，收入稳定无家庭负担，有闲置资金20万，想高效做财富快速积累，应该怎么制定投资策略。
+- 你好，我想做一个资产配置，但我对风险很敏感，属于保守型投资者。我特别说明：坚决不投股票和股票型基金，只接受债券、货币基金这类低风险产品。
+- 我有50万闲置资金想配置，但我风险承受能力比较低，不想碰高风险产品。另外我之前买过货币基金，收益太低不想考虑这类产品。我每月还有5千房贷要还，流动性需要考虑。你能帮我规划吗？
+- 我目前资产一千五，风险偏好保守偏稳健，投资期限一周，希望兼顾增长与安全，请帮我拆解预期收益5%-6%的目标，并给出A股资产配置的类别比例（如股票、债券、现金的具体占比）。
+- 我目前资产100w，风险偏好保守偏稳健，投资期限3年，希望兼顾增长与安全，请帮我拆解预期年化收益5%-6%的目标，并给出在湖南板块资产配置的类别比例（如股票、现金的具体占比），其中需要包括金杯电工、科力远、方盛制药的资产配置策略。
+- 我每月固定能结余3000元左右，想同时实现强制储蓄+稳健定投理财，兼顾安全性和小幅增值，适合配置哪些低中风险理财品种、怎么分配比例最合适？
+- 我这种45岁左右的中年二孩家庭，闲置资金600万左右，有房贷教育双重支出压力，需要资产保值+抗通胀，平衡攻守属性，如何做资产配置？
+- 我计划3-5年中长期财富积累，结合分批投入模式，请帮我制定大类资产投资方案。
+- 假设接下来国内财政刺激加码、基建和地产政策边际放松，我该优先看上游资源、工程机械、建材，还是先看券商和银行？请结合过去几轮稳增长周期中各板块启动顺序、弹性、持续性和回撤特征来判断。
+
+06 账户诊断优化类（complex-topic/06-investment-decision）
+特征：特征：以已有持仓/账户为出发点——审视现有组合、给出买卖点/仓位调整/风控建议、选股策略优化。关键信号词：「持有」「持仓」「账户」「补仓」「减仓」「止损」「优化」「怎么处理」「帮我看看」。常见要素：具体持仓标的和成本、账户总资产、目标收益、交易风格、时间约束。
+示例：
+- 搜索今天所有强势的股票，主要是主板，结合龙虎榜，有哪些是上面这些砸盘王，比如知春路、紫阳东路、成都系这些砸盘王持有的股票，我想排雷。
+- 今天是2026年5月3日周日，我是一个资深的量化基金管理人，也是股票分析师。我想重新配置我的股票账户的仓位，截止到2026年5月3日，我的账户总资产3万元，其中：ST双成持仓400股市值3432元，中国黄金持仓100股市值894元，黄金ETF持仓100股市值967元，航天ETF持仓9500股市值10460元，芯片ETF持仓10000股市值9830元，我想在2026年5月6日至2026年5月30日内目标有15%以上的盈利。请给我建仓步骤的建议，包括买入或卖出的价位和量。
+- 我的持仓全是科技类ETF，仓位偏高波动大，如何降低回撤、优化资产结构？
+- 手里持有3只个股宁德时代、中际旭创和紫金矿业；2只行业ETF煤炭etf和通信etf，总仓位8成，要不要降仓加配债券基金和现金？
+- 上周1398元买的1手（100股）贵州茅台，占近16%仓位，现在五粮液的原因白酒板块节后开盘会大回调，我应该如何操作。
+- 截止至2026年4月30日收盘价，近期资金面，消息面等各方面综合比较东信和平、新国都、千红制药、创源股份、姚记科技、视觉中国，哪些票适合补仓，补仓价是多少。
+- 华工科技、光迅科技、生益科技、东山精密，长线持有，如何组合建仓。给出建议。
+- 手中的胜宏科技、江波龙、天新怎么处理比较合理。
+- 我持有中国卫星和四维图新，一涨一跌，目前满仓，如何调整个股仓位。
+- 江苏银行、宁波银行、杭州银行、青岛银行为主仓位，以唐山港、佐力药业、159201为辅仓位。这个组合行吗？
+- 我持有中天科技、拓维信息、长电科技、鸣志电器、航发动力、小商品城、宁波高发、深科技、昆仑万维、中科创达、云天化、农发种业、天齐锂业、金辰股份这些股票，帮我看是否合理，给仓位和风控建议，以及如何组合优化。
+- 50万资金，目前持有有色7.5万，沪深300ETF2万，药明康德4万，剩余资金如何配置，如何建仓。
+- 给ETHUSDT推荐入场价、分批买入计划和仓位大小。
+
+07 策略触发任务类（complex-topic/07-strategy-evaluation）
+特征：特征：以条件→动作为核心——设定规则，当行情/价格/事件满足条件时自动触发提醒或执行。关键信号词：「如果……就」「当……时」「触发」「提醒」「alert」「条件」「规则」「异动」「监控」。常见要素：触发条件（价格/均线/量/事件）、执行动作（买入/卖出/提醒）、持续监控要求。
+示例：
+- 这个图片里是我的持仓，你把它记住了。每天都有问题的时候，有基本面出问题或者出现什么意外的事情，你提醒我，并且如果要发现哪个股票更好，可以替代其中的一个也告诉我。
+- 帮我选几只最具有潜力能股价翻倍的票，我放入自选股，等股价下跌时候进入，我设置一个下跌到价位提醒。
+- 好的到时候美的集团快分红提醒我。
+- 那等中兴通讯适合加仓的时候你能主动提醒我吗。
+- 山子高科出现第三次大宗交易提醒我。
+- 工业富联，话说你能不能给我实时观察这个票，出现异动时提醒我。
+- 双欣材料退市前一天停牌，可以提醒我吗。
+- 在自选股今天盘中出现分时走势二次冲高回落后确认的买入点提醒我。
+- 中国电建收盘站上5.50元且近3日主力资金连续净流入且MACD翻红时提醒我。
+- MACD在0轴上方金叉，收盘价站上20日均线，成交量大于20日均量1.5倍，RSI(14)&lt;70。以这个条件为规则，每天帮我筛选可以操作的股票出来。每天下午四点提醒我复盘。
+
+08 目标跟踪执行（complex-topic/08-goal-execution）
+特征：特征：以长周期目标为驱动——设定长期收益目标，需要持续跟踪、动态调仓、阶段性复盘、通知确认。关键信号词：「长期」「年化」「跟踪」「持续」「动态」「季度」「定期」「目标收益」。常见要素：年化收益目标、投资期限、调仓频率、通知方式、里程碑检查。
+示例：
+- 我的目标是年化20%，基于每天市场数据帮我动态调整持仓，调整前发WhatsApp消息让我确认。
+- 我想长期持有，目标5-10倍收益，可以每季度再平衡。
+- 帮我跟踪我的持仓组合，每周生成一份表现报告，如果某只股票跌破止损线自动提醒。
+- 给这个投资计划设定3/6/12个月的里程碑检查点，每次检查后给出调仓建议并发邮件确认。
+
+09 动作类（complex-topic/09-action-output）
+特征：特征：以明确的工具操作或交付物为终点——生成报告、导出文件、发送通知、创建仪表盘、可视化等。关键信号词：「PPT」「Excel」「邮件」「dashboard」「报告」「导出」「生成」「建一个」「发」「写一个」。常见要素：输出格式（PPT/Excel/PDF/dashboard）、发送方式（邮件/通知）、内容要求。
+示例：
+- 给我建一个价格alert。
+- 把分析结果转成PPT并发邮件。
+- 写一个Excel或dashboard展示这些标的表现。
+- 生成一份PDF研究报告，包含图表和核心结论，发到我的邮箱。
+- 把这些选股结果导出成表格文件。</pre>
+        </details>
+      </section>
+
+      <section class="prompt-panel" aria-label="普通分类提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>普通分类提示词（16 类，含适用/排除/边界/易混）</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一个金融问句分类器。给定一个**有价值但非复杂**的金融问句（附前文问题列表，仅用于消解指代），从下列 16 类中选择**唯一**类别。
+
+要求：
+- 只按问句意图归类，不按关键词机械匹配。
+- 若多个类别都沾边，选择最决定答案正确性的那一类。
+- 只输出严格 JSON，不要 Markdown：{&quot;category_id&quot;: &quot;01&quot;, &quot;reason&quot;: &quot;中文短句，说明归类理由&quot;}
+- category_id 必须是下列 16 类之一。
+
+01 事件与概念选股（01-event-and-concept-stock-selection）
+定义：
+事件、政策、概念、主题或产业链驱动的选股、标的映射、受益排序和梯队划分任务。核心是从外部事件/主题出发，判断哪些股票或产业链环节受益。
+适用场景：
+- 用户要求找出某次战争、政策、产品发布、供给冲击、地缘事件或产业主题最受益的股票。
+- 用户要求识别概念股、领涨股、核心受益标的、边缘受益标的、产业链上下游映射或受益排序。
+- 用户要求把美股、海外巨头、产业标杆、客户供货、主营产品或产能份额映射到 A 股/港股/美股标的。
+- 用户要求按受益强度、确定性、弹性、产业链位置或事件重大程度对候选标的做优先级排序。
+排除场景：
+- 普通行情查询、个股诊断、数据查询、纯条件筛选且没有事件/主题推理层。
+- 用户已经给定具体标的，主要要求分析走势、估值、基本面或投资价值。
+- 用户主要要求结合个人持仓、目标、风险或资金做配置/交易建议。
+- 主任务是多条件、多阶段、跨口径的复杂股票筛选，且事件/概念只是筛选条件之一。
+- 主任务是对已给定股票或市场做基本面、技术面、资金面、消息面等综合分析并形成操作判断。
+边界规则：
+- 01 的核心不是出现某个热点词，而是把外部事件/主题推导到可投资标的或排序。
+- 01 看重“事件/主题—传导路径—受益环节—具体标的”的映射；若只查已有数据或简单筛列表，判断 03 是否更合适。
+- 如果只是解释某个新闻、政策或行业事件本身，优先 08；如果要求进一步给出受益股票、核心标的、排序、产业链上下游或 A 股映射，归 01。
+- 如果同时要求完整投研闭环、跨多源信息整合和多子任务，判断 06 是否更贴近主任务。
+易混类别：
+- 08-information-and-knowledge-qa: 08 可解释事件、政策、新闻及其影响；只要用户要求受益股票名单、核心标的、排序、产业链/上下游映射或 A 股可比公司，归 01。
+- 12-financial-logical-reasoning: 12 侧重对已有标的做投资推理、预测和取舍；01 侧重从事件/概念发现标的。
+- 03-stock-diagnosis-and-data-lookup: 03 是查数或条件筛选；01 必须有事件/主题到标的的推理层。
+- 06-compound-intent: 06 是多子任务、多信息源的复杂投研闭环；普通事件选股仍是 01。
+- 14-complex-stock-selection: 如果核心是围绕多个硬性/软性条件筛出股票，且不依赖事件/概念受益链条推理，优先归 14；如果核心是事件、政策、概念或产业链映射下的受益标的和排序，归 01。
+- 15-stock-comprehensive-analysis-and-selection: 如果用户要求对股票或市场做多维综合分析、强弱判断、买卖/持有建议或风险边界，归 15；如果是从事件/概念出发找受益股，归 01。
+
+02 回测取数计算（02-backtesting-data-extraction-and-calculation）
+定义：
+历史数据提取、指标计算、样本统计、概率估算或策略/事件表现回测任务。
+适用场景：
+- 用户要求回测策略、验证历史规律、统计事件发生后的收益或胜率。
+- 用户要求计算涨跌幅、收益率、波动率、最大回撤、相关性、概率、区间表现等指标。
+- 用户要求按明确时间窗口、样本条件或交易规则抽取数据并计算结果。
+- 用户要求跨期对比、差值计算、同比/环比变化、样本概率或多步公式推导。
+排除场景：
+- 只查询单个事实、明细、实时/最新数据或做轻量对比。
+- 计算只是投资分析或推理中的辅助步骤，主任务是评价、预测或建议。
+- 问题关键是时间锚点、交易日历或数据 as-of 判断，而不是计算本身。
+- 主任务是按当前或指定条件筛选股票，而不是回测历史规律、提取历史样本或计算策略表现。
+边界规则：
+- 02 的核心是可复现的取数、计算、统计或回测，不是泛泛分析。
+- 若答案成败取决于交易日/节假日/特定时点定位并进一步计算结果，通常仍按 02；若只考时间口径本身，才考虑 13。
+- 带日期不等于 02；只有日期用于样本窗口或计算逻辑时才考虑 02。
+- 若用户只要数据列表而无统计/计算/回测目标，通常归 03。
+易混类别：
+- 03-stock-diagnosis-and-data-lookup: 03 查数据或轻量对比；02 要计算统计结果或验证策略表现。
+- 13-time-awareness-ability: 13 考时间口径和交易日历理解；02 使用时间窗口产出计算结果。
+- 12-financial-logical-reasoning: 12 产出投资取舍逻辑；02 产出历史计算或回测证据。
+- 14-complex-stock-selection: 如果用户要回测、统计历史收益/胜率/概率或计算区间表现，归 02；如果用户要按复杂条件产出候选股票池，归 14。
+
+03 诊股查数（03-stock-diagnosis-and-data-lookup）
+定义：
+个股、板块、市场、宏观金融数据的查询、提取、对比分析或轻量诊断任务。核心是查明数据、事实、指标、行情或局部诊断结论。
+适用场景：
+- 用户要求查询分红、行情涨跌幅、技术指标、资金/主力、筹码集中度、客户、增长点、止盈位等数据。
+- 用户要求商品、期货、汇率比价、行业板块跑赢指数、宏观金融数据或全市场条件查询。
+- 用户需要明确口径、时间范围、数据来源和可验证结果，主任务仍是查数或轻量诊断。
+- 用户要求公司客户、分红、股东、主力资金、筹码、行业渗透率、价格或明细清单等可验证资料。
+排除场景：
+- 事件/概念驱动选股、重度投顾推荐、KYC 适配建议。
+- 纯财报业绩归因、复杂策略回测、客服问答或同花顺产品问题。
+- 核心是预测、投资取舍、原因解释或个性化操作建议。
+- 主任务是多条件、多阶段选股，要求保留复杂筛选逻辑、排序或候选池覆盖。
+- 主任务是围绕股票或市场做基本面、技术面、资金面、消息面、风险和操作建议的综合判断。
+- 主任务是查询人口、卫生、教育、贫困、就业等宏观或社会经济统计指标，而不是证券、市场、商品、汇率或公司数据。
+边界规则：
+- 03 可以包含简单对比和轻量诊断，但不能把需要完整投资逻辑的任务硬归查数。
+- 03 的重点是拿到可信数据或事实明细；若用户要求进一步做趋势判断、买卖取舍或投资逻辑闭环，转向 04/12。
+- 查询财务数值或分红记录通常是 03；解读财报表现和经营含义通常是 09。
+- 格式要求或表格输出只是展示方式时，不改变 03 的主类别。
+- 人口、死亡率、婴儿死亡率、国内贫困率、教育粗入学率等宏观或社会经济统计指标查询归 16；证券、市场、商品、汇率、公司和行业金融数据查询仍归 03。
+易混类别：
+- 02-backtesting-data-extraction-and-calculation: 02 有回测/统计/计算目标；03 主要是查询、提取或轻量比较。
+- 09-financial-performance-interpretation: 09 解读财报和经营表现；03 查询财务数据本身。
+- 04-analysis-evaluation-and-self-judgment: 04 要形成分析评价或趋势判断；03 以客观数据查询为主。
+- 11-instruction-following-ability: 11 关注严格遵守指令；普通表格查数仍按 03。
+- 14-complex-stock-selection: 简单查数据、查指标、查符合单一条件的明细通常归 03；多条件、多阶段、带排序/字段/排除条件的股票筛选归 14。
+- 15-stock-comprehensive-analysis-and-selection: 如果答案主要是查数或轻量诊断，归 03；如果需要整合多维证据形成投资判断、趋势判断或操作建议，归 15。
+- 16-macro-information-qa: 16 专门查询人口、卫生、教育、贫困、就业等宏观或社会经济统计指标；03 查询证券、市场、商品、汇率、公司或行业金融数据。
+
+04 分析评价与自我判断（04-analysis-evaluation-and-self-judgment）
+定义：
+围绕股票、基金、ETF、指数、板块、宏观资产或投资观点，对某个聚焦问题进行分析评价、原因判断、价值判断、方法匹配或投资逻辑评估的任务。核心通常是回答一个明确的分析问题，不要求建立股票短期与长期、多视角的完整综合分析框架。
+适用场景：
+- 用户针对股票、基金、ETF、指数、板块或宏观资产提出一个聚焦分析问题，例如上涨下跌原因、估值位置、题材持续性、业务逻辑、长期价值或某一投资观点是否成立。
+- 用户要求分析基金、ETF、指数、宏观资产或资产配置方向；这些对象不属于 15 专门覆盖的股票/股票市场综合分析。
+- 用户要求评价已有观点、研究结论、投资逻辑、分析方法或答案是否合理。
+- 用户要求对股票做单一主线或少数关键视角的分析评价，但没有要求全面诊断、多维综合分析或完整交易决策框架。
+排除场景：
+- 纯条件选股、纯行情查询、客服问题、产品操作问题或不需要投资分析的简单事实查询。
+- 明确属于专门 KYC 推荐建议，即需要根据用户画像做适配后的配置、仓位或交易决策。
+- 主任务是政策、新闻、监管、产业事件、公司进展、传闻或调研纪要本身的事实梳理、证据核验或资讯整合，且不要求形成资产价值判断时，优先 08。
+- 主任务是撰写、精简、优化、润色或代笔一段金融文案，且字数、风格、结构或措辞约束主导答案成败时，优先 11。
+- 财报、业绩公告或会计口径解释是主任务时，优先 09。
+- 对象是股票、多个股票或股票市场，且用户要求综合分析、全面诊断，或正确答案需要系统整合基本面、技术面、资金面、消息面和风险并形成决策结论时，归 15。
+边界规则：
+- 04 的核心是解决一个聚焦的分析评价问题；15 的核心是对股票或股票市场建立多维综合分析框架并形成决策。
+- 对象边界是重要辅助：基金、ETF、指数和宏观资产的分析评价通常归 04；15 专门面向股票、多股票组合和股票市场。
+- 股票问题中，单一原因、单一逻辑、估值、业务质量、题材持续性或某个观点是否成立，通常归 04。
+- 股票问题中，明确要求综合分析、全面诊断，或同时要求基本面、技术面、资金面、消息面、风险和操作建议，归 15。
+- 仅出现“能不能买”不能单独决定类别：聚焦某一分析逻辑可归 04；需要股票多维证据和完整决策框架则归 15；需要结合用户画像则归 05。
+易混类别：
+- 05-kyc-recommendation-suggestions: 05 是以用户画像为中心的投顾式决策支持；04 是资产或事件本身的分析评价。
+- 12-financial-logical-reasoning: 12 更强调预测、取舍、比较、证据到结论的推理链；04 更强调分析评价和价值判断。
+- 09-financial-performance-interpretation: 09 聚焦财报业绩和经营指标；04 可以使用财报作为分析材料但不以财报解读为主。
+- 08-information-and-knowledge-qa: 08 解释资讯、政策、事件、传闻或调研材料；04 基于这些信息评价资产、标的或板块的投资价值、趋势和风险。
+- 11-instruction-following-ability: 11 的主交付物是按明确约束生成或改写文本；04 的主交付物是分析评价结论。
+- 15-stock-comprehensive-analysis-and-selection: 04 处理聚焦的分析评价问题，以及基金/ETF/指数/宏观资产分析；15 专门处理股票、多股票或股票市场的多维综合分析、全面诊断和决策。
+
+05 KYC推荐建议（05-kyc-recommendation-suggestions）
+定义：
+需要结合用户目标、风险、资金、持仓、投资期限或真实处境的投资推荐、配置建议和交易决策支持。
+适用场景：
+- 用户要求推荐适合自己的股票、基金、ETF、行业、资产、组合或配置顺序。
+- 用户问能不能买、是否继续持有、该割肉还是加仓、如何控制仓位，并需要结合个人情况给建议。
+- 用户处于浮亏、套牢、迷茫、信心受挫等真实投资处境，需要投顾式建议和风险边界。
+- 用户明确给出资金量、风险偏好、投资期限、收益目标、持仓成本或交易计划，并要求据此生成配置/操作建议。
+排除场景：
+- 纯行情查询、纯事实查询、普通资料总结、客服问题或不需要用户适配的市场分析。
+- 没有个人适配要求的一般资产分析评价。
+- 一般投资逻辑推理、标的比较或走势预测，但不面向用户画像做建议。
+- 用户没有提供或要求结合个人画像、资金、持仓、风险偏好、期限、亏损处境等适配信息，而只是要求对标的本身做综合分析或操作判断。
+边界规则：
+- 05 的判断核心是“是否要为这个用户做适配后的决策建议”。
+- 05 需要面向用户输出行动框架、仓位、期限、观察点或触发条件；普通资产分析不因出现“推荐/可以买”就自动归 05。
+- 只出现“能不能买”不必然是 05；如果没有用户画像且主要是分析资产本身，可归 04/12。
+- 一旦 query 明确引用我的风险、目标、资金、持仓、成本、投资期限或仓位，优先考虑 05。
+易混类别：
+- 04-analysis-evaluation-and-self-judgment: 04 分析评价资产；05 给用户个性化推荐、配置、仓位或交易动作。
+- 12-financial-logical-reasoning: 12 是一般投资推理；05 是结合用户画像的投顾式建议。
+- 03-stock-diagnosis-and-data-lookup: 03 查数据；05 用数据服务个性化决策。
+- 15-stock-comprehensive-analysis-and-selection: 如果决策必须结合用户画像、持仓、资金、风险偏好或投资期限，归 05；如果主要判断股票/市场本身是否值得关注、买入、持有或风险如何，归 15。
+
+06 复合意图（06-compound-intent）
+定义：
+一句 query 中包含多个强子任务、跨多类信息源或需要复杂投研闭环的复合意图任务。
+适用场景：
+- 用户同时要求筛选、分析、比较、推荐、风险、策略、新闻/公告/财务/政策整合等多个强任务。
+- 用户需要跨行情、新闻、公告、产业、政策、财务、交易策略或衍生品信息进行深度整合。
+- 用户要求复杂推演、深度调研、事件影响评估、热点择股并形成完整结论闭环。
+- 用户要求先拆解多个子问题，再把事实、影响、传导和策略整合成统一结论。
+排除场景：
+- 单一主任务附带普通输出格式、简单解释或少量约束。
+- 普通事件选股、普通查数、普通 KYC 推荐或普通分析评价。
+- 只是问题很长，但实际只有一个清晰主任务。
+- 问题虽然长，但所有条件统一服务于筛选股票，主任务仍是复杂选股。
+- 问题虽然涉及多个分析视角，但统一服务于对股票或市场做综合分析与决策。
+边界规则：
+- 06 需要多个强子任务或多源信息整合，不是“长 query”同义词。
+- 06 的关键是意图拆解和跨源整合；如果一个专门标签已经能覆盖主任务，不因文本很长就归 06。
+- 若一个专门能力明显主导答案成败，优先归该专门类别。
+- 同时出现选股、分析、推荐和风险闭环时，才更像 06。
+易混类别：
+- 01-event-and-concept-stock-selection: 01 是事件/概念选股；06 是多任务、多源综合闭环。
+- 04-analysis-evaluation-and-self-judgment: 04 是单一分析评价；06 同时覆盖多个强任务。
+- 12-financial-logical-reasoning: 12 是投资逻辑推理；06 范围更广，包含跨源整合和任务拆解。
+- 14-complex-stock-selection: 长 query 不等于复合意图；如果多个子条件统一服务于产出股票候选池，归 14。只有存在多个并列强任务且不能被单一选股任务解释时，才归 06。
+- 15-stock-comprehensive-analysis-and-selection: 如果多个分析视角统一服务于综合投资判断，归 15；如果同时要求筛选、查数、资讯、推荐、策略等多个并列任务且需要跨任务闭环，归 06。
+
+07 交互澄清（07-interactive-clarification）
+定义：
+金融投资对话中的交互澄清、多轮承接、规则/前提纠错、实体识别和模糊口径定义任务。用户问题往往不能被直接可靠回答，需要先识别缺失变量、错误前提、真实标的或应采用的金融口径，再给出分层方案或后续引导。
+适用场景：
+- 用户意图模糊或关键信息不足，直接回答容易误导，需要先澄清股票、持仓、成本、目标、时间范围、风险偏好、交易权限或筛选口径。
+- 多轮对话中用户补充了持仓、成本、亏损幅度、目标、风险偏好等信息，当前 query 的正确处理依赖承接前文而不是重新开始。
+- 用户问题含交易规则或金融前提陷阱，例如做空、北交所权限、科创板盘后交易、撤单时间、T+1/T+0、分红除权除息、国债逆回购计息等。
+- 用户输入有错别字、拼音/同音误写、异常股票代码、重复代码、口语简称或行业黑话，需要识别真实实体或在必要时澄清。
+- 用户咨询模糊金融术语、技术形态、策略条件或选股口径，需要把“近期、短线、回调较多、业绩增长、现金奶牛”等词转成可核验定义。
+- 用户只有实体名、片段条件或省略上下文，直接分类为查数/分析会过度假设真实意图。
+排除场景：
+- 主任务是普通政策、新闻、产业事件、公司进展、市场异动、传闻或调研纪要的资讯理解与直接问答。
+- 主任务是回测、取数、财务业绩解读、KYC 适配建议、严格指令遵循或单纯时间口径判断。
+- 用户已明确要求输出事件/概念受益股票名单或排序，且不需要先澄清口径或纠错前提。
+边界规则：
+- 07 的核心是“能不能直接回答”：若缺少关键变量、存在错误前提、实体不清或口径模糊，且这些问题决定答案可靠性，优先 07。
+- 07 不等于所有短 query；只有缺失信息、错误前提或实体歧义会实质影响答案时才归 07。
+- 07 与 08 的新边界：07 处理澄清、承接、纠错和口径化；08 处理可直接回答的资讯/知识/事件解释。
+- 如果 query 只是事实、政策、新闻、市场异动或公司进展问答，且不需要澄清关键条件，优先 08。
+- 如果 query 明确要求个性化投资建议且已有足够用户画像，优先 05；若画像缺失导致必须先澄清，才考虑 07。
+易混类别：
+- 08-information-and-knowledge-qa: 08 可直接回答资讯、政策、事件或异动原因；07 要先澄清缺失变量、纠错前提、识别实体或定义口径。
+- 10-financial-common-sense-and-semantic-understanding: 10 解释术语、规则或实体含义本身；07 在答案可靠性取决于先澄清、纠错、承接上下文或把模糊口径转成可执行条件时优先。
+- 05-kyc-recommendation-suggestions: 05 在用户画像较充分时给个性化建议；07 在画像/条件不足时先澄清或分层假设。
+- 03-stock-diagnosis-and-data-lookup: 03 查询或轻诊断明确对象的数据；07 处理对象不清、代码异常、错别字或规则前提错误。
+- 15-stock-comprehensive-analysis-and-selection: 如果问题缺少关键前提、需要先澄清标的/持仓/成本/时间/口径才能可靠分析，归 07；如果分析对象和任务清楚，要求直接做综合判断，归 15。
+
+08 资讯知识问答（08-information-and-knowledge-qa）
+定义：
+金融资讯、政策、监管动态、产业事件、公司进展、市场异动、传闻、调研纪要和金融知识的直接解释、查询、比较或判断任务。答案重点是事实时效、证据质量、信息整合、影响链条和可信表达。
+适用场景：
+- 用户要求解释、查询、比较或判断金融资讯、政策、监管动态、产业事件、公司进展、市场异动原因、市场传闻或调研纪要。
+- 用户询问最新政策、产业数据、公司事件、项目进展、产能、海外建厂、新产品、供应链变化等事实和影响。
+- 用户要求说明某新闻、政策、宏观事件或产业事件对 A 股行业/标的的影响，但主任务仍是资讯理解，不是直接产出选股名单、核心标的或排序。
+- 用户要求横向比较多个热门方向的新闻密度、政策层级、产业落地进度或概念热度。
+- 用户给出市场小段子、金融大 V 文章、调研纪要、官媒截图等非标准资讯，要求解释其含义、可信边界和市场影响。
+- 用户要求核验最新/近两周/截至某日的信息、事实进展、政策定位或事件影响。
+排除场景：
+- 主任务是纯行情查询、纯财务指标查询、无资讯理解要求的条件选股、普通客服问答或泛泛投资建议。
+- 主任务是按指定国家、地区、城市、年份或教育阶段查询人口、卫生、教育、贫困、就业等宏观或社会经济统计指标。
+- 主任务是金融终端、API、插件、导出、接入、权限、界面或操作路径的产品使用问题，即使包含金融数据名词，也归入 other。
+- 主任务是用户意图模糊、实体不清、规则前提错误或口径缺失，需要先澄清/纠错才能回答。
+- 主任务是把事件或概念直接落到受益股票名单、排序或产业链映射。
+- 主任务是根据给定对象生成短文案、改写材料或严格满足字数/格式/措辞约束，而不是解释资讯事实本身。
+- 主任务是金融术语、交易规则、实体边界或语义口径理解。
+边界规则：
+- 08 的核心是可直接回答的资讯/知识理解：发生了什么、为什么、进展如何、证据是什么、影响链条是什么。
+- 08 允许把资讯转化为行业判断或影响解读；若用户进一步要求受益标的排序和投资取舍，再判断 01/04/12。
+- 询问“如何在某金融终端/插件/API 中查、搜、导出、接入、插入字段或获取权限”是产品使用问题，通常归 other；直接要求回答金融事实、政策、事件或知识本身才考虑 08。
+- 如果答案可靠性取决于先追问用户持仓、目标、权限、时间范围或实体纠错，优先 07。
+- 如果用户要求受益股票名单、核心/弹性标的、排序、产业链上下游或 A 股映射，优先 01；仅解释影响链条或市场关注点时归 08。
+- 如果问题核心是术语、黑话、指标口径、实体边界或交易规则定义，优先 10。
+- 如果用户直接索取死亡率、婴儿死亡率、国内贫困率、粗入学率等宏观统计数值，优先 16；如果围绕新闻、政策、事件进展和影响链条展开，归 08。
+易混类别：
+- 07-interactive-clarification: 07 先澄清、纠错、承接上下文或定义口径；08 直接回答资讯、政策、事件、进展或市场异动。
+- 01-event-and-concept-stock-selection: 01 输出标的映射、受益股票、排序或产业链/A 股映射；08 输出资讯事实、事件解释和影响链条。
+- 04-analysis-evaluation-and-self-judgment: 04 评价具体资产、标的或板块的趋势、估值、买卖价值或风险；08 梳理资讯事实、事件线索、证据和市场关注点。
+- 10-financial-common-sense-and-semantic-understanding: 10 解释概念、口径和语义；08 回答资讯事件和事实知识。
+- 11-instruction-following-ability: 11 按约束生成、压缩或改写文本；08 解释资讯、事件、政策、进展或知识事实。
+- 15-stock-comprehensive-analysis-and-selection: 如果主任务是解释资讯、政策、事件或事实本身，归 08；如果要求把资讯与基本面、技术面、资金面等整合成股票/市场投资判断，归 15。
+- 16-macro-information-qa: 16 的交付是指定地域、年份和口径的宏观/社会经济统计指标；08 的交付是资讯事实、政策事件、进展和影响解释。
+
+09 财报业绩解读（09-financial-performance-interpretation）
+定义：
+财报、业绩公告、经营指标、会计口径或财务影响的解释、归因和持续性判断。
+适用场景：
+- 用户要求解读年报、季报、业绩快报、分红公告、业绩预告或财务指标变化。
+- 用户询问现金流、毛利率、ROE、营收确认、净利润差异、会计差错更正、投资性房地产公允价值等说明什么。
+- 用户要求从财务表现连接经营归因、股价影响或业绩持续性判断。
+- 用户关注利润暴增暴跌、现金流异常、资本开支、费用率、资产负债或经营质量变化的原因。
+排除场景：
+- 只是查询财务数值、分红金额或历史记录。
+- 普通资讯问答、无财务报告语境的个股诊断、KYC 投顾建议。
+- 财报只是综合分析中的一项材料，主任务是一般投资分析评价。
+边界规则：
+- 09 的主任务必须是财报/业绩/经营指标解释，而不是简单查数。
+- 09 重点是财务指标背后的经营含义、持续性和归因；若只是提取财务数值或生成表格，通常归 03。
+- 若问题从财报进一步要求投资价值判断，按主任务在 09 与 04 间选择。
+- 分红公告若要求解释财务意义或市场影响，可归 09；只查分红记录归 03。
+易混类别：
+- 03-stock-diagnosis-and-data-lookup: 03 查财务数据；09 解读财务表现、经营归因和影响。
+- 04-analysis-evaluation-and-self-judgment: 04 综合分析资产价值；09 聚焦财报业绩解读。
+- 05-kyc-recommendation-suggestions: 05 面向用户画像给建议；09 不以个人适配为中心。
+- 15-stock-comprehensive-analysis-and-selection: 如果主任务是财报、业绩、会计口径或经营指标的解释归因，归 09；如果财报只是综合投资分析中的一个视角，且需要形成操作/强弱/风险判断，归 15。
+
+10 金融常识与语义理解（10-financial-common-sense-and-semantic-understanding）
+定义：
+金融常识、金融语义、指标口径、交易规则、实体识别、错别字/黑话纠错和用户真实意图补全类问题。
+适用场景：
+- 用户询问金融概念、术语、市场黑话、交易规则、指标口径或产品/实体边界是什么意思。
+- 用户表达中有错别字、谐音、简称、口语黑话或非标准实体，需要先纠错和识别真实含义。
+- 问题重点是理解语义、口径、规则或实体关系，而不是完成后续投资任务。
+- 用户要求解释指标计算口径、代码含义、市场制度、金融分类或专业名词的边界。
+排除场景：
+- 主要考察事件选股排序、严格指令遵循或复杂投资逻辑推理。
+- 术语只是查数、分析、推荐或资讯问答中的一个词。
+- 主任务是金融终端、API、插件、导出、接入、权限、界面或操作路径的产品使用问题；这类问题通常归 other，不因包含金融指标名词就归 10。
+- 如果术语、规则、实体或错别字问题出现在投资对话中，且必须先澄清、纠错、承接上下文或定义口径才能可靠回答，优先 07。
+- 用户明确要求按某种格式、范围或约束执行任务，且遵循指令是主考点。
+边界规则：
+- 10 解决“这是什么意思/这个口径怎么理解/这个实体是哪类东西”。
+- 10 是可直接解释的常识/语义问题；若实体错写或口径缺失会改变答案对象，优先 07。
+- 如果用户问的是软件里怎么操作、怎么接入、怎么导出、怎么插入字段，主任务不是理解金融含义，通常归 other。
+- 理解术语后如果主任务是选股、分析、推荐或预测，应归对应主任务类别。
+- 10 与 07 的边界：10 是可直接回答的含义、定义、口径或规则解释；07 是需要追问、纠错、分层假设或把模糊条件转成执行口径的对话任务。
+- 不要把所有知识问答都归 10；新闻、政策、事件进展类直接问答通常是 08。
+易混类别：
+- 08-information-and-knowledge-qa: 08 回答资讯事实；10 解释术语、口径、规则、实体和语义。
+- 07-interactive-clarification: 07 处理澄清、纠错、上下文承接和模糊口径落地；10 直接解释术语、规则、实体边界和语义。
+- 11-instruction-following-ability: 11 考执行显式约束；10 考理解真实含义。
+- 12-financial-logical-reasoning: 12 考投资推理；10 考基础语义和口径理解。
+- 14-complex-stock-selection: 如果主任务是理解术语、指标口径或规则，归 10；如果这些语义服务于复杂条件选股并要求输出候选股票，归 14。
+
+11 指令跟随能力（11-instruction-following-ability）
+定义：
+用户给出明确任务、问题类型、对象范围、排除条件、输出焦点或格式约束，答案成败主要取决于是否严格遵守。
+适用场景：
+- 用户明确要求列举、定义、对比、整理、只看某范围、不看某内容、按特定格式输出。
+- 用户要求撰写、精简、优化、润色、代笔或生成金融文案，且字数、风格、口吻、结构、可复制格式或禁用内容是主要约束。
+- 用户的范围、对象、数量、顺序、排除项、输出结构或最新约束是主要考点。
+- 金融任务本身不难，关键风险是答非所问、漏掉约束、对象错配或格式偏离。
+- 用户要求严格按附件、模板、表格、步骤或限定字数输出，且这些约束主导答案合格与否。
+排除场景：
+- 主要考察金融术语知识但没有明显指令偏离风险。
+- 格式只是附带展示要求，核心仍是查数、分析、资讯问答或推荐。
+- 时间锚点/交易日历理解是主考点。
+边界规则：
+- 不要因为出现“表格/列出/对比”就自动归 11；要看指令遵循是否主导答案正确性。
+- 11 的核心是执行约束，不是金融能力本身；若取数、分析、资讯核验才是主要难点，优先对应金融主类。
+- 如果 query 的主交付物是一段受明确约束的金融文案，例如调入逻辑、推荐理由、材料回复、介绍文案或精简稿，通常归 11；如果主交付物是实质性分析结论，再按 04/08/12 等金融主任务分类。
+- 多轮或长指令中，最新的只要、不要、必须、不得、范围限定通常是强约束。
+- 如果金融主任务明显更专门，且格式不构成主风险，归金融主任务类别。
+易混类别：
+- 03-stock-diagnosis-and-data-lookup: 普通表格查数仍是 03；约束遵循成为主风险才是 11。
+- 04-analysis-evaluation-and-self-judgment: 04 以分析评价资产或市场为主；11 以按约束生成/改写金融文本为主。
+- 08-information-and-knowledge-qa: 08 以事实、资讯、政策或事件解释为主；11 以按要求组织表达、控制字数和格式为主。
+- 10-financial-common-sense-and-semantic-understanding: 概念解释可归 10；按用户指定方式执行定义/列举可归 11。
+- 13-time-awareness-ability: 时间词作约束不必然 13；时间推理本身主导才是 13。
+- 14-complex-stock-selection: 如果成败主要在于严格遵守输出格式、排除条件或文案约束，归 11；如果这些约束服务于复杂股票筛选，归 14。
+- 15-stock-comprehensive-analysis-and-selection: 如果成败主要在于格式、字数、风格、范围等显式指令遵守，归 11；如果核心是股票综合分析与投资决策，归 15。
+
+12 金融逻辑推理（12-financial-logical-reasoning）
+定义：
+投资判断、走势预测、个股选择、强势股筛选、板块内比较和风险情景推演类金融推理任务。
+适用场景：
+- 用户要求判断便宜有潜力的股票、明天可能涨停的股票、个股下周走势、还能不能追或后市怎么操作。
+- 用户要求多只概念股怎么选、谁弹性更强、谁更稳健、哪个风险收益更合适。
+- 用户要求根据市场热点、资金、技术面、基本面和事件催化形成投资逻辑或风险情景。
+- 用户要求在多个候选方向/标的之间做预测、取舍、排序或情景推演。
+排除场景：
+- 只考察单个金融术语定义、单纯指令未遵循、纯事实资讯问答或纯数据查询。
+- 主任务是从事件/概念找受益标的和排序。
+- 主任务是结合个人画像给适配后的推荐、仓位或配置建议。
+- 主任务是按复杂条件筛出股票候选池，而不是推理解释或情景判断。
+- 主任务是系统性整合基本面、技术面、资金面、消息面并给出股票/市场综合决策。
+边界规则：
+- 12 的核心是证据到结论的金融因果链和投资取舍，不是堆指标或静态资料总结。
+- 12 更强调“未来会怎样/该选哪个/能不能追”的推理链；如果主要是客观分析评价而非取舍预测，判断 04。
+- 预测类问题要有条件、情景和风险；但分类时看用户是否要求预测/取舍/推演。
+- 若 query 有明确个人持仓、风险、目标或资金背景，优先考虑 05。
+易混类别：
+- 04-analysis-evaluation-and-self-judgment: 04 分析评价资产；12 更强调预测、比较、排序、操作取舍和风险推演。
+- 01-event-and-concept-stock-selection: 01 从事件/概念发现标的；12 对标的或候选进行投资逻辑判断。
+- 05-kyc-recommendation-suggestions: 05 个性化适配建议；12 一般投资逻辑推理。
+- 14-complex-stock-selection: 如果问题要求通过复杂条件筛出股票，归 14；如果重点是基于金融逻辑链解释因果、比较强弱或推演情景，归 12。
+- 15-stock-comprehensive-analysis-and-selection: 如果核心是抽象金融逻辑、因果链或情景推演，归 12；如果核心是对具体股票/市场做多维综合分析并形成投资判断，归 15。
+
+13 时间感知能力（13-time-awareness-ability）
+定义：
+答案正确性高度依赖相对日期、周几、交易日历、市场休市、披露期、历史区间、未来日期、最新数据口径或 过期数据 纠错的任务。
+适用场景：
+- 用户问题包含今天、昨天、去年、下周、近 N 日、截至某日等需要精确落地的时间锚点。
+- 用户问题需要区分自然日、交易日、周几、节假日、休市、盘前/盘中/盘后或跨市场时区。
+- 用户问题涉及财报披露期、历史区间、未来预测日期、最新数据口径或旧数据冒充当前数据的风险。
+- 用户问题的正确答案取决于相对时间换算、交易日定位、未来/过期数据识别或披露窗口判断。
+排除场景：
+- 完全不涉及时间边界的普通事实问答、纯投资逻辑分析或不依赖当前日期的数据解释。
+- 时间只是普通查询范围，主任务是查数、计算、分析或资讯问答。
+- 时间只是用户格式/范围约束，主要考察指令遵循。
+边界规则：
+- 只有时间理解决定答案正确性时才归 13。
+- 13 不是所有带日期的问题；只有时间推理错误会直接导致错答时才优先 13。
+- 若问题同时属于查数、分析评价或事件选股，但主要错误风险来自时间锚点/交易日历/数据时点，可优先 13。
+- 普通“过去五年/今年/最近”不自动归 13；要看是否需要复杂时间推理或当前日期判断。
+- 指定 2002、2008、2021—2024 等统计年份的宏观指标查询，时间只是数据筛选条件，归 16；只有核心是相对日期解析、当前时点或发布期判断时才归 13。
+易混类别：
+- 02-backtesting-data-extraction-and-calculation: 02 用时间窗口计算结果；13 判断时间锚点、交易日历和数据时点。
+- 03-stock-diagnosis-and-data-lookup: 03 带日期查数；13 时间口径本身是主考点。
+- 11-instruction-following-ability: 11 遵守显式约束；13 解决时间推理和最新口径。
+- 14-complex-stock-selection: 如果时间锚点只是复杂选股条件的一部分，归 14；只有答案成败主要取决于时间锚点、交易日历、披露期或 过期数据 纠错时，才归 13。
+- 15-stock-comprehensive-analysis-and-selection: 如果时间只限定综合分析的数据新鲜度或近期走势，归 15；如果核心是解析日期、交易日、披露期或当前时点边界，归 13。
+- 16-macro-information-qa: 16 按指定统计年份查询宏观指标；13 处理相对日期、当前时点、交易日历或发布窗口本身。
+
+14 复杂选股（14-complex-stock-selection）
+定义：
+多条件、多阶段、跨口径或带排序/字段/排除条件的股票筛选任务。核心是完整理解筛选条件、金融口径和先后依赖，产出符合要求的候选股票池或排序结果。
+适用场景：
+- 用户要求按照多个硬性或软性条件筛选股票，例如行业、概念、财务、技术、资金、时间窗口、交易状态、排除范围等组合条件。
+- 用户要求先后分层筛选、跨市场/跨板块/跨产业链筛选，或需要处理“先满足A再满足B”“近N日/某时点/某阶段”等时间依赖。
+- 用户要求输出候选股票、排序、Top N、字段明细、筛选理由、入选条件覆盖或无结果说明。
+- 问题很长但各条件统一服务于选股，即使包含概念、行情、财务、技术或消息条件，也优先按复杂选股处理。
+排除场景：
+- 核心是某个事件/政策/主题的受益链条映射和受益标的排序，而不是复杂筛选条件本身。
+- 核心是回测历史规律、统计收益胜率或计算历史表现。
+- 只是查询单个数据、单项指标、简单明细或轻量诊断，不需要复杂筛选规划。
+- 核心是对已给定股票或市场做多维综合分析并形成买卖、持有、强弱、风险等投资判断。
+- 多个并列强任务不能被统一解释为选股，需要同时完成筛选、分析、推荐、查数、资讯整合等复合闭环。
+边界规则：
+- 先判断用户最终是否要“筛出股票/候选池/排序名单”。如果是，再看是否存在多条件、多阶段、复杂口径或输出字段要求。
+- 复杂选股不要求一定有事件驱动；财务、技术、资金、时间、交易状态、排除条件等组合也可以构成 14。
+- 不要因为 query 很长就自动归 06；只要所有子条件统一服务于选股，优先归 14。
+- 如果只有一个简单条件或只是查某股票/板块数据，通常归 03。
+- 如果用户要求的是“这些股票怎么看、能不能买、谁更强、风险如何”，而不是筛选候选池，通常归 15 或 12。
+易混类别：
+- 01-event-and-concept-stock-selection: 01 从事件/政策/概念/产业链主题出发找受益股；14 从复杂条件体系出发筛股票。事件概念只是筛选条件之一时优先 14。
+- 02-backtesting-data-extraction-and-calculation: 02 要回测、统计、计算历史表现；14 要按条件筛出当前或指定范围的股票。
+- 03-stock-diagnosis-and-data-lookup: 03 是查数、提取明细或轻量诊断；14 需要复杂筛选规划、条件覆盖和候选池输出。
+- 06-compound-intent: 06 是多个并列强任务的复合闭环；14 的多个条件虽多，但目标统一为选股。
+- 11-instruction-following-ability: 11 的核心是遵守格式/范围/表达等显式指令；14 的核心是正确执行复杂股票筛选逻辑。
+- 13-time-awareness-ability: 13 的核心是时间锚点、交易日历或披露期判断；14 的时间窗口只是筛选条件的一部分。
+- 15-stock-comprehensive-analysis-and-selection: 14 主要产出候选股票或排序名单；15 主要对股票/市场做多维分析并形成投资决策。
+
+15 股票综合分析与选股决策（15-stock-comprehensive-analysis-and-selection）
+定义：
+围绕个股、多标的组合或市场进行多维综合分析，并形成投资判断、趋势判断、强弱判断、买卖/持有建议、风险边界或操作策略的任务。核心是整合基本面、技术面、资金面、消息面和风险，给出可解释的决策结论。
+适用场景：
+- 用户要求分析某只股票、几只股票或市场整体是否值得买、能不能持有、是否强势、趋势如何、风险是否累积或后续怎么操作。
+- 用户要求综合分析基本面、业务进展、竞争力、财务表现、技术走势、量价关系、资金筹码、近期消息催化或上涨逻辑。
+- 用户要求比较多个标的谁更强、谁更适合关注、谁风险收益更好，并期待明确判断或操作建议。
+- 用户问走势、支撑压力、底部、出货/洗盘、短线机会、市场阶段、主线方向等，答案需要量价、位置、资金、消息和风险共同支撑。
+排除场景：
+- 主任务只是查询某个数据、指标、行情、财务数值或事实明细，不需要综合投资判断。
+- 主任务是按复杂条件筛选股票候选池，而不是对已有标的做综合分析或决策。
+- 主任务是结合用户个人画像、资金、持仓、风险偏好、期限或亏损处境做个性化推荐。
+- 主任务是评价已有回答、研究观点或分析方法是否合理，或者只分析基金、ETF、指数或宏观资产。
+- 主任务只是围绕股票的单一原因、单一投资逻辑、估值位置、业务质量或某个观点做聚焦评价，不要求多维综合框架。
+- 主任务是抽象金融逻辑推理、术语解释或资讯事实问答，没有要求形成综合投资决策。
+边界规则：
+- 先判断对象是否为股票、多股票组合或股票市场，再判断是否需要多维综合分析、全面诊断或完整决策框架。
+- 15 不要求用户逐项列出所有分析维度；只要正确答案必须系统整合多个核心视角，仍属于综合分析与决策。
+- 如果只查数据，归 03；如果财报业绩本身是主任务，归 09；如果个人适配是主任务，归 05。
+- 如果问题目标是筛出股票名单而不是分析已有股票，归 14。
+- 如果只是分析一个聚焦问题、判断一条投资逻辑，或对象是基金、ETF、指数、宏观资产，通常归 04。
+- 如果只是抽象因果推理或情景推演，且不需要综合投研框架和操作结论，通常归 12。
+易混类别：
+- 03-stock-diagnosis-and-data-lookup: 03 以查数、事实、指标或轻量诊断为核心；15 需要整合多维证据形成投资判断和可执行结论。
+- 04-analysis-evaluation-and-self-judgment: 04 处理聚焦的投资分析评价，以及基金/ETF/指数/宏观资产分析；15 专门处理股票、多股票或股票市场的多维综合分析、全面诊断和决策。
+- 05-kyc-recommendation-suggestions: 05 必须结合用户画像、持仓、资金、风险偏好、期限或处境；15 主要判断标的或市场本身。
+- 06-compound-intent: 06 是多个并列强任务的复合闭环；15 的多个视角统一服务于综合投资判断。
+- 09-financial-performance-interpretation: 09 以财报/业绩/经营指标解读为主；15 可包含财务视角，但最终目标是综合投资决策。
+- 12-financial-logical-reasoning: 12 以金融逻辑链、因果推理、情景推演为核心；15 以股票/市场多维分析和操作判断为核心。
+- 14-complex-stock-selection: 14 主要筛选候选股票或排序名单；15 主要分析已给定股票/市场并形成投资判断。
+
+16 宏观信息问答（16-macro-information-qa）
+定义：
+查询、整理或比较人口、卫生、教育、贫困、就业及其他宏观或社会经济统计指标的任务。核心是按指定国家、地区、城市、年份、指标定义和统计口径给出权威、可追溯的数值，并妥善处理缺失、估算、修订和跨对象可比性。
+适用场景：
+- 用户查询国家、地区或城市的死亡率、婴儿死亡率、出生率、人口、预期寿命等人口与卫生统计指标。
+- 用户查询国内贫困率、贫困人口、就业、失业、收入、社会发展等宏观或社会经济指标。
+- 用户查询小学、中等、高等教育等各级粗入学率、净入学率或其他教育统计指标。
+- 用户要求跨国家、地区、年份或教育阶段整理、比较、排序或形成时间序列，并需要统一单位、年份和统计口径。
+- 用户指定历史年份或尚可能未发布的年份，答案需要说明最近可得值、估算/初值、缺失或修订状态。
+排除场景：
+- 证券行情、个股、板块、商品、期货、汇率、公司经营或行业金融数据查询。
+- 金融资讯、政策、监管、产业事件、公司进展、市场异动或传闻的解释与影响分析。
+- 财报、业绩、会计指标或公司经营表现的解读。
+- 宏观指标的概念定义本身是主任务，且不要求具体地域、年份或数值。
+- 问题核心是相对日期、交易日历、当前时点或数据发布窗口的时间推理，而不是取得宏观指标。
+边界规则：
+- 16 的判断核心是最终交付是否为按地域、年份和口径组织的宏观/社会经济统计数值，而不是是否出现“宏观”关键词。
+- 人口、卫生、教育、贫困、就业等社会经济指标归 16；证券、市场、商品、汇率、公司与行业金融数据归 03。
+- 直接索取死亡率、婴儿死亡率、国内贫困率、粗入学率等数值归 16；解释新闻、政策、事件进展或影响链条归 08。
+- 统计年份只是取数条件时归 16；相对日期解析、当前时点、交易日历或发布期判断决定答案成败时归 13。
+- 只问指标含义、术语或计算定义且不索取具体数值时优先 10；既要具体数据又需口径说明时仍归 16。
+易混类别：
+- 03-stock-diagnosis-and-data-lookup: 03 查询证券、市场、商品、汇率、公司或行业金融数据；16 查询人口、卫生、教育、贫困、就业等宏观或社会经济统计指标。
+- 08-information-and-knowledge-qa: 08 解释资讯、政策、事件、进展和影响；16 交付指定地域、年份和口径的统计数值或比较表。
+- 10-financial-common-sense-and-semantic-understanding: 10 解释指标概念、术语和定义；16 查询具体地域、年份和指标数值，口径说明服务于数据交付。
+- 13-time-awareness-ability: 13 的核心是相对时间、当前时点、交易日历或发布窗口推理；16 的年份主要用于筛取宏观统计数据。</pre>
+        </details>
+      </section>
+
+      <section class="prompt-panel" aria-label="独立复判提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>独立复判提示词（含已确认负例）</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定**前文问题列表**（可能为空）和**当前问句**，判断当前问句是否是一个&quot;复杂金融问句&quot;。
 
 复杂金融问句必须同时满足：
-1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖前文就能理解在问什么（前文只用于理解指代，不补足任务）。
-2. 自身承载需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行的任务，答案不能通过一次简单查询获得。
+1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖前文就能理解在问什么。
+2. 问句自身完整承载需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行的任务，答案不能通过一次简单查询获得。
+
+前文的使用边界（关键纪律）：
+- 前文**只允许**帮助理解指代（&quot;它&quot;&quot;这家公司&quot;&quot;这个列表&quot;等词的具体对象）。
+- 前文**绝不允许**补足任务：问句的任务对象、候选集合、比较维度、分析范围若来自前文（例如&quot;再给我排一次&quot;&quot;重新检查这个列表&quot;&quot;换另一只&quot;&quot;那这些呢&quot;），该问句单独看任务不完整 → 判不复杂。
+- 问句中引用前文产物（&quot;la lista&quot;&quot;the list&quot;&quot;the table&quot;&quot;上一步的结果&quot;）而不自带完整任务 → 判不复杂。
 
 以下类型一律判为不复杂（即使提到具体标的名字）：
 - 纯陈述 / 计划告知：只告知已做或打算做的动作，不含任务。
-- 承接性短指令 / 确认：单独不构成任务（&quot;继续&quot;&quot;再看看&quot;&quot;再分析一下我的持仓&quot;）。
-- 无具体对象的泛化指令：没有明确标的、条件或比较对象（&quot;分析一下市场&quot;）。
+- 承接性短指令 / 确认：单独不构成任务（&quot;继续&quot;&quot;再看看&quot;&quot;再分析一下我的持仓&quot;）。多语言承接信号包括：again、once more、revisa、de nuevo、repite、otra vez、okay/OK/yes/no 开头、so/and/then/also 开头、what about、how about、再来/接着/那/这些/上面/刚才/还有。
+- 无具体对象的泛化指令：没有明确标的、条件或比较对象（&quot;分析一下市场&quot;&quot;推荐低估值高成长个股&quot;）。
 - 短决策 / 短评价：只有&quot;要不要&quot;&quot;能不能&quot;&quot;好不好&quot;&quot;行不行&quot;式的一句话询问，即使带行权价、到期日、持仓量等参数，也没有要求分析过程或比较取舍。
-- 单步查数 / 查异动 / 查新闻：只查一个行情、原因或事实。注意区分：明确列出多个数据源/维度并要求综合找原因的调查任务是多步任务，应判复杂。
+- 单步查数 / 单步计算 / 查异动 / 查新闻：只查一个行情、价格、市值、收益率、原因或事实；一次加减乘除也算单步。注意区分：明确列出多个数据源/维度并要求综合找原因的调查任务是多步任务，应判复杂。
 - 简单取数计算：仅按显式条件过滤/匹配/排序并输出名单，不含计算、统计、回测或多步处理。
+- 纯条件筛选列表（&quot;筛选出满足X条件的股票并列出&quot;）：无计算、统计、回测或分析要求 → 不复杂。
+- 单标的短期前景/表现评价：只问&quot;后市如何/表现如何/outlook/近期走势&quot;而未明确列出多个分析维度（如基本面+技术面+资金面+消息面）或指标 → 不复杂。
 - 闲聊、纠错、无实质任务、非金融问题。
 
 本次为第 1 轮独立复核：独立判断，不参考任何之前轮次的结论。判定纪律：默认从严，只有问句本身极其明确、无歧义地同时满足上面两条标准的，才判为复杂。
@@ -1355,11 +2372,63 @@ JSON 格式：
         </details>
       </section>
 
+      <section class="prompt-panel" aria-label="复判从严提示词">
+        <details>
+          <summary>
+            <span class="summary-title">
+              <strong>复判从严提示词（第 2 轮起，逐轮从严）</strong>
+            </span>
+            <span class="prompt-actions">
+              <button class="copy-button" type="button">复制提示词</button>
+              <span class="copy-status" aria-live="polite"></span>
+            </span>
+          </summary>
+          <pre class="prompt-code">你是一个金融问句复杂度评估专家。给定**前文问题列表**（可能为空，仅用于消解指代）和**当前问句**，这是对该问句的**第 {round_no} 轮独立判定**。请独立判断，不参考之前任何轮次的结论。
+
+判定标准与主判定一致，必须同时满足：
+1. 问句自身明确指涉具体金融对象：标的、行业、主题、市场、账户、组合、策略或投资目标，且不依赖前文就能理解在问什么（前文只用于理解指代，不补足任务）。
+2. 自身承载需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行的任务，答案不能通过一次简单查询获得。
+
+以下类型一律判为不复杂（即使提到具体标的名字）：
+- 纯陈述 / 计划告知
+- 承接性短指令 / 确认（again、revisa、de nuevo、okay 开头、so/and/then/also 开头、what about、再来/接着/那/这些/上面/刚才/还有 等承接信号）
+- 引用前文产物而不自带完整任务（&quot;la lista&quot;&quot;the list&quot;&quot;上一步的结果&quot;）
+- 无具体对象的泛化指令
+- 短决策 / 短评价
+- 单步查数 / 单步计算 / 查异动 / 查新闻
+- 简单取数计算 / 纯条件筛选列表 / 单标的短期前景评价（未明确多维分析要求）
+- 闲聊、纠错、无实质任务、非金融问题
+
+判定纪律（比主判定更严，宁缺毋滥）：
+- 独立判定：不参考、也不可被之前任何轮次的结论锚定。
+- 前文只允许消解指代，绝不允许补足任务；任务对象来自前文 → 不复杂。
+- 默认从严：只有问句本身极其明确、无歧义地同时满足上面两条标准的，才判为复杂；否则一律判不复杂。
+- 特别注意：承接性短指令、短决策、单步查数、纯条件筛选最容易在第 1 轮被误判为复杂，复核时优先排除。
+
+输出要求：
+- 只输出一个可解析的裸 JSON 对象，不要 Markdown、代码块或说明。
+- 字段：{{&quot;is_complex&quot;: bool, &quot;reason&quot;: &quot;中文短句，说明复核理由&quot;}}
+
+以下问句已被确认为不复杂（负例，判定时参照，不要与之冲突）：
+- 结合市场信息分析一下605499股票走势
+- 科技硬件、涨价链、出口制造各推5只个股
+- 目前手上有东方财富2000股成本23.31，今天价适不适合做T
+- 抓取5支真正意义上的中药题材个股给我，且目前股价处于低位的。
+- 给我整理pcb的龙头企业，要求财务状态好，订单多
+- 分析显盈科技，并给我一个进仓位价格
+- 帮我分析一下最近 ST 瑞和的走势，以及接下来，还有今天的趋势会怎么？
+- 如果我8月4号的10点45买入嘉立创，又在8月5号的9点45卖出，我的收益率是多少
+- 以有研硅这只股票为例，上个月的最高点涨到60块钱左右，最近刚出完权，一度跌到了20块左右，这两天又涨到了36，如果按照除权和复权，或者填权，这36相当于原来的多少钱？
+- 麒麟信安，晶科能源，大全能源，昱能科技，悦康药业，光峰科技最近581个交易日平均股价分别是多少？
+- 我今天买的章源钨业26块两毛九买的是25800股，然后25块九买的是5800股，然后明天要是按你给我说的呃，明天涨2%的利润，我大概能收入多少钱</pre>
+        </details>
+      </section>
+
       <section class="prompt-panel" aria-label="翻译提示词">
         <details>
           <summary>
             <span class="summary-title">
-              <strong>翻译提示词 <code>translate</code> · LLM</strong>
+              <strong>翻译提示词</strong>
             </span>
             <span class="prompt-actions">
               <button class="copy-button" type="button">复制提示词</button>

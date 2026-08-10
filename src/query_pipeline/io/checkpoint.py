@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -85,7 +87,48 @@ def stage_checkpoint(cfg: PipelineConfig, stage: str) -> "Checkpoint":
     path = cfg.checkpoint_dir / f"{stage}.jsonl"
     if not cfg.checkpoint.enabled:
         return Checkpoint(path=path, enabled=False)
-    return Checkpoint.load(path, expected_meta=stage_meta(cfg, stage))
+    cp = Checkpoint.load(path, expected_meta=stage_meta(cfg, stage))
+    if stage == "judge":
+        _migrate_judge_checkpoint(cp)
+    return cp
+
+
+def _migrate_judge_checkpoint(cp: "Checkpoint") -> None:
+    """旧格式 judge checkpoint 迁移：剥离 rows/judged 大字段（MB 级 chain）。
+
+    第三轮修复前 judge checkpoint 每会话存 rows/judged + stats（500 会话实测
+    91MB，且每次 run 全量解析进内存）；修复后只存 stats，rows/judged 由
+    llm_cache 确定性重建。存量旧文件不会自愈——每次 run 仍全量解析大对象，
+    这里在加载时检测并一次性剥离重写为 stats-only。
+    """
+    if not cp.enabled or not cp.path.exists():
+        return
+    heavy = [k for k, rec in cp.records.items() if "rows" in rec or "judged" in rec]
+    if not heavy:
+        return
+    logger.warning(
+        "judge checkpoint %s: %d 条旧格式记录（含 rows/judged）已迁移为 stats-only",
+        cp.path, len(heavy),
+    )
+    for key in heavy:
+        cp.records[key] = {k: v for k, v in cp.records[key].items() if k not in ("rows", "judged")}
+    # 原子重写：meta 行 + 全部记录（stats-only）。tmp 名带 pid+随机后缀：
+    # 两个进程并发迁移时不共用同一 tmp（与 llm_cache rewrite 同一竞态防护）。
+    tmp = cp.path.with_name(f"{cp.path.name}.migrate.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            if cp.meta is not None:
+                handle.write(
+                    json.dumps({"type": "meta", **cp.meta}, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
+            for record in cp.records.values():
+                handle.write(
+                    json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
+        os.replace(tmp, cp.path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def content_key(*parts: str) -> str:

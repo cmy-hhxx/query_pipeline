@@ -985,7 +985,7 @@ def _write_config(
               max_retries: 1
               timeout_seconds: 1
               response_format: json_object
-              cache: work/llm_cache.jsonl
+              cache: llm_cache.jsonl
             """
         ).strip()
         + "\n",

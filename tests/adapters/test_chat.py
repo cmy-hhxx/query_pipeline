@@ -40,3 +40,32 @@ class ChatAdapterTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             adapt_chat({"question": "x"})
 
+    def test_adapt_chat_non_dict_turn_raises(self) -> None:
+        # 非 dict turn 静默过滤会让整行在 chat 门槛下无声落选：必须 fail-loud
+        # （preclean 按 adapt_failed 进 bad_lines，可审计、可计数）。
+        record = {
+            "judge_data": {
+                "case_id": "c1",
+                "input": {"text": "当前问句"},
+                "context": [{"question": "前文1", "answer": "a1"}, "not-a-dict", 42],
+                "chain": [],
+            }
+        }
+        with self.assertRaises(ValueError):
+            adapt_chat(record)
+
+    def test_adapt_chat_malformed_chain_warns_and_empties(self) -> None:
+        # 畸形 chain 记 warning 并置空（chain 缺省对 chat 合法），不得崩溃。
+        record = {
+            "judge_data": {
+                "case_id": "c1",
+                "input": {"text": "当前问句"},
+                "context": [],
+                "chain": "not-a-list",
+                "raw_answer": "raw",
+                "text_answer": "text",
+            }
+        }
+        session = adapt_chat(record)
+        self.assertEqual(session.turns[-1].chain, [])
+

@@ -77,6 +77,8 @@ preclean → segment → rule_gate → judge → verify → simple_gate → answ
 
 杀进程后直接重跑，已完成单元跳过：LLM 缓存 + 阶段 checkpoint 都在 `outputs/<数据集>/logs/` 下（judge/verify/translate）。配置/输入/源码变化自动失效。强制全量重跑：删 logs/checkpoints 和 logs/llm_cache.jsonl。
 
+**judge 续跑是 cache-only**：judge checkpoint 只存每会话的完成标记与统计（rows/judged 含 MB 级 chain，不再落盘，由 llm_cache 确定性重建）。删 llm_cache.jsonl 后 judge 会全量重调 LLM（verify/translate 的 checkpoint 仍可复用）；存量旧格式 judge checkpoint（含 rows/judged）在加载时自动迁移为 stats-only。
+
 ## 质检（quality）
 
 对输出 jsonl 做质量校验：全量规则 + LLM 抽检。
@@ -85,6 +87,8 @@ preclean → segment → rule_gate → judge → verify → simple_gate → answ
 uv run query-pipeline-qc run --dataset aime --date 0806                 # 规则 + LLM 抽检（默认 5%）
 uv run query-pipeline-qc run --dataset aime --date 0806 --no-llm
 ```
+
+QC 产物按日期分目录：`outputs/<数据集>/qc/<date>/`（results.jsonl / overview.json / report.md / sampled.jsonl，同一数据集不同日期互不覆盖）。
 
 逐条规则含：结构、问句长度/乱码、分类（complex-topic/ 前缀校验）、chain、回答非空/截断/**拒绝话术**/**last_event_type**、时间与 token、翻译/理由元信息。数据集级规则含近重复（槽化 Jaccard ≥ 0.85）、类别偏斜、空值率、未知字段。
 

@@ -371,6 +371,43 @@ class CheckpointInvalidationTest(unittest.TestCase):
             keys = {r["key"] for r in cp if r.get("type") != "meta"}
             self.assertEqual(len(keys), 2)
 
+    def test_judge_checkpoint_old_format_migrated(self) -> None:
+        # 第四轮 #3：存量旧格式 judge checkpoint（每会话含 rows/judged，MB 级
+        # chain）在加载时自动迁移为 stats-only，否则每次 run 仍全量解析大对象。
+        from query_pipeline.io.checkpoint import stage_checkpoint, stage_meta
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write_jsonl(tmp_path / "input.jsonl", [_session("t0", "S0")])
+            cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
+            path = cfg.checkpoint_dir / "judge.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            meta = {"type": "meta", **stage_meta(cfg, "judge")}
+            old_row = {
+                "key": "c:old",
+                "rows": [{"chain": "x" * 1000}],
+                "judged": [{"idx": 0}],
+                "stats": {"candidates": 1},
+            }
+            new_row = {"key": "c:new", "stats": {"candidates": 1}}
+            path.write_text(
+                "".join(
+                    json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n"
+                    for r in (meta, old_row, new_row)
+                ),
+                encoding="utf-8",
+            )
+
+            cp = stage_checkpoint(cfg, "judge")
+            self.assertEqual(cp.get("c:old"), {"key": "c:old", "stats": {"candidates": 1}})
+            self.assertEqual(cp.get("c:new"), {"key": "c:new", "stats": {"candidates": 1}})
+            # 文件已重写为 stats-only：不再含 rows/judged 大字段
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("\"rows\"", text)
+            self.assertNotIn("\"judged\"", text)
+            self.assertIn("c:old", text)
+            self.assertIn("c:new", text)
+
     def test_fingerprint_tracks_source(self) -> None:
         # Code changes must invalidate the checkpoint fingerprint (else a behavior fix
         # silently never takes effect on resume).
@@ -435,7 +472,7 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
               max_retries: 1
               timeout_seconds: 1
               response_format: json_object
-              cache: work/llm_cache.jsonl
+              cache: llm_cache.jsonl
             """
         ).strip()
         + "\n",

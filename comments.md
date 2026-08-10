@@ -6,6 +6,11 @@
 >
 > **第二轮修复状态（2026-08-09）：全部 10 项已修复**（基于提交 d566151 之后的代码）。
 > 基线 207 passed → 修复后 **224 passed** / pyright 0 error（新增 17 个回归测试）。
+>
+> **第三轮修复状态（2026-08-09）：全部 10 项已修复**（基于提交 48f4dc6 之后的代码）。
+> 基线 224 passed → 修复后 **244 passed** / pyright 0 error（新增 20 个回归测试，均不依赖真实 LLM）。
+> 说明：第三轮 #8 仅涉及 chat 适配器（session 适配器的非 dict turn 按第二轮契约
+> 计 empty_sessions，语义不变，未动）。
 
 > 审查方式：主代理全量通读 + 4 个子代理并行分工审查（llm/io、steps/session、quality/post、config/api），
 > 每个点均经**交叉验证**（≥2 个独立来源 + 代码路径/运行实证）后才记录。维度：健壮性 / 可扩展性 / 优雅 / 简洁。
@@ -208,3 +213,218 @@ importlib.resources fallback，实现没有；(e) cli `--verify-rounds` 只映�
 .env 三套查找逻辑（api/loader/quality）、record_key 无 id 时 `line_?` 撞键、cli 死代码/未使用 import、
 model 默认字面量 6 处 + concurrency 256 vs 64、report.md "共 N 条（显示前 N 条）"恒等文案、api.run JSON 往返、
 sniff_format 仅采样 5 行、verify 4xx 不落 checkpoint（恢复后重验）。*
+
+---
+
+# 第三轮审查：10 个新问题（基于修复提交 48f4dc6 之后的代码）
+
+> 方法：3 个子代理并行（48f4dc6 回归审查、性能/并发深挖、quality/config/适配器深挖）+ 主代理逐项实证。
+> 基线：`uv run pytest` 224 passed；`pyright src 0 errors`。
+> 前两轮 20 条已全部修复；本条含**修复不彻底项**（#1）与修复引入的**新问题**（#4）。
+
+## 1. [高·回归不彻底] 模板污染仍在：第二轮 #8 只修了标题行，正文继续混入类别 16 — ✅ 已修复
+**位置**：`src/query_pipeline/prompts/assemble.py:69-71,126-128`（对照 `templates/normal_few_shot.md:505`）
+**问题**：`parse_normal_few_shot` 对 `# 决策步骤` 只跳过标题行，其后 7 行正文仍被并入**类别 16 的当前 section**。
+运行实证：解析真实模板后 `specs["16"].sections["易混类别"]` 末尾含 `7. 对 other、低置信…设置 needs_review=true` 等
+指令正文 → `build_normal_classify_prompt()` 生产 prompt 中类别 16 混入无关后处理指令。
+同类缺口：`parse_complex_few_shot` 对 `## 02`（类别头少一个 #）不 raise，02 的内容静默并入 01（实证 "特征：a 特征：b"，02 消失）。
+根因：只有"匹配的类别头/EOF"能结束类别吸收，文档级标题（`#`）不终止当前 section。
+**验证**：运行实证（真实模板解析 + 少 # 场景）。
+**修复**：`#`/`##` 级标题行一律终结当前类别（save + current=None），其后正文 fail-loud；并补回归测试。
+
+## 2. [高·可扩展性] judge checkpoint 存全量 rows/judged（含 MB 级 chain），磁盘翻倍 + 全量解析进内存 — ✅ 已修复
+**位置**：`src/query_pipeline/io/checkpoint.py:110-152` + `steps/judge_stage.py:87-98`
+**问题**：checkpoint 每会话存 rows（含完整 chain，单行实测 3.2MB）+ judged + stats。
+实测：500 会话 → judge.jsonl **91MB**，与输出数据量同量级（数据翻倍）；`Checkpoint.load/_read` 每 run 全量解析进内存，
+百万行级输入即 GB 级内存。rows/judged 实际可由 llm_cache（funnel 已落盘）确定性重建，checkpoint 只需 stats。
+**验证**：子代理实测 outputs/aime/logs/checkpoints/judge.jsonl 91MB / 188KB 均行 / 3.2MB 最大行。
+**修复**：checkpoint 只存 stats（rows/judged 由 llm_cache 重建）；或按会话拆分存储避免单行巨对象。
+
+## 3. [高·并发] 退避 sleep 与 5×90s 超时都发生在 semaphore 内，429/5xx 风暴时 permit 被占死 — ✅ 已修复
+**位置**：`src/query_pipeline/llm/client.py:28-29,63-64`
+**问题**：`complete()` 在 `async with self._semaphore` 内调用 `_complete_once`，而重试循环的
+`asyncio.sleep`（累计最长 ~25s）与每次请求的 90s 超时（5 次 ≈ 7.5min）都在锁内。
+429/5xx 风暴时全部 permit 被睡觉/挂起请求占死 → 后续健康请求队头阻塞、吞吐归零，风暴后需逐个超时才恢复。
+**验证**：代码路径确认（semaphore 包裹完整重试循环）。
+**修复**：semaphore 移到单次 API 调用（每次 attempt 重新 acquire），sleep/超时在锁外。
+
+## 4. [中高·可扩展性] llm_cache 无界增长：src_hash 进 key 后代码变更全量废弃旧条目，但永不清理 — ✅ 已修复
+**位置**：`src/query_pipeline/llm/cache.py:10-26,86-94`（fix #6 引入）
+**问题**：`make_cache_key` 并入 src_hash 后，任何代码改动使**全部**旧 key 永久失效；但 cache 是 append-only，
+无裁剪/重置——checkpoint 在 meta 不匹配时 `_seed` 截断重建，cache 文件却只增不减。
+实证：仓库现有 outputs/aime/logs/llm_cache.jsonl 2836 行，48f4dc6 后全部成孤儿；每次代码变更重跑即追加一整轮，
+`load_cache` 每 run 全量解析（含全部死代条目），活跃开发期内存/启动耗时随迭代线性恶化。
+**验证**：三方独立确认（主代理实证 load_cache 全量加载 + 两子代理）。
+**修复**：缓存按 src_hash 分片文件，或启动时检测孤儿代并触发一次 rewrite/压缩。
+
+## 5. [中·契约冲突] QC `_check_meta` 与 translate fail-open 语义矛盾：管线接受的行 QC 必判 FAIL — ✅ 已修复
+**位置**：`src/query_pipeline/quality/rules.py:219-222` vs `post/translate.py:101-103` + `templates/filter_out.jsonc:69`
+**问题**：翻译失败是**故意 fail-open**（put(row, None)，filter_out.jsonc 明示"翻译失败 → null"），
+但 `_check_meta` 对非中文行 `translation=null` 判 fail。运行实证：fail-open 行（非中文+translation=null）→ meta 规则 FAIL。
+同一状态管线接受、质检判错，且测试只固化了严格语义、无 fail-open 场景。
+**验证**：运行实证 + 子代理确认。
+**修复**：_check_meta 区分"从未翻译"（null 且无失败记录，判 fail）与"翻译失败"（fail-open 可接受）；
+或在 QC 输出中携带 translate_failed 标记供规则区分。
+
+## 6. [中·数据覆盖] quality/paths.py 的 date 是死参数：同一数据集不同日期 QC 产物互相覆盖 — ✅ 已修复
+**位置**：`src/query_pipeline/quality/paths.py:15-27`（source_path/qc_dir/llm_cache_path 三函数）
+**问题**：三个函数的 date 参数均未使用（date 只进 overview.json 内容字段）。运行实证：
+`qc_dir("aime","0806") == qc_dir("aime","0807")` → 同一目录，0806 与 0807 两次 QC 运行
+**互相覆盖** results.jsonl/overview.json/report.md，且 overview 内 date 字段与文件名/内容对不上。
+**验证**：运行实证 + 子代理确认。
+**修复**：qc_dir 路径并入 date（outputs/<dataset>/qc/<date>/），或删掉 date 参数并显式文档化单目录语义。
+
+## 7. [中·行为陷阱] api.run 的 api_key/base_url 用 setdefault：env 已有 key 时显式传参被静默丢弃 — ✅ 已修复
+**位置**：`src/query_pipeline/api.py:90-93`（对照 `cli.py:33` help"OPENAI_API_KEY 覆盖"）
+**问题**：`os.environ.setdefault("OPENAI_API_KEY", api_key)`——env 已存在 key 时，用户显式
+`--api-key new-key` 被静默忽略，实际使用旧 env key。运行实证：env=old-key + 传 new-key → 实际 old-key。
+与 CLI 帮助文本"覆盖（默认读 .env）"直接矛盾。
+**验证**：运行实证 + 子代理确认。
+**修复**：显式传入时用 `os.environ[...] = api_key`（覆盖），或至少 warning 提示被忽略。
+
+## 8. [中·数据丢失] adapters/chat.py 静默丢弃畸形行：非 dict turn 被过滤、畸形 chain 静默置 [] — ✅ 已修复
+**位置**：`src/query_pipeline/adapters/chat.py:24-28,48`
+**问题**：context 中非 dict turn 被列表推导静默过滤（无计数无日志）；chain 非 list 静默变 []。
+chain=[] 时 `chain_tool_calls` 回退 `turn.tool_count`（adapt_chat 未设置 → 0），chat 门槛 3/1/2 下
+**整行无声落选**——输入畸形导致输出少行，无任何警告，与 session 适配器/管线其余部分的 fail-loud 哲学不一致。
+**验证**：代码路径确认 + 子代理确认。
+**修复**：非 dict turn 计数并写 bad_lines；畸形 chain 记 warning（或同样进 bad_lines）。
+
+## 9. [中·可扩展性] run_concurrent 一次性 eager 创建全部协程：verify/translate 上万行 = 上万个 task — ✅ 已修复
+**位置**：`src/query_pipeline/llm/runner.py:38`
+**问题**：`asyncio.gather(*(wrapped(...) for ... in items))` 一次性创建全部任务；子代理实测
+100k 任务峰值 **110MB + 2.1s 纯调度开销**，百万行输入即 >1GB。且每项 checkpoint.mark/put_cache
+都 open/close 文件（10k 行 × 5 轮 = 5 万次 open）。
+**验证**：子代理实测量化。
+**修复**：有界 worker 池（固定 N 个 worker 拉队列），或分块 dispatch（如每 1000 项一批）。
+
+## 10. [中·健壮性] audit 一行坏 JSON 崩溃整个命令，非 dict 行 AttributeError 穿透 — ✅ 已修复
+**位置**：`src/query_pipeline/audit.py:45-51,65`（对照 `cli.py:88`）
+**问题**：`_load_rows` 直接 `json.loads`，一行坏 JSON 抛异常使整个 audit 命令崩溃（管线端坏行有
+bad_lines 落盘容忍，audit 没有——同一仓库两套读取语义）；`check()` 的 `row.get("input")` 在
+try/except 之外，非 dict 行的 AttributeError 穿透 asyncio.gather 直接炸掉 audit。
+**验证**：代码路径确认 + 子代理确认。
+**修复**：_load_rows 复用 read_jsonl_with_bad_lines（或逐行容错）；check() 内对 row 类型兜底。
+
+---
+
+*第三轮候选但未入选（低优先，供参考）：sniff_format 仅采样 5 行（全坏行误拒/混合漏检）、Checkpoint._seed
+非原子截断（write_text vs tmp+replace）、PROMPTS 模块导入期 fail-loud（模板漂移 → 全部子命令 import 崩溃）、
+build_segment_payload 无超长截断（千 turn 会话爆上下文静默回退）、audit 错误票仍记 is_complex=True（展示误导，
+闸门本身正确）、concurrency 默认 256 vs 64 不一致、QC 私有名跨模块导入+shadowing（前两轮已提未修）、
+api.run JSON 往返、logging FileHandler 不 close、.env 三套查找、record_key "line_?" 撞键、cli 未用 import、
+report.render_markdown results 死参数。*
+
+---
+
+# 第四轮审查：10 个新问题（基于第三轮修复的工作区改动）
+
+> 方法：3 个子代理并行（第三轮修复回归审查、tests/models/quality 契约深挖、cli/config/docs 深挖）+ 主代理逐项实证。
+> 基线：`uv run pytest` 244 passed；`pyright src 0 errors`。
+> 前 30 条已全部修复；本条含**第三轮修复引入的并发缺陷**（#1）与**修复不完整项**（#3、#5）。
+>
+> **第四轮修复状态（2026-08-10）：全部 10 项已修复**。
+> 基线 244 passed → 修复后 **261 passed** / pyright 0 error（新增 17 个回归测试，均不依赖真实 LLM）。
+> 说明：#4 槽位计数约束同时作用于模板层与 Jaccard 层（否则 2 只 vs 3 只股票的示例仍会在
+> Jaccard 层以 sim=1.0 合并）；Jaccard 层只约束两侧**共享**槽类型的计数一致，避免股票名词典
+> 不完备导致的非对称槽化（nvidia 在词典而 amd 不在）漏并同型查询。`test_representative_selection_and_determinism`
+> 原用例（1 个时间段 vs 3 个时间段）在新契约下合法不合并，fixture 已改为同槽位计数。
+> #9 错误率默认独立阈值 0（任何一行无法判定即 FAIL），可用 `--max-error-ratio` 放宽。
+
+## 1. [高·回归引入] load_cache 孤儿代 rewrite 并发竞态：双进程同时 rewrite 丢数据 — ✅ 已修复
+**位置**：`src/query_pipeline/llm/cache.py:55-71,75-82`
+**问题**：第三轮修复让 load_cache 检测到孤儿代时**自动 rewrite 压缩**，但 tmp 名固定（`llm_cache.jsonl.tmp`）且无进程锁。
+管线（runner.py:52）与 QC CLI（quality/cli.py:58）共用同一 cache 文件；源码变更后首次运行必然出现孤儿代 →
+两进程同时 rewrite：B 的 tmp+replace 截断 A 正在写的内容。子代理实测（模拟双写同一 tmp）：**5000 条仅存 1959 条、
+33 行损坏**（损坏行下一轮 load 静默 skip → 大量 LLM 重调）；B rewrite 前 A 的 append 写进旧 inode → 条目静默丢失。
+**验证**：子代理并发模拟实测 + 代码路径确认（固定 tmp 名、无锁）。
+**修复**：tmp 名带 pid/随机后缀，或 rewrite 加文件锁；或将 rewrite 移到 put_cache 的锁内。
+
+## 2. [高·契约] QC record_key 复合键塌缩：同 (source_case_id|trace_id) 重复行互相覆盖 — ✅ 已修复
+**位置**：`src/query_pipeline/quality/aggregate.py:11-17,73-95` + `quality/cli.py:46-49`
+**问题**：per_record / sample_set / judge_results 三个 dict 均以 `record_key = source_case_id|trace_id` 为键；
+docstring 明言"duplicate trace_ids fold onto their own rows"，但 **dict 无法容纳重复键**——同键第二行覆盖第一行，
+规则判定、judge 判定、sampled 标志全部串行错乱。子代理实验：r1 答案过短（应 fail answer 规则）+ r2 同键正常答案 →
+**两行共用 r2 的规则结果，r1 显示 pass**；重复行越多漏报越多（上一轮修的 `line_?` 分支未覆盖此分支）。
+**验证**：子代理实验复现 + Python dict 语义（确定）。
+**修复**：record_key 追加行号/计数消歧（或 per_record 改为 key → list）。
+
+## 3. [中高·行为契约] judge 断点续跑变 cache-only：删 cache 即全量重跑；旧 91MB checkpoint 不迁移 — ✅ 已修复
+**位置**：`src/query_pipeline/steps/judge_stage.py:92-100`（对照 `README.md:76-78`）
+**问题**：第三轮修复后 judge checkpoint 不再存 rows/judged，resume 完全依赖 llm_cache；
+`record` 仅用于 `record is None` 判重。**(a)** 只删 llm_cache（保留 checkpoints）→ 全量重调 LLM
+（旧行为：checkpoint 直接复用 rows，零 LLM）——README 仍写"已完成单元跳过：LLM 缓存 + 阶段 checkpoint"，未说明 judge 已变 cache-only；
+**(b)** 存量 91MB 旧格式 checkpoint 文件永不被压缩/迁移，每次 run 仍全量解析进内存——本轮声称解决的问题对存量用户仍在。
+**验证**：代码路径确认 + 两子代理独立确认。
+**修复**：README 同步"judge 续跑依赖 llm_cache，删 cache 即全量重跑"；load 时检测旧格式记录并迁移/截断。
+
+## 4. [中高·数据丢失] dedup 实体集合塌缩：实体数量不同的问句被 template_merge 合并 — ✅ 已修复
+**位置**：`src/query_pipeline/post/dedup.py:40,54-101`（对照 `rules/normalize.py:76-87`）
+**问题**：tokenize 用**集合**，多个实体槽折叠为单个 `<stock>`；template 层同骨架只看非槽 token 集合相等。
+实证："帮我比较一下贵州茅台和宁德时代的走势" vs "帮我比较一下贵州茅台、宁德时代和比亚迪的走势"
+（实体均在词典）→ Jaccard=1.0 → **2 实体行被 template_merge 删除，只留 3 实体行**——
+两个答案不同的分析请求（2 只 vs 3 只股票的比较）被当作"只换标的的同一模板"合并。
+另有边界：两行完全相同的纯槽位文本永不查重（comparable=False 且无测试覆盖）。
+**验证**：运行实证（similarity=1.0, method=template_merge）。
+**修复**：template 层要求实体槽**数量**一致（比较槽位计数，而非仅集合）；纯槽位行补查重策略或文档化。
+
+## 5. [中·数据丢失被掩盖] translate 失败用 null 覆盖已有译文 + 标记，QC 不再暴露 — ✅ 已修复
+**位置**：`src/query_pipeline/post/translate.py:56-68,111-113`
+**问题**：第三轮修复让翻译失败落 `meta.translate_failed` 标记、QC 据此放行——但失败分支
+`put(row, None, failed=True)` **无条件覆盖已有译文**。实证：已有译文的行（缓存丢失后）重跑失败 →
+translation 被覆盖为 None + 标记 → QC 判通过（旧行为 QC fail 会暴露译文丢失）。译文丢失被静默掩盖。
+**验证**：运行实证——已有译文行重跑失败 → translation=None、meta.translate_failed=True。
+**修复**：失败时**保留已有译文**（仅当 translation 为空才置 null）；或 QC 对"曾有译文后丢失"单独暴露。
+
+## 6. [中·错误处理] 模板 fail-loud 位于模块导入期：模板小改动瘫痪全部 CLI 子命令 — ✅ 已修复
+**位置**：`src/query_pipeline/prompts/__init__.py:17-27`（对照 `prompts/assemble.py:80-84,153-157`）
+**问题**：PROMPTS 在 import 时构建（build_* 读 templates 三个文件 + fail-loud 校验）；
+cli.py:9 import api → runner → steps → prompts 全链。实测 `QUERY_PIPELINE_TEMPLATES` 指向空目录时，
+连 `query-pipeline --help` 和 `suggest`（运行时根本不碰 PROMPTS）都抛 FileNotFoundError traceback。
+模板缺失/格式错误 = 所有子命令不可用，且报错指向 assemble.py 而非模板行。
+**验证**：子代理实测（env 指向空目录 → --help 崩）+ 导入链代码确认（双来源）。
+**修复**：PROMPTS 惰性化（resolve_prompt 首次调用时构建），或至少让 --help/suggest 不触发 prompts 构建。
+
+## 7. [中·一致性] answer_gate 与 QC 截断判定分叉 + `_DANGLING_END` shadowing — ✅ 已修复
+**位置**：`src/query_pipeline/steps/answer_gate_stage.py:57` vs `quality/rules.py:176-183`
+**问题**：gate 判截断有前置条件 `if question and ...`（无问句不判）；QC `_check_truncation` 无条件判。
+实验：无 input.text 的行以"，"结尾 → gate 通过（None）、QC truncation fail。且 rules.py 导入
+`_DANGLING_END` 后本地重定义（:26，死导入 shadowing），MIN_ANSWER_LEN 两处重复——两侧阈值/条件
+后续必然漂移（当前被 question 规则兜住，但契约已分叉）。
+**验证**：运行实证（gate None vs QC fail）+ 代码对照。
+**修复**：判定逻辑收敛到单一实现（QC 复用 answer_gate 的判定函数），删 shadowing。
+
+## 8. [中·文档-代码脱节] docs/html 与运行时装配脱节：缺 4/9 提示词面板 + 双实现 + 阶段数不符 — ✅ 已修复
+**位置**：`docs/html/build.py:105-122`（对照 `docs/html/README.md:4`、`src/query_pipeline/prompts/__init__.py`）
+**问题**：(a) build.py 只提取 5/9 个提示词（缺 classify_complex / classify_normal / verify_recheck / complex_judge），
+而 docs/html/README.md 声称展示"全部生产提示词"——**最关键的分类提示词无面板**；
+(b) build.py:73 `parse_bad_cases` 与 assemble.py 的 `parse_bad_cases` 是同规则**两份实现**（改一处另一处静默漂移）；
+(c) 文档称"7 阶段"而运行时 8 阶段（simple_gate 缺失）。
+**验证**：build_prompt_sections 代码确认（5 个 section）+ 双实现对照。
+**修复**：build.py 补 classify/verify_recheck 面板（或运行时导入 PROMPTS 而非手工提取）；parse_bad_cases 收敛单源。
+
+## 9. [中·健壮性] audit 错误率与非复杂率共用 max_ratio + cli 重复计算 passed — ✅ 已修复
+**位置**：`src/query_pipeline/audit.py:132,148`（对照 `cli.py:101-104`）
+**问题**：(a) 错误率（审计自身 LLM 失败）与非复杂率共用一个阈值：5% 容错可能系统性掩盖审计失效
+（3 次判定全挂也只是 audit_errors=3，占比 ≤5% 即 PASS）；(b) render 内部已计算 passed 但只返回字符串，
+cli.py 重新计算一份（errors/total <= max_ratio）——两处判定逻辑易漂移。
+**验证**：代码对照确认（render 的 passed 与 cli 的退出码判断各自独立实现）。
+**修复**：错误率独立阈值（建议近 0）或独立旋钮；render 返回结构化结论供 cli 复用。
+
+## 10. [中·配置一致性] loader 相对路径基座不一致：显式 cache/checkpoint 解析到 project root，默认解析到 work_dir — ✅ 已修复
+**位置**：`src/query_pipeline/config/loader.py:37-44`
+**问题**：显式 `checkpoint.dir`/`llm.cache` 相对路径按 project root 解析（`(base / cfg.checkpoint.dir).resolve()`），
+而 None 默认落到 `work_dir/logs/…`。实测：config 设 `llm.cache: logs/llm_cache.jsonl` + `work_dir: scratch` →
+缓存落在 `<root>/logs` 而非 `scratch/logs`——**--work-dir 覆盖对显式 cache 配置失效**，同一配置两套基座。
+**验证**：loader 代码对照 + 子代理实测。
+**修复**：显式相对路径统一按 work_dir（或 project root）解析，文档化单一基座。
+
+---
+
+*第四轮候选但未入选（低优先，供参考）：chat fail-loud 整行丢弃 vs session 静默过滤契约不一致（1 个坏 turn 丢 99 个好 turn）、
+audit bad_lines 命名三套并存且写输入目录（权限失败换一种崩法）、timing 校验缺口（first_token_time_ms=-5 通过 QC；
+chat 的 first_token_time_cost 直通 *_ms 无单位校验）、cli --verify-rounds 负数/0 抛 pydantic 原始 traceback、
+load_taxonomy 无视进程内 QUERY_PIPELINE_TEMPLATES 变更、suggest 占比分母含 ineligible 槽位、category_distribution 死字段、
+translate 双计数（mark 抛 OSError 时同行走 translated+translate_failed）、mock 分发过宽（prompt 措辞一改测试语义即变）、
+QC --model 帮助文本"默认复用管线模型"但实际硬编码、record_detail 对无 trace_id 行不可钻取、LLMConfig 无默认、
+cache_path/checkpoint_dir 兜底 logs/logs（第 1 轮已提）、logging FileHandler 不 close。*

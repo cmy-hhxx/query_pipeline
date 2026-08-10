@@ -5,25 +5,24 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from query_pipeline.models.output import OutputRow
-from query_pipeline.steps.answer_gate_stage import _DANGLING_END, _REFUSAL_PATTERNS
+from query_pipeline.steps.answer_gate_stage import (
+    MIN_ANSWER_LEN,
+    _REFUSAL_PATTERNS,
+    truncation_reason,
+)
 from query_pipeline.taxonomy import COMPLEX_PREFIX, load_taxonomy
 from query_pipeline.post.dedup import dedup_rows
 from query_pipeline.config.models import DedupConfig
 
 # Rule thresholds — code constants, no per-rule config (project convention).
+# MIN_ANSWER_LEN / 截断判定与 answer_gate 共用单一实现（第四轮 #7：两侧阈值与
+# 条件曾各自复制，必然漂移；_DANGLING_END 也曾本地重定义 shadowing 死导入）。
 QUESTION_MIN_LEN = 5
 QUESTION_MAX_LEN = 2000
-MIN_ANSWER_LEN = 50
 EMPTY_FIELD_RATIO = 0.10
 CATEGORY_SKEW_MAX_SHARE = 0.50
 NEAR_CONSTANT_SHARE = 0.90  # soft tier: top value covers >=90% of records
 NEAR_DUP_THRESHOLD = 0.85
-
-_SENTENCE_END = ".。!?！？…"
-# ; / ； excluded: in Greek, ";" is the question mark (ερωτηματικό), so an
-# answer legitimately ends with it. Comma/colon/dash endings remain strong
-# truncation signals.
-_DANGLING_END = ",，:：-—–"
 
 # Content fields monitored for constant/near-constant values at the dataset level.
 _CONTENT_FIELDS = ("text_answer", "raw_answer", "input.text", "category", "tools", "meta.reason")
@@ -104,7 +103,7 @@ def _check_category(row: dict[str, Any]) -> tuple[bool, str]:
     if not isinstance(category, str) or not category:
         return False, "category 缺失或非字符串"
     if category == "other":
-        # 普通分类的兜底标签（normal_few_shot.md 决策步骤允许 other）
+        # 普通分类的兜底标签（classify_normal 允许 other，仅 normal 行可用）
         return (True, "ok") if row.get("difficulty_level") == "normal" else (False, "other 仅允许出现在 normal 行")
     cat = next((c for c in load_taxonomy().all() if c.path == category), None)
     if cat is None:
@@ -174,14 +173,17 @@ def _check_event_type(row: dict[str, Any]) -> tuple[bool, str]:
 
 
 def _check_truncation(row: dict[str, Any]) -> tuple[bool, str]:
-    text = (row.get("text_answer") or "").strip()
-    if not text:
-        return False, "text_answer 为空"
-    if text[-1] in _SENTENCE_END:
+    """与 answer_gate 共用同一判定（truncation_reason）：无问句不判截断。
+
+    空回答由 answer 规则负责，这里不重复报（避免两条规则对同一缺陷各报一次）。
+    """
+    inp = row.get("input")
+    question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
+    reason = truncation_reason(row.get("text_answer"), question=question)
+    if reason is None:
         return True, "ok"
-    if text[-1] in _DANGLING_END:
-        return False, f"回答以未完结标点结尾，疑似截断：…{text[-40:]}"
-    return True, "ok"
+    text = str(row.get("text_answer") or "").strip()
+    return False, f"回答以未完结标点结尾，疑似截断：…{text[-40:]}"
 
 
 def _check_timing(row: dict[str, Any]) -> tuple[bool, str]:
@@ -217,9 +219,14 @@ def _check_meta(row: dict[str, Any]) -> tuple[bool, str]:
         if translation is not None and str(translation).strip():
             return False, "中文问句不应有 translation（应为 null）"
     else:
-        # 非中文问句需要翻译：translation 应非空
-        if not isinstance(translation, str) or not translation.strip():
-            return False, "非中文问句缺少 translation 翻译"
+        # 非中文问句需要翻译；翻译失败是故意 fail-open（translate 阶段落
+        # meta.translate_failed 标记，filter_out.jsonc 明示"翻译失败 → null"），
+        # 与"从未翻译"（null 且无失败记录）区分开——后者仍判 fail。
+        if isinstance(translation, str) and translation.strip():
+            return True, "ok"
+        if meta.get("translate_failed"):
+            return True, "ok"
+        return False, "非中文问句缺少 translation 翻译"
     return True, "ok"
 
 

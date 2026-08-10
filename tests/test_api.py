@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -205,6 +206,28 @@ class ApiTest(unittest.TestCase):
     def test_missing_input_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
             api_run("/nonexistent/input.jsonl")
+
+    def test_explicit_api_key_overrides_env(self) -> None:
+        # env 已有 key 时，显式传参必须覆盖（旧实现 setdefault 静默忽略显式 key）
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            src.write_text(_session_lines(), encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"OPENAI_API_KEY": "env-old-key", "OPENAI_BASE_URL": "http://env-old"},
+                clear=False,
+            ):
+                with patch("query_pipeline.pipeline.runner.LLMClient", RecordingClient):
+                    api_run(
+                        src,
+                        output_dir=tmp_path / "out",
+                        work_dir=tmp_path / "work",
+                        api_key="explicit-new-key",
+                        base_url="http://explicit-new",
+                    )
+                self.assertEqual(os.environ["OPENAI_API_KEY"], "explicit-new-key")
+                self.assertEqual(os.environ["OPENAI_BASE_URL"], "http://explicit-new")
 
     def test_default_output_dir(self) -> None:
         # unique dataset dir so the default outputs/<parent> path can never

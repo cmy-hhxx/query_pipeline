@@ -10,12 +10,19 @@ _STATUSES = ("pass", "fail", "needs_review")
 
 def record_key(row: dict[str, Any]) -> str:
     """Stable per-record identity: source_case_id|trace_id when trace_id present,
-    else source line number. Composite key so duplicate trace_ids across sessions
-    or reimports fold onto their own rows instead of overwriting one another."""
+    else source line number.
+
+    复合键必须唯一：per_record / sample_set / judge_results 都是 dict，同
+    (source_case_id|trace_id) 的重复行（跨会话/重复导入）若键相同会互相覆盖——
+    规则判定、judge 判定、sampled 标志全部串行错乱（实验：r2 覆盖 r1 的规则
+    结果，r1 显示 pass）。追加 _line_number 消歧，dict 即可容纳重复行。
+    """
     trace_id = row.get("trace_id")
+    line = row.get("_line_number")
     if trace_id:
-        return f"{row.get('source_case_id') or ''}|{trace_id}"
-    return f"line_{row.get('_line_number', '?')}"
+        base = f"{row.get('source_case_id') or ''}|{trace_id}"
+        return f"{base}#{line}" if line is not None else base
+    return f"line_{line if line is not None else '?'}"
 
 
 def _judge_payload(judge: dict[str, Any] | None) -> dict[str, Any] | None:

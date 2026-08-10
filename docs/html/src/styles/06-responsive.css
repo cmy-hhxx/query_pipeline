@@ -1,129 +1,28 @@
-/* RESPONSIVE — 响应式（≤860px）与打印样式 */
-@media (max-width: 860px) {
-  main {
-    width: min(100% - 28px, var(--max));
-    padding-top: 28px;
-  }
-  h1 {
-    margin-bottom: 22px;
-    font-size: clamp(30px, 9vw, 42px);
-  }
-  .legend {
-    grid-template-columns: 1fr;
-  }
-  .legend-title {
-    padding: 10px 0 8px;
-  }
-  .badge {
-    grid-template-columns: 118px 1fr;
-    gap: 12px;
-    border-top: 1px dashed var(--line-strong);
-    border-left: 0;
-    padding: 10px 0;
-  }
-  .pipeline {
-    margin-top: 48px;
-  }
-  .flow-io,
-  .flow-main,
-  .flow-drops {
-    min-width: 1010px;
-  }
-  .step-layout {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-  .step-table-head,
-  .tax-table-head {
-    display: none;
-  }
-  .step-card {
-    display: grid;
-    grid-template-columns: 1fr;
-    padding: 16px 0;
-  }
-  .step-card > * {
-    padding: 4px 0;
-  }
-  .step-card-head {
-    margin-bottom: 5px;
-  }
-  .step-tags,
-  .step-rule {
-    display: grid;
-    grid-template-columns: 70px 1fr;
-    gap: 8px;
-  }
-  .step-tags::before,
-  .step-rule::before {
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .step-tags::before {
-    content: "方式";
-  }
-  .step-rule::before {
-    content: "动作";
-  }
-  .tax-card {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-    padding: 15px 0;
-  }
-  .tax-card > * {
-    padding: 2px 0;
-  }
-  .tax-head {
-    grid-template-columns: 34px 1fr;
-    align-items: baseline;
-  }
-  .tax-name {
-    font-size: 15px;
-  }
-  .tax-key b,
-  .tax-example b {
-    display: inline;
-    margin-right: 6px;
-  }
-  .funnel-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .funnel-steps li {
-    border: 1px solid var(--line);
-    border-radius: 2px;
-  }
-  .funnel-steps li::after {
-    display: none;
-  }
-  .prompt-panel summary {
-    display: grid;
-    gap: 10px;
-  }
-  .prompt-actions {
-    justify-content: start;
-  }
+/* RESPONSIVE — 中等屏 / 打印 */
+
+/* 中等屏：流程图节点收窄 */
+@media (max-width: 980px) {
 }
+
 @media print {
-  body {
-    background: var(--surface);
-  }
+  body { background: var(--surface); }
   main {
     width: 100%;
     padding: 0;
+    gap: 16px;
   }
-  .flow-chart {
-    overflow: visible;
-  }
-  .flow-io,
-  .flow-main,
-  .flow-drops {
-    min-width: 0;
+  .flow-chart,
+  .funnel-note,
+  .prompt-panel {
+    box-shadow: none;
+    border-color: var(--line-strong);
   }
   .copy-button,
   .copy-status {
     display: none;
+  }
+  .flow-node:not(:last-child)::after,
+  .flow-node:not(:last-child)::before {
+    border-color: var(--ink);
   }
 }

@@ -139,15 +139,20 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(dropped[0]["similarity"], 1.0)
 
     def test_representative_selection_and_determinism(self) -> None:
+        # 三行同一模板（槽位计数一致：1 ticker + 3 num），只换 ticker → 模板合并；
+        # 代表选最长（同长取索引更小者 → r1），且结果确定。
         rows = [
-            _row("Forecast  SNDK for the next 1 day, — bull / base / bear scenarios with confidence levels and what would trigger each.", "r1"),
+            _row("Forecast $SNDK for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels and what would trigger each.", "r1"),
             _row("Forecast $AAPL for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels and what would trigger each.", "r2"),
             _row("Forecast $MSFT for the next 1 day, 1 week, and 1 month — bull / base / bear scenarios with confidence levels and what would trigger each.", "r3"),
         ]
         kept, dropped = dedup_rows(rows, DedupConfig())
         self.assertEqual(len(kept), 1)
-        self.assertEqual(kept[0]["trace_id"], "r2")
-        self.assertEqual({d["dedup_of_trace_id"] for d in dropped}, {"r2"})
+        self.assertEqual(kept[0]["trace_id"], "r1")
+        self.assertEqual({d["dedup_of_trace_id"] for d in dropped}, {"r1"})
+        kept2, dropped2 = dedup_rows(rows, DedupConfig())
+        self.assertEqual([r["trace_id"] for r in kept2], [r["trace_id"] for r in kept])
+        self.assertEqual([d["trace_id"] for d in dropped2], [d["trace_id"] for d in dropped])
         kept2, dropped2 = dedup_rows(rows, DedupConfig())
         self.assertEqual([r["trace_id"] for r in kept2], [r["trace_id"] for r in kept])
         self.assertEqual([d["trace_id"] for d in dropped2], [d["trace_id"] for d in dropped])
@@ -166,6 +171,50 @@ class DedupTest(unittest.TestCase):
         kept, dropped = dedup_rows(rows, DedupConfig())
         self.assertEqual(len(kept), 2)
         self.assertEqual(dropped, [])
+
+    def test_different_entity_counts_not_merged(self) -> None:
+        # 第四轮 #4：2 只 vs 3 只股票的比较是不同的分析请求——实体槽数量不同，
+        # 模板层与 Jaccard 层都不得合并（旧实现集合折叠 → Jaccard=1.0 → 误删）。
+        rows = [
+            _row("帮我比较一下贵州茅台和宁德时代的走势", "r1"),
+            _row("帮我比较一下贵州茅台、宁德时代和比亚迪的走势", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig(enabled=True, threshold=0.80))
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+
+    def test_same_entity_count_different_entities_merged(self) -> None:
+        # 同为 1 只股票的模板变体仍正常合并（实体槽计数一致）。
+        rows = [
+            _row("帮我比较一下贵州茅台和宁德时代的走势", "a"),
+            _row("帮我比较一下五粮液和隆基绿能的走势", "b"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig(enabled=True, threshold=0.80))
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped[0]["method"], "template_merge")
+
+    def test_entity_count_change_across_layers_blocked(self) -> None:
+        # 短骨架（非槽 token < 4，不进模板层）也要在 Jaccard 层拦住实体数差异。
+        rows = [
+            _row("比较贵州茅台和宁德时代", "r1"),
+            _row("比较贵州茅台、宁德时代和比亚迪", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig(enabled=True, threshold=0.80))
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+
+    def test_pure_slot_exact_duplicate_merged(self) -> None:
+        # 纯槽位行：集合近似无法区分实体（"1234" 与 "5678" 都折叠成 {<num>}），
+        # 只有原文完全相同才查重（exact_text）。
+        rows = [
+            _row("1234", "r1"),
+            _row("1234", "r2"),
+            _row("5678", "r3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig(enabled=True, threshold=0.80))
+        self.assertEqual(len(kept), 2)
+        self.assertEqual({d["trace_id"] for d in dropped}, {"r2"})
+        self.assertEqual(dropped[0]["method"], "exact_text")
 
     def test_chained_pair_merged_transitively(self) -> None:
         # A~B (8/9) and B~C (0.8) both >= threshold; A~C (0.7) below it.

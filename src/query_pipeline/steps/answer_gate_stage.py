@@ -37,6 +37,21 @@ _REFUSAL_PATTERNS: tuple[re.Pattern[str], ...] = (
 _DANGLING_END = ",，:：-—–"
 
 
+def truncation_reason(text: str | None, *, question: str = "") -> str | None:
+    """Shared truncation judgment for answer_gate and QC (single implementation).
+
+    回答以未完结标点（逗号/冒号/破折号）结尾 → 疑似截断；但只在行携带问句时判定
+    （无问句无法判断回答相对什么不完整——gate 有该前置条件而 QC 曾无条件判定，
+    两侧契约分叉：无 input.text 的行 gate 放行、QC 判 fail）。
+    """
+    text = (text or "").strip()
+    if not text:
+        return None  # 空回答由 empty_answer / answer 规则负责
+    if question and text[-1] in _DANGLING_END:
+        return "truncated_dangling_punctuation"
+    return None
+
+
 def answer_gate_reason(row: dict[str, Any]) -> str | None:
     """Return the rejection reason, or None when the row passes the gate."""
     meta = row.get("meta") or {}
@@ -54,9 +69,7 @@ def answer_gate_reason(row: dict[str, Any]) -> str | None:
             return "refusal"
     if len(text.strip()) < MIN_ANSWER_LEN:
         return f"answer_too_short({len(text.strip())}<{MIN_ANSWER_LEN})"
-    if question and text.rstrip()[-1:] in _DANGLING_END:
-        return "truncated_dangling_punctuation"
-    return None
+    return truncation_reason(text, question=question)
 
 
 async def run_answer_gate_stage(

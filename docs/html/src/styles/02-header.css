@@ -1,73 +1,94 @@
 /* HEADER — 页面标题区与输出去向图例 */
+
 .topline {
   order: 1;
-  display: block;
-  padding: 0;
-  border: 0;
-}
-h1 {
-  margin: 0 0 28px;
-  font-size: clamp(32px, 4.3vw, 48px);
-  line-height: 1.08;
-}
-.legend {
-  display: grid;
-  grid-template-columns: 112px repeat(4, minmax(0, 1fr));
-  gap: 0;
-  width: 100%;
-  border-top: 1px dashed var(--ink);
-  border-bottom: 1px dashed var(--ink);
-  background: #fff;
-}
-.legend-title {
   display: flex;
-  align-items: center;
-  padding: 14px 12px 14px 0;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 700;
+  flex-direction: column;
+  gap: 16px;
 }
-.badge {
-  display: grid;
-  min-height: 0;
-  align-content: center;
-  align-items: center;
-  gap: 1px;
-  border: 0;
-  border-left: 0;
-  border-radius: 0;
-  background: #fff;
-  padding: 12px 14px;
-  white-space: normal;
+
+.topline > p,
+.topline .subtitle {
   color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-base);
+  max-width: 720px;
+  margin: -8px 0 4px;
 }
-.badge b {
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  font-size: 11px;
-  line-height: 1.25;
+
+/* 图例：水平 flex，chip + 文字说明 */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
 }
-.badge span {
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 500;
-}
-.badge.reject,
-.badge.non-complex,
-.badge.failed,
-.badge.accept {
-  background: transparent;
-}
-.badge.reject b {
-  color: var(--red);
-}
-.badge.non-complex b {
+
+.legend-title {
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-right: 12px;
+  margin-right: 4px;
+  border-right: 1px solid var(--line);
 }
-.badge.failed b {
-  color: var(--amber);
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  transition: background 120ms ease;
 }
-.badge.accept b {
-  color: var(--green);
+
+.badge b {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
+
+.badge span {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+}
+
+.badge.reject {
+  background: var(--reject-soft);
+  color: var(--reject);
+}
+.badge.reject b { color: var(--reject); }
+
+.badge.non-complex {
+  background: var(--normal-soft);
+  color: var(--normal);
+}
+.badge.non-complex b { color: var(--normal); }
+
+.badge.failed {
+  background: var(--failed-soft);
+  color: var(--failed);
+}
+.badge.failed b { color: var(--failed); }
+
+.badge.accept {
+  background: var(--accept-soft);
+  color: var(--accept);
+}
+.badge.accept b { color: var(--accept); }

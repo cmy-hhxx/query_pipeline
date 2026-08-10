@@ -54,6 +54,8 @@ def adapt_session(record: dict[str, Any]) -> Session:
     context = record.get("context")
     if not isinstance(context, list):
         raise ValueError("session.context must be a list")
+    # 非 dict turn 静默过滤：产出 0 turns 会话，由 judge 阶段的 empty_sessions
+    # 统计暴露（第二轮契约：context=[非 dict] 的会话按空会话计数，不丢行）。
     turns = [adapt_turn(t) for t in context if isinstance(t, dict)]
     return Session(
         thread_id=_as_str(record.get("thread_id")),

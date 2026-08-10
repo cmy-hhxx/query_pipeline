@@ -88,9 +88,11 @@ def run(
     """
     load_dotenv(_find_env_file(), override=False)
     if api_key:
-        os.environ.setdefault("OPENAI_API_KEY", api_key)
+        # 显式传参必须覆盖 env：setdefault 在 env 已有 key 时会静默丢弃用户显式
+        # 传入的 key（cli.py 帮助文本明示 --api-key 是"OPENAI_API_KEY 覆盖"）。
+        os.environ["OPENAI_API_KEY"] = api_key
     if base_url:
-        os.environ.setdefault("OPENAI_BASE_URL", base_url)
+        os.environ["OPENAI_BASE_URL"] = base_url
 
     src = Path(input_path).expanduser().resolve()
     if not src.exists():

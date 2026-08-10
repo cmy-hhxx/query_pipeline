@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from query_pipeline.audit import audit_rows, render
+from query_pipeline.audit import _load_rows, audit_rows, render
 
 
 class FakeClient:
@@ -69,6 +71,65 @@ class AuditTest(unittest.TestCase):
         rows = [_row("t1", "正常问题"), _row("t2", "boom 挂了")]
         results = self._audit(rows)
         self.assertIn("FAIL", render(results, max_ratio=0.05))
+
+    def test_load_rows_tolerates_bad_json(self) -> None:
+        # 一行坏 JSON 不得崩溃整个 audit：坏行落盘 bad_lines 并跳过
+        # （与管线 read_jsonl_with_bad_lines 同一套语义）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "input.jsonl"
+            src.write_text(
+                json.dumps(_row("t1", "正常问题")) + "\nnot-json-line\n[1,2]\n", encoding="utf-8"
+            )
+            rows = _load_rows(src)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["trace_id"], "t1")
+            bad_path = tmp_path / "input.jsonl.bad_lines.jsonl"
+            self.assertTrue(bad_path.exists())
+            lines = bad_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+
+    def test_non_dict_row_guarded_in_check(self) -> None:
+        # check() 对非 dict 行兜底：按"无法判定"处理，不得 AttributeError 穿透。
+        with patch("query_pipeline.audit.LLMClient", FakeClient):
+            results = asyncio.run(audit_rows(["not-a-dict"]))
+        self.assertEqual(results[0]["audit_errors"], 3)
+        self.assertIn("FAIL", render(results, max_ratio=0.05))
+
+    def test_error_ratio_uses_independent_threshold(self) -> None:
+        # 第四轮 #9：错误率与非复杂率分用独立阈值。1/100 行无法判定（1% ≤ 非复杂
+        # 阈值 5%）在旧实现会 PASS；默认 max_error_ratio=0 时任何一行判定失败即 FAIL。
+        rows = [_row(f"t{i}", "正常问题") for i in range(99)] + [_row("t99", "boom 挂了")]
+        results = self._audit(rows)
+        text = render(results, max_ratio=0.05)
+        self.assertIn("FAIL", text)
+        self.assertIn("错误率 1.0% > 0%", text)
+
+    def test_error_ratio_knob_relaxes_gate(self) -> None:
+        rows = [_row(f"t{i}", "正常问题") for i in range(99)] + [_row("t99", "boom 挂了")]
+        results = self._audit(rows)
+        # 显式放宽错误率阈值后，1% 错误率可接受 → PASS（非复杂率 0%）
+        text = render(results, max_ratio=0.05, max_error_ratio=0.05)
+        self.assertIn("PASS", text)
+
+    def test_conclusion_is_single_source_for_cli(self) -> None:
+        # render 的 PASS/FAIL 与 cli 退出码必须共用 conclusion，禁止两处独立实现。
+        from query_pipeline.audit import conclusion
+
+        rows = [_row("t1", "正常问题"), _row("t2", "正常问题")]
+        results = self._audit(rows)
+        passed, ratio, error_ratio = conclusion(results, max_ratio=0.05, max_error_ratio=0.0)
+        self.assertTrue(passed)
+        self.assertEqual(ratio, 0.0)
+        self.assertEqual(error_ratio, 0.0)
+        self.assertIn("PASS", render(results, max_ratio=0.05))
+        # 与 render 同一结论：单错误行 → conclusion FAIL 且 render FAIL
+        bad = self._audit([_row("t1", "正常问题"), _row("t2", "boom 挂了")])
+        passed2, ratio2, error_ratio2 = conclusion(bad, max_ratio=0.05, max_error_ratio=0.0)
+        self.assertFalse(passed2)
+        self.assertEqual(ratio2, 0.0)
+        self.assertEqual(error_ratio2, 0.5)
+        self.assertIn("FAIL", render(bad, max_ratio=0.05))
 
 
 if __name__ == "__main__":

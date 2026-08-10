@@ -12,23 +12,22 @@
     src/sections/*.html   页面内容区块（header / 流程与步骤 / 分类体系 / 组装说明）
     src/scripts/copy.js   交互脚本（提示词复制按钮）
 
-提示词面板不手写：构建时从 src/query_pipeline/prompts/*.py 提取常量自动生成，
-保证页面展示的就是生产提示词；verify 提示词按代码逻辑追加已确认负例。
+提示词面板不手写：构建时直接导入运行时 PROMPTS（惰性构建、读 templates/*.md
+并做 fail-loud 校验），保证页面展示的就是生产提示词——全部 9 个面板
+（segment / value_gate / complexity_gate / complex_judge / classify_complex /
+classify_normal / verify_complex / verify_recheck / translate），parse_bad_cases
+等提取规则不再在 build.py 里二次实现（曾与 assemble.py 双实现必然漂移）。
 
 构建产物无任何外部依赖（样式与脚本全部内联），任意环境双击即可离线打开。
 """
 
-import ast
 import html
 import pathlib
-import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SRC = ROOT / "src"
 PKG = ROOT.parent.parent / "src" / "query_pipeline"
-PROMPTS_DIR = PKG / "prompts"
-TPL_DIR = PKG / "templates"
 DEFAULT_OUT = ROOT / "query-cleaning-pipeline.html"
 
 
@@ -36,52 +35,32 @@ def read(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-# ---------- 提示词提取（与 src/query_pipeline/prompts/ 保持同步） ----------
-
-def extract_prompt_constant(py_file: pathlib.Path, name: str) -> str:
-    """提取模块级字符串常量；支持 NAME = dedent(...) 形式。"""
-    tree = ast.parse(py_file.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-        if not (isinstance(target, ast.Name) and target.id == name):
-            continue
-        value = node.value
-        # 三种常见形式：NAME = "..." / NAME = dedent("...") / NAME = "...".strip()
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            return value.value
-        if isinstance(value, ast.Call):
-            if value.args:
-                arg = value.args[0]
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    return arg.value
-            if isinstance(value.func, ast.Constant) and isinstance(value.func.value, str):
-                return value.func.value
-            if (
-                isinstance(value.func, ast.Attribute)
-                and isinstance(value.func.value, ast.Constant)
-                and isinstance(value.func.value.value, str)
-            ):
-                return value.func.value.value
-    raise ValueError(f"{name} not found in {py_file}")
+# ---------- 提示词提取（与运行时 PROMPTS 单源同步） ----------
+# 提示词面板不手写、也不在 build.py 里二次实现提取规则：直接导入运行时的
+# query_pipeline.prompts（惰性构建，读 templates/*.md），页面展示的就是生产
+# 提示词——含全部 9 个（classify_complex / classify_normal / verify_recheck /
+# complex_judge 曾缺失，且 parse_bad_cases 曾与 assemble.py 双实现必然漂移）。
 
 
-_ANNOTATION_RE = re.compile(r"^(?:以及|看下来|\d+、)")
+def _prompts() -> "dict[str, str]":
+    sys.path.insert(0, str(PKG.parent))  # src/
+    from query_pipeline.prompts import PROMPTS, resolve_prompt  # noqa: PLC0415
 
-
-def parse_bad_cases() -> tuple[str, ...]:
-    """与 prompts/assemble.py::parse_bad_cases 同规则：负例行，去掉 `-- reason`。"""
-    text = read(TPL_DIR / "bad_cases_for_complex.md")
-    cases: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or _ANNOTATION_RE.match(line):
-            continue
-        case = re.split(r"\s*--\s*", line)[0].strip()
-        if case:
-            cases.append(case)
-    return tuple(cases)
+    # 触发惰性构建（模板解析 + fail-loud 校验）：构建文档时模板坏会在此报错，
+    # 与生产行为一致，而不是默默展示一份过时的提示词。
+    for prompt_id in (
+        "segment",
+        "value_gate",
+        "complexity_gate",
+        "complex_judge",
+        "classify_complex",
+        "classify_normal",
+        "verify_complex",
+        "verify_recheck",
+        "translate",
+    ):
+        resolve_prompt(prompt_id)
+    return PROMPTS
 
 
 def prompt_section(label: str, title: str, text: str) -> str:
@@ -102,24 +81,21 @@ def prompt_section(label: str, title: str, text: str) -> str:
 
 
 def build_prompt_sections() -> str:
-    seg = extract_prompt_constant(PROMPTS_DIR / "segment.py", "SEGMENT")
-    value = extract_prompt_constant(PROMPTS_DIR / "value_gate.py", "VALUE_GATE")
-    complexity = extract_prompt_constant(PROMPTS_DIR / "complexity_gate.py", "COMPLEXITY_GATE")
-    verify = extract_prompt_constant(PROMPTS_DIR / "verify.py", "VERIFY_COMPLEX").strip()
-    cases = parse_bad_cases()
-    if cases:
-        verify = (
-            verify
-            + "\n\n以下问句已被确认为不复杂（负例，判定时参照，不要与之冲突）：\n"
-            + "\n".join(f"- {c}" for c in cases)
-        )
-    translate = extract_prompt_constant(PROMPTS_DIR / "translate.py", "TRANSLATE")
+    prompts = _prompts()
+    panels = [
+        ("会话分段提示词", "会话分段提示词", "segment"),
+        ("价值门提示词", "价值门提示词", "value_gate"),
+        ("复杂度门提示词", "复杂度门提示词", "complexity_gate"),
+        ("复杂判定提示词", "复杂判定提示词", "complex_judge"),
+        ("复杂分类提示词", "复杂分类提示词（9 类，含 few-shot 定义与示例）", "classify_complex"),
+        ("普通分类提示词", "普通分类提示词（16 类，含适用/排除/边界/易混）", "classify_normal"),
+        ("独立复判提示词", "独立复判提示词（含已确认负例）", "verify_complex"),
+        ("复判从严提示词", "复判从严提示词（第 2 轮起，逐轮从严）", "verify_recheck"),
+        ("翻译提示词", "翻译提示词", "translate"),
+    ]
     sections = [
-        prompt_section("会话分段提示词", "会话分段提示词 <code>segment</code> · LLM", seg),
-        prompt_section("价值门提示词", "价值门提示词 <code>value_gate</code> · LLM", value),
-        prompt_section("复杂度门提示词", "复杂度门提示词 <code>complexity_gate</code> · LLM", complexity),
-        prompt_section("独立复判提示词", "独立复判提示词 <code>verify_complex</code> · LLM（含已确认负例）", verify),
-        prompt_section("翻译提示词", "翻译提示词 <code>translate</code> · LLM", translate),
+        prompt_section(label, title, prompts[prompt_id])
+        for label, title, prompt_id in panels
     ]
     return "\n\n".join(sections)
 

@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit_parser.add_argument("input", help="complex_queries.jsonl 路径")
     audit_parser.add_argument("--max-ratio", type=float, default=0.05, help="非复杂率阈值（默认 5%，超出则退出码 1）")
+    audit_parser.add_argument("--max-error-ratio", type=float, default=0.0, help="无法判定行占比阈值（默认 0：任何一行判定失败即 FAIL；独立于非复杂率）")
     audit_parser.add_argument("--model", default="gpt-5.4-mini")
     audit_parser.add_argument("--concurrency", type=int, default=64)
     return parser
@@ -83,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         from dotenv import load_dotenv
 
         load_dotenv(_find_env_file(), override=False)
-        from query_pipeline.audit import _load_rows, audit_rows, render
+        from query_pipeline.audit import _load_rows, audit_rows, conclusion, render
 
         rows = _load_rows(Path(args.input))
         if not rows:
@@ -92,14 +93,10 @@ def main(argv: list[str] | None = None) -> int:
         results = asyncio.run(
             audit_rows(rows, model=args.model, concurrency=args.concurrency)
         )
-        print(render(results, max_ratio=args.max_ratio))
-        from query_pipeline.audit import _error_rows
-
-        non_complex = sum(1 for r in results if not r["is_complex"])
-        errors = len(_error_rows(results))
-        total = len(results)
-        passed = (
-            non_complex / total <= args.max_ratio and errors / total <= args.max_ratio
+        print(render(results, max_ratio=args.max_ratio, max_error_ratio=args.max_error_ratio))
+        # 退出码与 render 的 PASS/FAIL 共用同一结论（conclusion 单源，不重复计算）。
+        passed, _ratio, _error_ratio = conclusion(
+            results, max_ratio=args.max_ratio, max_error_ratio=args.max_error_ratio
         )
         return 0 if passed else 1
     if args.command == "suggest":

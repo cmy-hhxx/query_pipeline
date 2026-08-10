@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from query_pipeline.models.turn import Session, Turn
+
+logger = logging.getLogger(__name__)
 
 
 def _as_str(value: Any) -> str:
@@ -21,10 +24,15 @@ def adapt_chat(record: dict[str, Any]) -> Session:
     if not isinstance(prior, list):
         raise ValueError("judge_data.context must be a list")
 
+    bad_turns = [t for t in prior if not isinstance(t, dict)]
+    if bad_turns:
+        # fail-loud：静默过滤非 dict turn 会让整行在 chat 门槛（3/1/2）下无声落选，
+        # 且无任何计数/日志。抛错 → preclean 按 adapt_failed 进 bad_lines（可审计）。
+        raise ValueError(f"judge_data.context 含 {len(bad_turns)} 个非对象 turn")
+
     turns: list[Turn] = [
         Turn(question=_as_str(t.get("question")), answer=_as_str(t.get("answer")))
         for t in prior
-        if isinstance(t, dict)
     ]
 
     meta = jd.get("meta")
@@ -32,6 +40,11 @@ def adapt_chat(record: dict[str, Any]) -> Session:
         meta = {}
     raw_input = jd.get("input")
     chain = jd.get("chain")
+    if chain is not None and not isinstance(chain, list):
+        # 畸形 chain 静默置 [] 会让 chain_tool_calls 回退 tool_count（chat 未设置 → 0），
+        # 整行在 3/1/2 门槛下无声落选。记 warning 暴露问题，但保留行（chain 缺省合法）。
+        logger.warning("judge_data.chain 非列表（置空）：%r", str(chain)[:80])
+        chain = []
     if isinstance(raw_input, dict):
         question = _as_str(raw_input.get("text") or record.get("question"))
     elif isinstance(raw_input, str):

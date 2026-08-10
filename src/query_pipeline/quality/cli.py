@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", default="gpt-5.4-mini", help="judge 模型（默认复用管线模型）")
     run.add_argument("--concurrency", type=int, default=64, help="LLM 并发数")
     run.add_argument("--input", type=Path, help="输出 jsonl 路径覆盖（默认 outputs/<dataset>/cleaned_queries.jsonl）")
-    run.add_argument("--qc-dir", type=Path, help="QC 产物目录覆盖（默认 outputs/<dataset>/qc）")
+    run.add_argument("--qc-dir", type=Path, help="QC 产物目录覆盖（默认 outputs/<dataset>/qc/<date>）")
     run.add_argument("--cache", type=Path, help="LLM 缓存文件覆盖（默认 outputs/<dataset>/logs/llm_cache.jsonl）")
     run.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -79,12 +79,12 @@ def run_quality(args: argparse.Namespace) -> int:
     root = project_root()
     load_dotenv(root / ".env", override=False)
 
-    source = (args.input or source_path(args.dataset, args.date, root)).resolve()
+    source = (args.input or source_path(args.dataset, root)).resolve()
     if not source.exists():
         print(f"错误：找不到输出文件 {source}")
         return 1
     out_dir = (args.qc_dir or qc_dir(args.dataset, args.date, root)).resolve()
-    cache_path = (args.cache or llm_cache_path(args.dataset, args.date, root)).resolve()
+    cache_path = (args.cache or llm_cache_path(args.dataset, root)).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     records, skipped = read_jsonl_with_bad_lines(source, out_dir / "bad_lines.jsonl")

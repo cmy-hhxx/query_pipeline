@@ -94,6 +94,22 @@ def tokenize_question(text: str, *, entity_slot: bool = True) -> set[str]:
     return tokens
 
 
+def slot_counts(text: str, *, entity_slot: bool = True) -> dict[str, int]:
+    """槽位占位符计数（按类型）。
+
+    tokenize_question 返回**集合**，多个同型槽会折叠为单个 `<stock>`——模板层
+    只看非槽集合相等时，"比较 A 和 B"与"比较 A、B 和 C"会被当成同模板合并。
+    实体槽数量不同的问句是不同的分析请求（2 只 vs 3 只股票的比较），去重时
+    必须要求槽位计数一致。
+    """
+    text = (slot_entities(text) if entity_slot else normalize_question(text)).lower()
+    counts: dict[str, int] = {}
+    for word in text.split():
+        if word in SLOT_PLACEHOLDERS:
+            counts[word] = counts.get(word, 0) + 1
+    return counts
+
+
 def exact_token_jaccard(left: set[str], right: set[str]) -> float:
     """精确 token-set Jaccard;任一为空集返回 0.0(空文本永不与任何查询合并)。"""
     if not left or not right:
