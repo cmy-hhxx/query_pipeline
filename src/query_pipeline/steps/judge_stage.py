@@ -50,8 +50,8 @@ async def run_judge_stage(
                 "complex_rows": 0,
                 "normal_rows": 0,
                 "value_rejected": 0,
-                "non_complex": 0,
                 "llm_failed": 0,
+                "empty_sessions": 0,
                 "category_counts": {},
                 "category_counts_normal": {},
             }
@@ -68,8 +68,8 @@ async def run_judge_stage(
                 "complex_rows": 0,
                 "normal_rows": 0,
                 "value_rejected": 0,
-                "non_complex": 0,
                 "llm_failed": 0,
+                "empty_sessions": 0,
                 "category_counts": {},
                 "category_counts_normal": {},
             }
@@ -94,7 +94,7 @@ async def run_judge_stage(
             if sess_stats.get("llm_failed", 0) == 0 and "error" not in sess_stats:
                 await checkpoint.mark(key, rows=sess_rows, stats=sess_stats, judged=judged)
         except Exception as exc:  # noqa: BLE001 checkpoint 磁盘异常等也按会话错误兜底
-            sess_rows, sess_stats, judged = [], {"session_error": 1, "error": str(exc)[:200]}, []
+            sess_rows, sess_stats, judged = [], {"error": str(exc)[:200]}, []
         return sess_rows, sess_stats, judged
 
     # 会话层与其余阶段一致走 run_concurrent：纯任务编排 + 单行异常兜底（返回 None）。
@@ -123,8 +123,8 @@ async def run_judge_stage(
             "complex_rows": counters.get("complex_rows", 0),
             "normal_rows": counters.get("normal_rows", 0),
             "value_rejected": value_rejected,
-            "non_complex": counters.get("non_complex", 0),
             "llm_failed": llm_failed,
+            "empty_sessions": counters.get("empty_sessions", 0),
             "session_errors": counters.get("session_errors", 0),
             "category_counts": {cid: complex_categories[cid] for cid in sorted(complex_categories)},
             "category_counts_normal": {cid: normal_categories[cid] for cid in sorted(normal_categories)},
@@ -177,7 +177,6 @@ async def _process_session(
     rows: list[dict[str, Any]] = []
     llm_failed = 0
     value_rejected = 0
-    non_complex = 0
     complex_count = 0
     normal_count = 0
     complex_categories: Counter[str] = Counter()
@@ -197,7 +196,6 @@ async def _process_session(
             complex_count += 1
             complex_categories[j["category_id"]] += 1
         else:
-            non_complex += 1
             normal_count += 1
             normal_categories[j["category_id"]] += 1
         rows.append(
@@ -211,26 +209,30 @@ async def _process_session(
             )
         )
 
-    debug = [
-        {
-            "thread_id": session.thread_id,
-            "idx": j.get("idx"),
-            "question": turns[j["idx"]].question[:200] if j.get("idx") is not None else "",
-            "is_valuable": bool(getattr(j.get("value"), "is_valuable", None)),
-            "is_complex": bool(getattr(j.get("complexity"), "is_complex", None)),
-            "difficulty": j.get("difficulty"),
-            "category_id": j.get("category_id"),
-            "reason": j.get("reason"),
-            "error": j.get("error"),
-        }
-        for j in judged
-    ]
+    # 与计数循环一致：兜底网返回的 None 跳过，不得让 debug 推导再炸一次
+    # （否则整会话变 session_error，单候选异常会拖垮整次 run）。
+    debug: list[dict[str, Any]] = []
+    for j in judged:
+        if j is None:
+            continue
+        debug.append(
+            {
+                "thread_id": session.thread_id,
+                "idx": j.get("idx"),
+                "question": turns[j["idx"]].question[:200] if j.get("idx") is not None else "",
+                "is_valuable": bool(getattr(j.get("value"), "is_valuable", None)),
+                "is_complex": bool(getattr(j.get("complexity"), "is_complex", None)),
+                "difficulty": j.get("difficulty"),
+                "category_id": j.get("category_id"),
+                "reason": j.get("reason"),
+                "error": j.get("error"),
+            }
+        )
     stats = {
         "candidates": len(candidates),
         "complex_rows": complex_count,
         "normal_rows": normal_count,
         "value_rejected": value_rejected,
-        "non_complex": non_complex,
         "llm_failed": llm_failed,
         "categories": dict(complex_categories),
         "categories_normal": dict(normal_categories),

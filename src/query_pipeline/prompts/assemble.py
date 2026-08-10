@@ -60,6 +60,12 @@ def parse_complex_few_shot(text: str) -> dict[str, ComplexCategorySpec]:
             current = match.group(1)
             definition, examples, in_examples = [], [], False
             continue
+        if line.startswith("###"):
+            # `###` 是类别 header 层级：格式不符（缺 id 等）必须 fail-loud，
+            # 否则该类别内容会静默并入前一类别并覆盖其同名 section。
+            raise ValueError(f"malformed complex few-shot header: {line!r}")
+        if line.startswith("#"):
+            continue  # 文档级标题（如 "## 9 类复杂金融问句"）不属于任何类别
         if current is None:
             continue
         if _EXAMPLE_LIST.match(line):
@@ -114,6 +120,12 @@ def parse_normal_few_shot(text: str) -> dict[str, NormalCategorySpec]:
             current_name = match.group(3).strip()
             section, sections, buffer = None, {}, []
             continue
+        if line.startswith("##"):
+            # `##` 是类别 header 层级：格式不符（缺 slug/name）必须 fail-loud，
+            # 否则该类别内容会静默并入前一类别并覆盖其同名 section。
+            raise ValueError(f"malformed normal few-shot header: {line!r}")
+        if line.startswith("#"):
+            continue  # 文档级标题（如 "# 决策步骤"）不属于任何类别
         if current is None:
             continue
         sec = _SECTION.match(line)
@@ -147,9 +159,26 @@ def parse_bad_cases(text: str) -> tuple[str, ...]:
     return tuple(cases)
 
 
+def _require_complete_specs(spec_ids: set[str], taxonomy_ids: set[str], source: str) -> None:
+    """templates 是唯一事实源：taxonomy ↔ few_shot spec 必须一一对应，缺失即 fail-loud。
+
+    静默缺 spec 会让该类别输出空标题行（LLM 无定义可依）；多余 spec 说明模板漂移。
+    """
+    missing = sorted(taxonomy_ids - spec_ids)
+    extra = sorted(spec_ids - taxonomy_ids)
+    if missing or extra:
+        problems = []
+        if missing:
+            problems.append(f"缺少类别 spec: {missing}")
+        if extra:
+            problems.append(f"spec 不在 taxonomy 中: {extra}")
+        raise ValueError(f"{source} 与 taxonomy 不一致：{'；'.join(problems)}")
+
+
 def build_complex_classify_prompt(*, max_examples: int = 1000) -> str:
     tax = load_taxonomy()
     specs = parse_complex_few_shot(_read("complex_few_shot.md"))
+    _require_complete_specs(set(specs), set(tax.complex), "complex_few_shot.md")
     blocks: list[str] = []
     for cid, cat in tax.complex.items():
         spec = specs.get(cid)
@@ -176,6 +205,7 @@ def build_complex_classify_prompt(*, max_examples: int = 1000) -> str:
 def build_normal_classify_prompt() -> str:
     tax = load_taxonomy()
     specs = parse_normal_few_shot(_read("normal_few_shot.md"))
+    _require_complete_specs(set(specs), set(tax.normal), "normal_few_shot.md")
     blocks: list[str] = []
     for cid, cat in tax.normal.items():
         spec = specs.get(cid)

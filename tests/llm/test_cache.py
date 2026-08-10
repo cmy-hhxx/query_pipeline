@@ -19,6 +19,17 @@ class CacheKeyTest(unittest.TestCase):
             make_cache_key(q, step="s", model="m", prompt="v2"),
         )
 
+    def test_cache_key_versioned_by_source_fingerprint(self) -> None:
+        # "改代码不改 prompt" 的修复也必须让旧缓存失效（与 checkpoint 策略一致）
+        from unittest.mock import patch
+
+        q = "question"
+        with patch("query_pipeline.llm.cache.src_hash", return_value="aaaa"):
+            key_a = make_cache_key(q, step="s", model="m", prompt="p")
+        with patch("query_pipeline.llm.cache.src_hash", return_value="bbbb"):
+            key_b = make_cache_key(q, step="s", model="m", prompt="p")
+        self.assertNotEqual(key_a, key_b)
+
     def test_cache_key_verify_rounds_distinct(self) -> None:
         q = "question"
         base = make_cache_key(q, step="verify:verify_complex", model="m", prompt=resolve_prompt("verify_complex"))

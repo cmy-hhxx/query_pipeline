@@ -41,10 +41,13 @@ async def run_segment_stage(
 
     results = await run_concurrent(ctx.sessions, worker, description="LLM segment")
     ctx.segments = {}
-    for session, (thread_id, segments) in zip(ctx.sessions, results):
-        if segments is None:  # run_concurrent 兜底网捕获的意外异常：回退 whole_session
+    for session, result in zip(ctx.sessions, results):
+        if result is None:  # run_concurrent 兜底网捕获的意外异常：回退 whole_session
             turns = session.turns
             segments = [Segment(0, len(turns) - 1, "whole_session")] if turns else []
+            thread_id = session.thread_id
+        else:
+            thread_id, segments = result
         ctx.segments[thread_id] = segments
     ctx.stats["segments"] = sum(len(v) for v in ctx.segments.values())
     return ctx

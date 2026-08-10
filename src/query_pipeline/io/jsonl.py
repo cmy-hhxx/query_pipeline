@@ -33,10 +33,11 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
 
 
 def read_jsonl_with_bad_lines(path: Path, bad_path: Path) -> tuple[list[dict[str, Any]], int]:
-    """Read records; unparseable lines go to bad_path (one raw line each) and are skipped."""
+    """Read records; unparseable lines go to bad_path as JSON objects (single
+    format shared with adapt-failed records) and are skipped."""
     records: list[dict[str, Any]] = []
     skipped = 0
-    bad_lines: list[str] = []
+    bad_records: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
             raw = line.rstrip("\n")
@@ -47,19 +48,21 @@ def read_jsonl_with_bad_lines(path: Path, bad_path: Path) -> tuple[list[dict[str
                 record = json.loads(stripped)
             except json.JSONDecodeError:
                 skipped += 1
-                bad_lines.append(raw)
+                bad_records.append({"reason": "invalid_json", "line_number": line_number, "raw": raw})
                 continue
             if not isinstance(record, dict):
                 skipped += 1
-                bad_lines.append(raw)
+                bad_records.append({"reason": "not_an_object", "line_number": line_number, "raw": raw})
                 continue
             record.setdefault("_line_number", line_number)
             records.append(record)
-    if bad_lines:
+    if bad_records:
         bad_path.parent.mkdir(parents=True, exist_ok=True)
         with bad_path.open("w", encoding="utf-8") as handle:
-            for line in bad_lines:
-                handle.write(line + "\n")
+            for record in bad_records:
+                handle.write(
+                    json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
     return records, skipped
 
 

@@ -5,11 +5,11 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from query_pipeline.config.models import PipelineConfig
+from query_pipeline.llm import cache as llm_cache
 from query_pipeline.prompts import resolve_prompt
 
 logger = logging.getLogger(__name__)
@@ -18,20 +18,6 @@ logger = logging.getLogger(__name__)
 def _hash_material(material: dict[str, Any]) -> str:
     blob = json.dumps(material, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-
-@lru_cache(maxsize=1)
-def _src_hash() -> str:
-    """Hash of all pipeline source code; behavior fixes must invalidate checkpoints.
-
-    Hashes the whole src/query_pipeline tree (not a per-stage list) so the fingerprint
-    can never silently forget the modules a stage depends on.
-    """
-    root = Path(__file__).resolve().parents[1]
-    h = hashlib.sha256()
-    for path in sorted(root.rglob("*.py")):
-        h.update(path.read_bytes())
-    return h.hexdigest()
 
 
 def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
@@ -49,7 +35,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
                 "rule_gate": cfg.rule_gate.model_dump(mode="json"),
                 "judge": cfg.judge.model_dump(mode="json"),
                 "llm": llm,
-                "src": _src_hash(),
+                "src": llm_cache.src_hash(),
                 "prompts": {
                     "segment": resolve_prompt("segment"),
                     cfg.judge.value_prompt: resolve_prompt(cfg.judge.value_prompt),
@@ -67,7 +53,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
             {
                 "verify": cfg.verify.model_dump(mode="json"),
                 "llm": llm,
-                "src": _src_hash(),
+                "src": llm_cache.src_hash(),
                 "prompts": prompts,
             }
         )
@@ -76,7 +62,7 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
             {
                 "translate": cfg.post.translate.model_dump(mode="json"),
                 "llm": llm,
-                "src": _src_hash(),
+                "src": llm_cache.src_hash(),
                 "prompts": {"translate": resolve_prompt("translate")},
             }
         )

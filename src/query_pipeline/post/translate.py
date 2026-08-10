@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from query_pipeline.config.models import LLMConfig
 from query_pipeline.io.checkpoint import Checkpoint, content_key
@@ -72,11 +75,16 @@ async def translate_rows(
         )
         cache_key = make_cache_key(user_prompt, step="translate", model=llm_cfg.model, prompt=system_prompt)
         try:
+            translation: str | None = None
             if cache_key in cache:
-                translation = cache[cache_key].get("translation")
-                if not isinstance(translation, str) or not translation.strip():
-                    raise ValueError("cached translation is invalid")
-            else:
+                cached = cache[cache_key].get("translation")
+                if isinstance(cached, str) and cached.strip():
+                    translation = cached
+                else:
+                    # 坏缓存 label：驱逐并重调，避免每次运行重复失败（与 segment 自愈一致）
+                    logger.warning("cached translate label invalid, re-calling LLM")
+                    cache.pop(cache_key, None)
+            if translation is None:
                 raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
                 translation = parse_translation(raw)
                 await put_cache(

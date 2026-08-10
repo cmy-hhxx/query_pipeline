@@ -79,7 +79,6 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["candidates"], 2)
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["normal_rows"], 1)
-            self.assertEqual(summary.stats["non_complex"], 1)
             self.assertEqual(summary.stats["llm_failed"], 0)
             self.assertEqual(summary.stats["verify_kept"], 2)  # hard keep + normal keep
             self.assertEqual(summary.stats["verify_rejected"], 0)
@@ -271,6 +270,108 @@ class SessionPipelineContractTest(unittest.TestCase):
                 {"帮我构建一个沪深300的增强策略并回测"},
             )
 
+    def _corrupt_cache_entry(self, cache_path: Path, step_prefix: str, label: dict[str, Any]) -> None:
+        """把 cache 文件中指定 step 的第一个 label 替换为坏值。"""
+        lines = cache_path.read_text(encoding="utf-8").splitlines()
+        out: list[str] = []
+        replaced = False
+        for line in lines:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("cache_key", "").startswith(step_prefix) and not replaced:
+                row["label"] = label
+                replaced = True
+            out.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        assert replaced, f"no {step_prefix} entry in cache"
+        cache_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    def test_bad_funnel_cache_label_self_heals(self) -> None:
+        # 坏 value_gate 缓存 label：驱逐并重调 LLM，候选保留；不得每次运行重复丢弃。
+        # 删除 judge checkpoint 让 funnel 真正重跑（否则会话级 checkpoint 直接回放行）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                run_pipeline(cfg)
+            cache_path = tmp_path / "work" / "llm_cache.jsonl"
+            self._corrupt_cache_entry(cache_path, "value_gate:", {"is_valuable": "not-a-bool"})
+            (tmp_path / "work" / "logs" / "checkpoints" / "judge.jsonl").unlink()
+
+            class RecordingFunnelClient(FakeSessionLLMClient):
+                def __init__(self, config: object) -> None:
+                    super().__init__(config)
+                    self.calls: list[dict[str, Any]] = []
+
+                async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                    self.calls.append(json.loads(user_prompt.split("\n", 1)[1]))
+                    return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+
+            clients: list[RecordingFunnelClient] = []
+
+            def factory(config: object) -> RecordingFunnelClient:
+                client = RecordingFunnelClient(config)
+                clients.append(client)
+                return client
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory):
+                summary = run_pipeline(cfg)
+            client = clients[0]
+
+            self.assertEqual(summary.stats["complex_rows"], 1)  # 候选未被重复丢弃
+            self.assertEqual(summary.stats["value_rejected"], 0)
+            funnel_calls = [c for c in client.calls if "current_question" in c]
+            # 只有 value gate 重调（坏缓存驱逐）；complexity/classify 命中完好缓存
+            self.assertEqual(len(funnel_calls), 1)
+
+    def test_bad_verify_cache_label_self_heals(self) -> None:
+        # 坏 verify 缓存 label：驱逐并重调，行保留；不得固化坏裁决。
+        # 删除 judge/verify checkpoint 让 round 循环真正执行（否则 checkpoint 直接回放）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                run_pipeline(cfg)
+            cache_path = tmp_path / "work" / "llm_cache.jsonl"
+            self._corrupt_cache_entry(cache_path, "verify:", {"is_complex": "garbage"})
+            for name in ("judge.jsonl", "verify.jsonl"):
+                (tmp_path / "work" / "logs" / "checkpoints" / name).unlink()
+
+            class RecordingVerifyClient(FakeSessionLLMClient):
+                def __init__(self, config: object) -> None:
+                    super().__init__(config)
+                    self.calls: list[dict[str, Any]] = []
+
+                async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                    self.calls.append(json.loads(user_prompt.split("\n", 1)[1]))
+                    return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+
+            clients: list[RecordingVerifyClient] = []
+
+            def factory(config: object) -> RecordingVerifyClient:
+                client = RecordingVerifyClient(config)
+                clients.append(client)
+                return client
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", factory):
+                summary = run_pipeline(cfg)
+            client = clients[0]
+
+            self.assertEqual(summary.stats["verify_kept"], 2)  # 未被坏缓存丢弃（hard+normal 各 1）
+            self.assertEqual(summary.stats["verify_failed"], 0)
+            verify_calls = [
+                c
+                for c in client.calls
+                if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c
+            ]
+            self.assertGreaterEqual(len(verify_calls), 1)  # round 1 重调（坏缓存驱逐）
+
     def test_end_to_end_post_stage_dedup_and_translate(self) -> None:
         # Two candidate turns with identical English text: verify keeps both,
         # dedup drops the second, translate fills top-level translation on the
@@ -422,6 +523,52 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["candidates"], 0)
             self.assertEqual(summary.stats["complex_rows"], 0)
 
+    def test_unexpected_candidate_error_does_not_fail_run(self) -> None:
+        # 兜底网返回 None（如 cache 磁盘 OSError）：单候选按 llm_failed 计，
+        # debug 推导不得再对 None 崩溃 → 会话不得变 session_error、run 不得失败。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient), patch(
+                "query_pipeline.session.funnel.put_cache", side_effect=OSError("disk full")
+            ):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["session_errors"], 0)
+            self.assertGreater(summary.stats["llm_failed"], 0)
+
+    def test_api_4xx_in_funnel_drops_candidate_not_session(self) -> None:
+        # fix #9 让 4xx 立即抛出；funnel 必须捕获 APIStatusError 按候选失败处理
+        # （否则逃逸到兜底网 → debug 崩溃 → 整会话 error → run 失败）。
+        import httpx
+        from openai import BadRequestError
+
+        class FourHundredClient(FakeSessionLLMClient):
+            async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                payload = json.loads(user_prompt.split("\n", 1)[1])
+                if "current_question" in payload and "价值判官" in system_prompt:
+                    req = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+                    raise BadRequestError("context too long", response=httpx.Response(400, request=req), body=None)
+                return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FourHundredClient):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["session_errors"], 0)
+            self.assertEqual(summary.stats["llm_failed"], 2)  # 两个候选均 400 → 丢弃
+            self.assertEqual(summary.stats["complex_rows"], 0)
+
     def test_value_gate_string_false_rejects_fail_closed(self) -> None:
         # LLM 输出 "is_valuable": "false"（字符串）：严格解析后应为 False 并丢弃候选，
         # 不得因 bool("false") == True 静默放行。
@@ -444,6 +591,22 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["value_rejected"], 2)  # 全部候选被 value 门拒
             self.assertEqual(summary.stats["complex_rows"], 0)
             self.assertEqual(summary.stats["llm_failed"], 0)
+
+    def test_empty_sessions_counted_in_stats(self) -> None:
+        # context=[非 dict] 可产出 0 turns 会话：empty_sessions 必须出现在 stats 里
+        # （preclean 只滤空 context 列表，不滤非 dict 元素）。
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": [42, "not-a-dict"]}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeSessionLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["total_sessions"], 1)
+            self.assertEqual(summary.stats["empty_sessions"], 1)
+            self.assertEqual(summary.stats["candidates"], 0)
 
     def test_empty_success_run_keeps_previous_output(self) -> None:
         # 成功但零输出的 run 不得用空文件覆盖上次良好产物。

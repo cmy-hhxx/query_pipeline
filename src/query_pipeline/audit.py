@@ -65,7 +65,10 @@ async def audit_rows(
         inp = row.get("input")
         question = str(inp.get("text") or "") if isinstance(inp, dict) else ""
         # 3 次独立判定取多数：LLM 对边界问句的判定有波动，多数裁决更稳。
-        verdicts: list[tuple[bool, str]] = []
+        # 调用失败 / 字段缺失 / 非布尔：一律记 audit_error 票（"无法判定"），
+        # 不得判复杂（掩盖故障）也不得判非复杂（拉低通过率）。
+        verdicts: list[tuple[bool, str]] = []  # (is_complex, reason_or_error_detail)
+        errors = 0
         for _ in range(3):
             try:
                 raw = await client.complete(
@@ -73,8 +76,12 @@ async def audit_rows(
                     user_prompt=json.dumps({"question": question}, ensure_ascii=False),
                 )
                 data = json.loads(raw)
-                verdicts.append((bool(data.get("is_complex")), str(data.get("reason") or "")))
-            except Exception as exc:  # noqa: BLE001 审计失败按通过处理
+                is_complex = data.get("is_complex")
+                if not isinstance(is_complex, bool):
+                    raise ValueError(f"is_complex 缺失或非布尔: {is_complex!r}")
+                verdicts.append((is_complex, str(data.get("reason") or "")))
+            except Exception as exc:  # noqa: BLE001 无法判定：单独计数，由错误率闸门拦截
+                errors += 1
                 verdicts.append((True, f"audit_error: {str(exc)[:80]}"))
         is_complex = sum(1 for v, _ in verdicts if v) >= 2
         reasons = [r for v, r in verdicts if not v]
@@ -85,6 +92,7 @@ async def audit_rows(
             "question": question,
             "is_complex": is_complex,
             "reason": reason,
+            "audit_errors": errors,
         }
 
     try:
@@ -94,16 +102,32 @@ async def audit_rows(
     return results
 
 
+def _error_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in results if r.get("audit_errors", 0) > 0]
+
+
 def render(results: list[dict[str, Any]], *, max_ratio: float) -> str:
+    total = len(results)
     non_complex = [r for r in results if not r["is_complex"]]
-    ratio = len(non_complex) / len(results) if results else 0.0
+    errors = _error_rows(results)
+    ratio = len(non_complex) / total if total else 0.0
+    error_ratio = len(errors) / total if total else 0.0
+    passed = ratio <= max_ratio and error_ratio <= max_ratio
     lines = [
-        f"=== complex 输出审计：共 {len(results)} 行，非复杂 {len(non_complex)} 行 "
-        f"({ratio * 100:.1f}%，阈值 {max_ratio * 100:.0f}%) ===",
+        f"=== complex 输出审计：共 {total} 行，非复杂 {len(non_complex)} 行 "
+        f"({ratio * 100:.1f}%，阈值 {max_ratio * 100:.0f}%)；无法判定 {len(errors)} 行 "
+        f"({error_ratio * 100:.1f}%，错误率超过阈值即 FAIL) ===",
     ]
     for r in non_complex[:20]:
         lines.append(f"  [非复杂] {r['reason'][:50]} | {r['question'][:70]}")
+    for r in errors[:10]:
+        lines.append(f"  [无法判定] {r['reason'][:50]} | {r['question'][:70]}")
     if len(non_complex) > 20:
         lines.append(f"  ... 其余 {len(non_complex) - 20} 条见完整结果")
-    lines.append(f"结论: {'PASS' if ratio <= max_ratio else 'FAIL'}（非复杂率 {'<=' if ratio <= max_ratio else '>'} {max_ratio * 100:.0f}%）")
+    lines.append(
+        f"结论: {'PASS' if passed else 'FAIL'}（非复杂率 {ratio * 100:.1f}% "
+        f"{'<=' if ratio <= max_ratio else '>'} {max_ratio * 100:.0f}%；"
+        f"错误率 {error_ratio * 100:.1f}% "
+        f"{'<=' if error_ratio <= max_ratio else '>'} {max_ratio * 100:.0f}%）"
+    )
     return "\n".join(lines)

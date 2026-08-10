@@ -52,7 +52,7 @@ _NORMAL_SAMPLE = """\
 易混类别：
 - 03-stock-diagnosis-and-data-lookup: 03 是查数。
 
-## 决策步骤
+# 决策步骤
 
 1. 阅读 query。
 """
@@ -99,6 +99,40 @@ class ParseNormalTest(unittest.TestCase):
         for spec in specs.values():
             self.assertIn("定义", spec.sections)
             self.assertIn("易混类别", spec.sections)
+
+class FailLoudTest(unittest.TestCase):
+    def test_malformed_normal_header_raises(self) -> None:
+        # 缺 slug/name 的 `## 02`：必须抛错，不得静默并入前一类别
+        from query_pipeline.prompts.assemble import parse_normal_few_shot
+
+        with self.assertRaises(ValueError):
+            parse_normal_few_shot("## 01-good | 名字\n定义：a\n## 02\n定义：b")
+
+    def test_malformed_complex_header_raises(self) -> None:
+        from query_pipeline.prompts.assemble import parse_complex_few_shot
+
+        with self.assertRaises(ValueError):
+            parse_complex_few_shot("### 01 好\n特征：a\n### 没有编号\n特征：b")
+
+    def test_document_title_skipped(self) -> None:
+        from query_pipeline.prompts.assemble import parse_complex_few_shot
+
+        specs = parse_complex_few_shot("## 文档标题\n### 01 好\n特征：a")
+        self.assertEqual(set(specs), {"01"})
+
+    def test_missing_spec_raises_in_builder(self) -> None:
+        # taxonomy 有类别而 few_shot 缺 spec：build 必须 fail-loud
+        from unittest.mock import patch
+
+        from query_pipeline.prompts.assemble import _read
+
+        good = _read("normal_few_shot.md")
+        # 删掉 16 的整个 section（保留其它类别）
+        truncated = good.split("# 决策步骤")[0].rsplit("## 15-", 1)[0]
+        with patch("query_pipeline.prompts.assemble._read", return_value=truncated):
+            with self.assertRaises(ValueError):
+                build_normal_classify_prompt()
+
 
 class BadCasesTest(unittest.TestCase):
     def test_annotation_lines_skipped(self) -> None:

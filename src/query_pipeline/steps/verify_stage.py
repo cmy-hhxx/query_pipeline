@@ -99,9 +99,17 @@ async def run_verify_stage(
                 user_prompt, step=f"verify:{prompt_id}", model=cfg.llm.model, prompt=system_prompt
             )
             try:
+                parsed: Any | None = None
                 if cache_key in cache:
-                    parsed = parse_verify_payload(cache[cache_key])
-                else:
+                    try:
+                        parsed = parse_verify_payload(cache[cache_key])
+                    except (ValueError, RuntimeError) as exc:
+                        # 坏缓存 label：驱逐并重调，避免每次运行重复丢弃（与 segment 自愈一致）
+                        logger.warning(
+                            "cached verify label invalid, re-calling LLM: %s", str(exc)[:120]
+                        )
+                        cache.pop(cache_key, None)
+                if parsed is None:
                     raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
                     parsed = parse_verify_response(raw)
                     await put_cache(

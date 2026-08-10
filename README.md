@@ -45,21 +45,22 @@ JSONL，一行一条，格式**自动识别**（`format: auto`，可显式覆盖
 ## 流程（stage 可插拔，默认顺序）
 
 ```
-preclean → segment → rule_gate → judge → verify → answer_gate → post
+preclean → segment → rule_gate → judge → verify → simple_gate → answer_gate → post
 ```
 
 每个阶段是注册的模块（`register("name")(stage_fn)`），`--stages` / config 可自定义顺序。新增类别 = 改 `templates/` 下的 md；新增阶段 = 实现 `(ctx, client, cache, cache_lock) -> ctx` 并注册。
 
 1. **preclean**：格式嗅探 + 坏行落盘 + 输入去重 + adapt 成统一 Session。
 2. **segment**（session，LLM）：按主题切 2-4 段，失败回退整段。
-3. **rule_gate**（规则，双格式生效）：噪声 reject 规则 + 工具门槛（chain 调用 ≥7 / 步骤 ≥1 / 工具种 ≥2，chat 同规则，阈值按数据可调）。
+3. **rule_gate**（规则，双格式生效）：噪声 reject 规则 + 工具门槛（chain 调用 ≥7（session）/ ≥3（chat，分布平坦，≥7 仅覆盖 ~1%）、步骤 ≥1、工具种 ≥2，阈值按数据可调；未显式设置的旋钮按嗅探到的输入格式补默认）。
 4. **judge**（LLM，解耦漏斗，每个候选 2-3 次调用，失败即弃）：
    - `value_gate`：是否有价值（有任务非闲聊 / 金融相关 / 不依赖不可见上文），无价值丢弃
    - `complexity_gate`：是否复杂（二分类，与打标签解耦）
    - `classify`：复杂 → 9 类（`complex-topic/{id}-{slug}`，difficulty=hard）；非复杂 → 16 类（`{id}-{slug}`，difficulty=normal）
 5. **verify**（LLM，带前文问题作指代参考，准入标准不放松）：hard 5 轮 / normal 2 轮（可配），级联从严，任一轮与难度相悖即弃；LLM 失败丢弃（fail-closed）。
-6. **answer_gate**（规则）：`meta.last_event_type` 必须为 `runFinished`（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 拒绝）+ 拒绝话术（中英）+ 截断标点 + 回答过短（<50 字）。
-7. **post**：`dedup`（股票名词典槽化 + 同模板等价类合并 + token-Jaccard ≥ 0.80，倒排阻塞，10 万行秒级）→ `translate`（中文占比 < 30% 才翻译，写 `translation`，原文保留）。
+6. **simple_gate**（规则，只查 hard 行）：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。
+7. **answer_gate**（规则）：`meta.last_event_type` 必须为 `runFinished`（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 拒绝）+ 拒绝话术（中英）+ 截断标点 + 回答过短（<50 字）。
+8. **post**：`dedup`（股票名词典槽化 + 同模板等价类合并 + token-Jaccard ≥ 0.80，倒排阻塞，10 万行秒级）→ `translate`（中文占比 < 30% 才翻译，写 `translation`，原文保留）。
 
 `llm.enabled=false`：跳过所有 LLM 阶段，只跑规则，输出为空属正常。
 

@@ -4,10 +4,26 @@ import asyncio
 import hashlib
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def src_hash() -> str:
+    """Hash of all pipeline source code; behavior fixes must invalidate LLM cache.
+
+    Hashes the whole src/query_pipeline tree (not a per-stage list) so the
+    fingerprint can never silently forget the modules a stage depends on.
+    checkpoint 的 stage_fingerprint 复用同一哈希，缓存与断点失效策略一致。
+    """
+    root = Path(__file__).resolve().parents[1]
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        h.update(path.read_bytes())
+    return h.hexdigest()
 
 
 def load_cache(cache_path: Path) -> dict[str, dict[str, Any]]:
@@ -70,6 +86,9 @@ async def put_cache(
 def make_cache_key(question: str, *, step: str, model: str, prompt: str = "") -> str:
     # Include the system prompt so a prompt change invalidates stale cached
     # results (otherwise old labels are reused for the new instructions).
-    material = (prompt + "\n") + question if prompt else question
+    # Include the source fingerprint so "改代码不改 prompt" 的修复（parse 规则、
+    # taxonomy 映射、难度判定等）也不会跨运行静默复用旧 label——与 checkpoint
+    # 的失效策略一致（README：配置/输入/源码变化自动失效）。
+    material = f"{src_hash()}\n{prompt}\n{question}"
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"{step}:{model}:{digest}"

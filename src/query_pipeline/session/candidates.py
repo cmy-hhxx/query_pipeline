@@ -6,13 +6,13 @@ from query_pipeline.rules.reject import generic_reject_reason
 
 
 # 未显式设置的旋钮按输入格式补齐（chat 工具调用分布平坦，>=7 次仅覆盖 ~1%）。
-# suggest.py 的 is_default 标记同源：session 7/2、chat 3/2。
-_FORMAT_DEFAULTS = {"session": (7, 2), "chat": (3, 2)}
+# suggest.py 直接导入本表（唯一事实源），is_default 标记与实际执行门槛一致。
+FORMAT_DEFAULTS = {"session": (7, 2), "chat": (3, 2)}
 
 
 def effective_gate(cfg: RuleGateConfig, fmt: str) -> RuleGateConfig:
     """按输入格式补齐 None 旋钮；显式传入的旋钮保持原值。"""
-    calls, tools = _FORMAT_DEFAULTS.get(fmt, _FORMAT_DEFAULTS["session"])
+    calls, tools = FORMAT_DEFAULTS.get(fmt, FORMAT_DEFAULTS["session"])
     return RuleGateConfig(
         enabled=cfg.enabled,
         reject_rules=cfg.reject_rules,

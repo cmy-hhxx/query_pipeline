@@ -27,7 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--min-tool-calls", type=int, default=None, help="rule_gate 工具调用数门槛（默认 session 7 / chat 3）")
     run_parser.add_argument("--min-unique-tools", type=int, default=None, help="rule_gate 工具种数门槛（默认 session 2 / chat 2）")
     run_parser.add_argument("--no-reject-rules", action="store_true", help="关闭 reject 规则")
-    run_parser.add_argument("--verify-rounds", type=int, default=None, help="复杂问句 verify 轮数（默认 5）")
+    run_parser.add_argument("--verify-rounds", type=int, default=None, help="hard 复杂问句 verify 轮数（默认 5）")
+    run_parser.add_argument("--verify-rounds-normal", type=int, default=None, help="normal 问句 verify 轮数（默认 2）")
     run_parser.add_argument("--dedup-threshold", type=float, default=None, help="去重 Jaccard 阈值（默认 0.80）")
     run_parser.add_argument("--api-key", default=None, help="OPENAI_API_KEY 覆盖（默认读 .env）")
     run_parser.add_argument("--base-url", default=None, help="OPENAI_BASE_URL 覆盖（默认读 .env）")
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             min_unique_tools=args.min_unique_tools,
             reject_rules=not args.no_reject_rules,
             verify_rounds_hard=args.verify_rounds,
+            verify_rounds_normal=args.verify_rounds_normal,
             api_key=args.api_key,
             base_url=args.base_url,
             verbose=args.verbose,
@@ -91,8 +93,15 @@ def main(argv: list[str] | None = None) -> int:
             audit_rows(rows, model=args.model, concurrency=args.concurrency)
         )
         print(render(results, max_ratio=args.max_ratio))
+        from query_pipeline.audit import _error_rows
+
         non_complex = sum(1 for r in results if not r["is_complex"])
-        return 0 if non_complex / len(results) <= args.max_ratio else 1
+        errors = len(_error_rows(results))
+        total = len(results)
+        passed = (
+            non_complex / total <= args.max_ratio and errors / total <= args.max_ratio
+        )
+        return 0 if passed else 1
     if args.command == "suggest":
         from query_pipeline.suggest import render_suggestions, suggest_gates
 

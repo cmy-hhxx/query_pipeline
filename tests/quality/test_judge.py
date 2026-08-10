@@ -172,3 +172,49 @@ class JudgeTest(unittest.TestCase):
             for verdict in verdicts:
                 self.assertIsNone(verdict["error"])
 
+    def test_safety_net_none_maps_to_error_not_silent_drop(self) -> None:
+        # judge_one 意外异常（如 cache 磁盘 OSError）→ 兜底网 None →
+        # 必须映射为 error 语义（needs_review），不得静默丢弃算成 pass。
+        from unittest.mock import patch
+
+        records = [_row(trace_id=f"t{i}") for i in range(4)]
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "llm_cache.jsonl"
+            client = self._client()
+            with patch("query_pipeline.quality.judge.put_cache", side_effect=OSError("disk full")):
+                indices, verdicts = asyncio.run(
+                    judge_mod.run_llm_judge(
+                        records, client, {}, asyncio.Lock(), cache_path,
+                        ratio=1.0, seed=1,
+                    )
+                )
+            self.assertEqual(len(indices), 4)
+            self.assertEqual(len(verdicts), 4)  # 不再被过滤掉
+            self.assertTrue(all(v["error"] for v in verdicts), verdicts)
+
+    def test_bad_cached_label_self_heals(self) -> None:
+        # 坏缓存 label（如手改缓存）：驱逐并重调 LLM，而不是每次运行都误判。
+        from query_pipeline.quality.judge import JudgeResult, build_judge_user_prompt, build_judge_system_prompt
+        from query_pipeline.llm.cache import make_cache_key
+
+        records = [_row(trace_id="t1")]
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "llm_cache.jsonl"
+            client = self._client()
+            system_prompt = build_judge_system_prompt()
+            model = client.config.model
+            user_prompt = build_judge_user_prompt(records[0])
+            cache_key = make_cache_key(user_prompt, step=judge_mod.QC_STEP, model=model, prompt=system_prompt)
+            cache = {cache_key: {"question_quality": "bogus", "label_ok": True, "reason": ""}}
+
+            indices, verdicts = asyncio.run(
+                judge_mod.run_llm_judge(
+                    records, client, cache, asyncio.Lock(), cache_path,
+                    ratio=1.0, seed=1,
+                )
+            )
+            self.assertEqual(len(verdicts), 1)
+            self.assertIsNone(verdicts[0]["error"])  # 重调后正常判定
+            self.assertEqual(client.calls, 1)  # 缓存被驱逐并重新调用
+            self.assertEqual(cache[cache_key]["question_quality"], "high")  # 新 label 已写入
+

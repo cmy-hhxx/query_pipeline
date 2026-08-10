@@ -79,7 +79,7 @@ def run(
         post_enabled: run dedup + translate after verify.
         dedup_threshold / verify_rounds_hard / verify_rounds_normal: knobs
             with pipeline defaults when omitted.
-        work_dir: scratch dir for caches/checkpoints (default: ``work/<input stem>``).
+        work_dir: scratch dir for caches/checkpoints (default: the output dir).
         llm_enabled: False runs rules only (empty output is expected).
         verbose: debug logging.
 

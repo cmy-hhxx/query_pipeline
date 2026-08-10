@@ -7,8 +7,12 @@ candidate (fail-closed); the funnel only assembles rows for survivors.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, ClassVar
 
+logger = logging.getLogger(__name__)
+
+from openai import APIStatusError
 from pydantic import BaseModel, field_validator
 
 from query_pipeline.config.models import LLMConfig
@@ -83,7 +87,13 @@ async def _call(
     )
     cache_key = make_cache_key(user_prompt, step=step, model=llm_cfg.model, prompt=system_prompt)
     if cache_key in cache:
-        return parse(cache[cache_key])
+        try:
+            return parse(cache[cache_key])
+        except (ValueError, RuntimeError) as exc:
+            # 坏缓存 label（跨版本 schema / 手改缓存）：驱逐并重调，避免每次运行重复丢弃
+            # （与 segment 的自愈策略一致）。
+            logger.warning("cached %s label invalid, re-calling LLM: %s", step, str(exc)[:120])
+            cache.pop(cache_key, None)
     raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
     parsed = parse(raw)
     await put_cache(
@@ -153,5 +163,7 @@ async def funnel_candidate(
             "reason": classify.reason or complexity.reason,
             "error": None,
         }
-    except (ValueError, RuntimeError) as exc:
+    except (ValueError, RuntimeError, APIStatusError) as exc:
+        # APIStatusError（含 4xx/5xx 永久错误）也按候选失败处理（fail-closed 丢弃），
+        # 不重试（client 已处理）也不炸掉整个会话。
         return {"idx": idx, "error": str(exc)[:200]}

@@ -66,7 +66,6 @@ async def run_preclean_stage(
                 "segments": 0,
                 "candidates": 0,
                 "complex_rows": 0,
-                "non_complex": 0,
                 "llm_failed": 0,
                 "category_counts": {},
             }

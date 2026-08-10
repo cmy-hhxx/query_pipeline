@@ -10,7 +10,8 @@ from typing import Any
 from unittest.mock import patch
 
 from query_pipeline.config.loader import load_pipeline_config
-from query_pipeline.io.checkpoint import Checkpoint, _src_hash, content_key, stage_fingerprint
+from query_pipeline.io.checkpoint import Checkpoint, content_key, stage_fingerprint
+from query_pipeline.llm.cache import src_hash
 from query_pipeline.pipeline.runner import run_pipeline
 
 def _make_turn(idx: int, question: str) -> dict[str, Any]:
@@ -373,12 +374,12 @@ class CheckpointInvalidationTest(unittest.TestCase):
     def test_fingerprint_tracks_source(self) -> None:
         # Code changes must invalidate the checkpoint fingerprint (else a behavior fix
         # silently never takes effect on resume).
-        self.assertEqual(_src_hash(), _src_hash())  # stable across calls
+        self.assertEqual(src_hash(), src_hash())  # stable across calls
         with tempfile.TemporaryDirectory() as tmp:
             cfg = load_pipeline_config(_write_config(Path(tmp), post_enabled=False))
-            with patch("query_pipeline.io.checkpoint._src_hash", return_value="aaaa"):
+            with patch("query_pipeline.llm.cache.src_hash", return_value="aaaa"):
                 fp_a = stage_fingerprint(cfg, "judge")
-            with patch("query_pipeline.io.checkpoint._src_hash", return_value="bbbb"):
+            with patch("query_pipeline.llm.cache.src_hash", return_value="bbbb"):
                 fp_b = stage_fingerprint(cfg, "judge")
         self.assertNotEqual(fp_a, fp_b)
 

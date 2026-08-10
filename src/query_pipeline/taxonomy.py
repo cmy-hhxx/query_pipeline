@@ -97,9 +97,7 @@ def templates_dir() -> Path:
     Search order:
     1. QUERY_PIPELINE_TEMPLATES env override;
     2. <repo-or-site-packages>/templates — source tree layout and wheel
-       artifacts (hatch `artifacts = ["../templates"]`) both land here;
-    3. package-data fallback via importlib.resources (templates shipped
-       inside the wheel package).
+       artifacts (hatch `artifacts = ["../templates"]`) both land here.
     """
     env = os.environ.get("QUERY_PIPELINE_TEMPLATES")
     if env:

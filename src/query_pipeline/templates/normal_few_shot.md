@@ -502,7 +502,7 @@
 - 10-financial-common-sense-and-semantic-understanding: 10 解释指标概念、术语和定义；16 查询具体地域、年份和指标数值，口径说明服务于数据交付。
 - 13-time-awareness-ability: 13 的核心是相对时间、当前时点、交易日历或发布窗口推理；16 的年份主要用于筛取宏观统计数据。
 
-## 决策步骤
+# 决策步骤
 
 1. 阅读 query，并在内部复述用户的主任务。
 2. 判断 query 是否属于 16 个金融 tag 的范围；如果确实不属于，选择 `other`。

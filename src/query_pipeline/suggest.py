@@ -18,6 +18,7 @@ from query_pipeline.io.jsonl import read_jsonl_with_bad_lines
 from query_pipeline.io.sniff import preclean_records, sniff_format
 from query_pipeline.rules.reject import generic_reject_reason
 from query_pipeline.session.candidates import (
+    FORMAT_DEFAULTS,
     chain_steps,
     chain_tool_calls,
     is_eligible,
@@ -147,7 +148,8 @@ def suggest_gates(
                     n += 1
         return n
 
-    default_calls, default_tools = (7, 2) if fmt == "session" else (3, 2)
+    # 与 effective_gate 同一张默认表：未知格式回退 session（不再手写第二份字面量）
+    default_calls, default_tools = FORMAT_DEFAULTS.get(fmt, FORMAT_DEFAULTS["session"])
     seen: set[int] = set()
     suggestions: list[GateSuggestion] = []
     for calls_min, tools_min, reject_on in product(
