@@ -37,6 +37,8 @@ def assemble_row(
     category_id: str,
     reason: str | None = None,
     difficulty: str = "hard",
+    complexity_profile: dict | None = None,
+    value_profile: dict | None = None,
 ) -> dict:
     """Build one filter_out.jsonc row for a turn; returns a plain dict for stages."""
     turns = session.turns
@@ -45,15 +47,25 @@ def assemble_row(
         ContextTurn(question=turns[k].question, answer=turns[k].answer)
         for k in prior_indices(segment, idx)
     ]
+    meta_payload: dict = {
+        "reason": reason,
+        "request_time": turn.request_time,
+        "run_id": turn.run_id,
+        "last_event_type": turn.last_event_type,
+    }
+    if complexity_profile is not None:
+        meta_payload["complexity_profile"] = complexity_profile
+        meta_payload["semantic_signature"] = complexity_profile.get("semantic_signature")
+    if value_profile is not None:
+        meta_payload["value_profile"] = value_profile
+        meta_payload["contains_embedded_prompt"] = bool(
+            value_profile.get("contains_embedded_prompt")
+        )
     row = OutputRow(
         source_case_id=session.thread_id,
         capture_mode="full_link" if turn.chain else "end2end",
         trace_id=turn.trace_id,
-        category=(
-            "other"
-            if category_id == "other"
-            else load_taxonomy().get(difficulty, category_id).path
-        ),
+        category=load_taxonomy().get(difficulty, category_id).path,
         input=OutputInput(text=turn.question),
         context=prior,
         chain=turn.chain,
@@ -67,11 +79,6 @@ def assemble_row(
         output_tokens=turn.output_tokens,
         request_time_ms=_request_time_ms(turn.request_time),
         difficulty_level=difficulty,
-        meta=OutputMeta(
-            reason=reason,
-            request_time=turn.request_time,
-            run_id=turn.run_id,
-            last_event_type=turn.last_event_type,
-        ),
+        meta=OutputMeta(**meta_payload),
     )
     return row.model_dump(mode="python")

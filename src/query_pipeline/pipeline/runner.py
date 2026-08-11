@@ -21,17 +21,17 @@ from query_pipeline.pipeline.stages import DEFAULT_STAGES, get_stage, stage_name
 
 
 def _run_success(stats: dict[str, Any]) -> bool:
-    """A run fails when discover-level work errored or nothing was adapted.
-
-    verify_failed / translate_failed are fail-open by design (kept, retried next run)
-    and empty complex_rows on a clean run (e.g. llm.enabled=false) is legitimate —
-    neither makes the run a failure. bad input lines / adapt failures don't fail a
-    run that still adapted sessions (they surface in the summary + bad_lines.jsonl).
-    """
+    """A run fails when discovery or complex verification is unresolved."""
     if stats.get("session_errors", 0) > 0:
         return False
-    # llm_failed is counted but not fatal: a deterministic LLM parse failure on a
-    # single candidate must not block delivery of the rest (fail-closed drop).
+    if stats.get("llm_failed", 0) > 0:
+        return False
+    if stats.get("verify_failed", 0) > 0:
+        return False
+    if stats.get("template_family_failed", 0) > 0:
+        return False
+    if stats.get("semantic_dedup_failed", 0) > 0:
+        return False
     if stats.get("total_sessions", 0) == 0:
         return False
     return True
@@ -105,16 +105,15 @@ async def _execute_pipeline(
     # Standard runs stream rows from the terminal post stage. This final pass is
     # both the fallback for custom stage orders and a completeness check; the
     # writer's per-stream fingerprints make it idempotent.
-    business_writer.write_many(ctx.rows)
+    if success:
+        business_writer.write_many(ctx.rows)
     logs = {
         "batch_id": log_session.batch_id,
         "ordinary": str(log_session.ordinary_path),
         "business": {name: str(path) for name, path in business_writer.paths.items()},
     }
-    # Write output unless the run failed AND produced nothing — avoid clobbering a
-    # previous good output with an empty file. Partial rows are still inspectable;
-    # the exit code and summary flag the failure.
-    if ctx.rows:
+    # Verification infrastructure errors never publish partial semantic labels.
+    if success and ctx.rows:
         write_jsonl(cleaned_path, ctx.rows)
         write_jsonl(complex_path, [r for r in ctx.rows if r.get("difficulty_level") == "hard"])
         write_jsonl(normal_path, [r for r in ctx.rows if r.get("difficulty_level") == "normal"])
@@ -134,6 +133,9 @@ async def _execute_pipeline(
             write_jsonl(cleaned_path, [])
             write_jsonl(complex_path, [])
             write_jsonl(normal_path, [])
+    else:
+        logger.error("run verification unresolved: preserving previous output files")
+        stats["output_preserved_previous"] = True
     summary_path.write_text(
         json.dumps({**stats, "success": success, "logs": logs}, ensure_ascii=False, indent=2),
         encoding="utf-8",

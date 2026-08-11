@@ -14,21 +14,25 @@ def _build_prompts() -> dict[str, str]:
         build_complex_classify_prompt,
         build_normal_classify_prompt,
         build_verify_prompt,
+        load_complex_quality_policy,
     )
-    from query_pipeline.prompts.complex_judge import COMPLEX_JUDGE
     from query_pipeline.prompts.complexity_gate import COMPLEXITY_GATE
+    from query_pipeline.prompts.dedup import DEDUP_PAIR
     from query_pipeline.prompts.value_gate import VALUE_GATE
     from query_pipeline.prompts.segment import SEGMENT
+    from query_pipeline.prompts.template_family import TEMPLATE_FAMILY
     from query_pipeline.prompts.translate import TRANSLATE
     from query_pipeline.prompts.verify import VERIFY_COMPLEX, VERIFY_RECHECK
 
+    policy = load_complex_quality_policy()
     return {
         "segment": SEGMENT,
-        "complex_judge": COMPLEX_JUDGE,
         "classify_complex": build_complex_classify_prompt(),
         "classify_normal": build_normal_classify_prompt(),
-        "value_gate": VALUE_GATE,
-        "complexity_gate": COMPLEXITY_GATE,
+        "value_gate": VALUE_GATE + "\n\n---\n\n" + policy,
+        "complexity_gate": COMPLEXITY_GATE + "\n\n---\n\n" + policy,
+        "dedup_pair": DEDUP_PAIR,
+        "template_family": TEMPLATE_FAMILY + "\n\n---\n\n" + policy,
         "verify_complex": build_verify_prompt(VERIFY_COMPLEX),
         "verify_recheck": build_verify_prompt(VERIFY_RECHECK),
         "translate": TRANSLATE,

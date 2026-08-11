@@ -68,6 +68,12 @@ class PrecheckReport:
         }
 
 
+def _validate_ratio(value: float, name: str) -> float:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1], got {value}")
+    return value
+
+
 def _session_turn_eligible(turn: dict[str, Any]) -> bool:
     """与 session/candidates.is_eligible 同口径：status/outcome 正常 + 有问有答。"""
     if turn.get("status") not in (None, "completed"):
@@ -81,7 +87,11 @@ def _session_turn_eligible(turn: dict[str, Any]) -> bool:
 
 
 def _chat_record_eligible(record: dict[str, Any]) -> bool:
-    """与 adapters/chat.py + candidates.is_eligible 保持同一口径。"""
+    """与 adapters/chat.py + session/candidates.is_eligible 同口径：
+
+    judge_data.context 必须是只含对象的 list（否则 adapt 抛错），且
+    input.text（或回退 question）与 text_answer/raw_answer 均非空。
+    """
     jd = record.get("judge_data")
     if not isinstance(jd, dict):
         return False
@@ -120,12 +130,8 @@ def precheck(
 
     格式无法识别或混合时报 ValueError（与 sniff_format 一致）。
     """
-    for name, value in (
-        ("min_chain_coverage", min_chain_coverage),
-        ("max_bad_line_ratio", max_bad_line_ratio),
-    ):
-        if not 0.0 <= value <= 1.0:
-            raise ValueError(f"{name} must be in [0, 1]")
+    min_chain_coverage = _validate_ratio(min_chain_coverage, "min_chain_coverage")
+    max_bad_line_ratio = _validate_ratio(max_bad_line_ratio, "max_bad_line_ratio")
 
     src = Path(path).resolve()
     fmt = format if format != "auto" else sniff_format(src)

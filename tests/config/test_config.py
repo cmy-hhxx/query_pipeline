@@ -35,11 +35,11 @@ class ConfigContractTest(unittest.TestCase):
             InputConfig(path=Path("x.jsonl"), format="bogus")
 
     def test_verify_config_rounds(self) -> None:
-        self.assertEqual(VerifyConfig().max_rounds_hard, 5)
-        self.assertEqual(VerifyConfig().max_rounds_normal, 2)
+        self.assertEqual(VerifyConfig().max_rounds_hard, 1)
         self.assertEqual(VerifyConfig(max_rounds_hard=1).max_rounds_hard, 1)
+        self.assertEqual(VerifyConfig(max_rounds_hard=0).max_rounds_hard, 0)
         with self.assertRaises(ValueError):
-            VerifyConfig(max_rounds_hard=0)
+            VerifyConfig(max_rounds_hard=-1)
 
     def test_explicit_relative_cache_checkpoint_resolve_against_work_dir(self) -> None:
         # 第四轮 #10：显式 cache/checkpoint 相对路径与默认值同一基座（work_dir）。

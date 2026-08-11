@@ -13,10 +13,10 @@
     src/scripts/copy.js   交互脚本（提示词复制按钮）
 
 提示词面板不手写：构建时直接导入运行时 PROMPTS（惰性构建、读 templates/*.md
-并做 fail-loud 校验），保证页面展示的就是生产提示词——全部 9 个面板
-（segment / value_gate / complexity_gate / complex_judge / classify_complex /
-classify_normal / verify_complex / verify_recheck / translate），parse_bad_cases
-等提取规则不再在 build.py 里二次实现（曾与 assemble.py 双实现必然漂移）。
+并做 fail-loud 校验），保证页面展示的就是生产提示词——全部 10 个面板
+（segment / value_gate / complexity_gate / classify_complex / classify_normal /
+verify_complex / verify_recheck / template_family / dedup_pair / translate），模板
+提取规则不再在 build.py 里二次实现（曾与 assemble.py 双实现必然漂移）。
 
 构建产物无任何外部依赖（样式与脚本全部内联），任意环境双击即可离线打开。
 """
@@ -38,8 +38,7 @@ def read(path: pathlib.Path) -> str:
 # ---------- 提示词提取（与运行时 PROMPTS 单源同步） ----------
 # 提示词面板不手写、也不在 build.py 里二次实现提取规则：直接导入运行时的
 # query_pipeline.prompts（惰性构建，读 templates/*.md），页面展示的就是生产
-# 提示词——含全部 9 个（classify_complex / classify_normal / verify_recheck /
-# complex_judge 曾缺失，且 parse_bad_cases 曾与 assemble.py 双实现必然漂移）。
+# 提示词。
 
 
 def _prompts() -> "dict[str, str]":
@@ -52,11 +51,12 @@ def _prompts() -> "dict[str, str]":
         "segment",
         "value_gate",
         "complexity_gate",
-        "complex_judge",
         "classify_complex",
         "classify_normal",
         "verify_complex",
         "verify_recheck",
+        "template_family",
+        "dedup_pair",
         "translate",
     ):
         resolve_prompt(prompt_id)
@@ -86,11 +86,12 @@ def build_prompt_sections() -> str:
         ("会话分段提示词", "会话分段提示词", "segment"),
         ("价值门提示词", "价值门提示词", "value_gate"),
         ("复杂度门提示词", "复杂度门提示词", "complexity_gate"),
-        ("复杂判定提示词", "复杂判定提示词", "complex_judge"),
         ("复杂分类提示词", "复杂分类提示词（9 类，含 few-shot 定义与示例）", "classify_complex"),
         ("普通分类提示词", "普通分类提示词（16 类，含适用/排除/边界/易混）", "classify_normal"),
         ("独立复判提示词", "独立复判提示词（含已确认负例）", "verify_complex"),
         ("复判从严提示词", "复判从严提示词（第 2 轮起，逐轮从严）", "verify_recheck"),
+        ("模板族裁决提示词", "模板族裁决提示词", "template_family"),
+        ("语义去重提示词", "语义去重提示词", "dedup_pair"),
         ("翻译提示词", "翻译提示词", "translate"),
     ]
     sections = [

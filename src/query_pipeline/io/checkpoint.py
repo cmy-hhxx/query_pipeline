@@ -48,12 +48,17 @@ def stage_fingerprint(cfg: PipelineConfig, stage: str) -> str:
             }
         )
     if stage == "verify":
-        prompts = {cfg.verify.prompt_id: resolve_prompt(cfg.verify.prompt_id)}
-        if max(cfg.verify.max_rounds_hard, cfg.verify.max_rounds_normal) > 1:
+        prompts = {
+            cfg.verify.prompt_id: resolve_prompt(cfg.verify.prompt_id),
+            "template_family": resolve_prompt("template_family"),
+            "dedup_pair": resolve_prompt("dedup_pair"),
+        }
+        if cfg.verify.max_rounds_hard > 1:
             prompts["verify_recheck"] = resolve_prompt("verify_recheck")
         return _hash_material(
             {
                 "verify": cfg.verify.model_dump(mode="json"),
+                "dedup": cfg.post.dedup.model_dump(mode="json"),
                 "llm": llm,
                 "src": llm_cache.src_hash(),
                 "prompts": prompts,

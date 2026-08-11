@@ -42,6 +42,24 @@ def render_markdown(overview: dict[str, Any], results: list[dict[str, Any]]) -> 
             f"- judge 错误：{sample['judge_errors']}",
         ]
 
+    gate = overview["quality_gate"]
+    gold = gate.get("complex_policy_gold")
+    lines += [
+        "",
+        "## 发布闸门",
+        "",
+        f"- 总结：{'PASS' if gate['passed'] else 'FAIL'}",
+        f"- hard 误收率：{gate['hard_false_accept_rate']:.1%}",
+        f"- 审计错误率：{gate['audit_error_rate']:.1%}",
+        f"- 残余模板重复率：{gate['residual_template_duplicate_rate']:.1%}",
+    ]
+    if gold is not None:
+        lines += [
+            f"- 人工正例召回：{gold['positive_accepted']}/{gold['positive_total']} "
+            f"({gold['positive_recall']:.1%})",
+            f"- 已知负例误入 complex：{gold['negative_false_accepts']}/{gold['negative_total']}",
+        ]
+
     lines += [
         "",
         "## 逐条规则命中",
@@ -100,6 +118,14 @@ def print_terminal(overview: dict[str, Any]) -> None:
             f"低质 {sample['question_quality_low']}，"
             f"标签不符 {sample['label_not_ok']}，"
             f"judge 错误 {sample['judge_errors']}"
+        )
+    gate = overview["quality_gate"]
+    print(f"发布闸门：{'PASS' if gate['passed'] else 'FAIL'}")
+    gold = gate.get("complex_policy_gold")
+    if gold is not None:
+        print(
+            f"人工金标：正例召回 {gold['positive_accepted']}/{gold['positive_total']}，"
+            f"已知负例误入 complex {gold['negative_false_accepts']}/{gold['negative_total']}"
         )
     for rule in overview["dataset_rules"]:
         mark = "✓" if rule["ok"] else "!"

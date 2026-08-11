@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from query_pipeline.quality.rules import PER_RECORD_RULES
+from query_pipeline.quality.rules import PER_RECORD_RULES, semantic_duplicate_metrics
 
 _STATUSES = ("pass", "fail", "needs_review")
 
@@ -31,6 +31,7 @@ def _judge_payload(judge: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "question_quality": judge.get("question_quality"),
         "label_ok": judge.get("label_ok"),
+        "difficulty_ok": judge.get("difficulty_ok"),
         "reason": judge.get("reason", ""),
         "error": judge.get("error"),
     }
@@ -56,6 +57,7 @@ def build_results(
         elif sampled and judge is not None and (
             judge.get("question_quality") == "low"
             or judge.get("label_ok") is False
+            or judge.get("difficulty_ok") is False
             or judge.get("error")
         ):
             status = "needs_review"
@@ -69,6 +71,7 @@ def build_results(
                 "trace_id": str(row.get("trace_id") or "") or key,
                 "source_case_id": str(row.get("source_case_id") or ""),
                 "category": str(row.get("category") or ""),
+                "difficulty_level": str(row.get("difficulty_level") or ""),
                 "question": str(question)[:80],
                 "status": status,
                 "sampled": sampled,
@@ -91,6 +94,7 @@ def build_overview(
     seed: int,
     bad_lines: int = 0,
     flagged_limit: int = 100,
+    complex_policy_gold: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_counts = {status: 0 for status in _STATUSES}
     for result in results:
@@ -120,7 +124,36 @@ def build_overview(
         ),
         "label_ok": sum(1 for result in sampled if (result["judge"] or {}).get("label_ok") is True),
         "label_not_ok": sum(1 for result in sampled if (result["judge"] or {}).get("label_ok") is False),
+        "difficulty_ok": sum(
+            1 for result in sampled if (result["judge"] or {}).get("difficulty_ok") is True
+        ),
+        "difficulty_not_ok": sum(
+            1 for result in sampled if (result["judge"] or {}).get("difficulty_ok") is False
+        ),
         "judge_errors": sum(1 for result in sampled if (result["judge"] or {}).get("error")),
+    }
+    sampled_hard = [result for result in sampled if result.get("difficulty_level") == "hard"]
+    hard_false_accepts = sum(
+        1 for result in sampled_hard if (result["judge"] or {}).get("difficulty_ok") is False
+    )
+    hard_false_accept_rate = hard_false_accepts / len(sampled_hard) if sampled_hard else 0.0
+    semantic_metrics = semantic_duplicate_metrics(records)
+    quality_gate = {
+        "passed": (
+            bool(sampled_hard)
+            and hard_false_accept_rate <= 0.02
+            and sample["judge_errors"] == 0
+            and semantic_metrics["residual_template_duplicate_rate"] <= 0.02
+            and (complex_policy_gold is None or complex_policy_gold["passed"])
+        ),
+        "hard_false_accept_rate": hard_false_accept_rate,
+        "audited_complex_rows": len(sampled_hard),
+        "hard_false_accept_rate_limit": 0.02,
+        "audit_error_rate": sample["judge_errors"] / len(sampled) if sampled else 0.0,
+        "audit_error_rate_limit": 0.0,
+        **semantic_metrics,
+        "residual_template_duplicate_rate_limit": 0.02,
+        "complex_policy_gold": complex_policy_gold,
     }
 
     flagged: list[dict[str, Any]] = []
@@ -155,6 +188,7 @@ def build_overview(
         "rule_hits": rule_hits,
         "category_distribution": category_distribution,
         "sample": sample,
+        "quality_gate": quality_gate,
         "dataset_rules": dataset_rules,
         "flagged": flagged,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

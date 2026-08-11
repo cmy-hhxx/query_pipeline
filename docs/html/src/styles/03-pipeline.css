@@ -177,7 +177,7 @@
 }
 
 /* —— 流程分支（失败去向）—— */
-/* 每个退出口都正对触发它的阶段（4—8），避免看图时来回寻找来源。 */
+/* 每个退出口都正对触发它的阶段（5—8），避免看图时来回寻找来源。 */
 
 .flow-drops {
   display: grid;
@@ -240,9 +240,8 @@
   font-weight: 700;
 }
 
-.branch-judge  { grid-column: 4; }
-.branch-verify { grid-column: 5; }
-.branch-simple { grid-column: 6; }
+.branch-judge  { grid-column: 5; }
+.branch-verify { grid-column: 6; }
 .branch-answer { grid-column: 7; }
 .branch-post   { grid-column: 8; }
 

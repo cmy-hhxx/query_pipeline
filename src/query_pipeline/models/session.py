@@ -5,7 +5,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from query_pipeline.models.complexity import (
+    ComplexFeature,
+    ComplexRoute,
+    ExclusionReason,
+    PolicyEvidence,
+    evidence_is_grounded,
+)
 
 
 
@@ -46,14 +54,52 @@ def parse_json_object(raw: str) -> dict[str, Any]:
 
 
 class VerifyResult(BaseModel):
-    """Standalone second-pass verdict: is the question complex on its own.
+    """Standalone three-way verdict based only on the current question."""
 
-    Deliberately category-free — pass 1 already assigned the category; this
-    stage only re-confirms complexity without session context.
-    """
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    is_complex: bool
+    route: ComplexRoute
+    complex_features: list[ComplexFeature] = Field(default_factory=list)
+    exclusion_reasons: list[ExclusionReason] = Field(default_factory=list)
+    evidence: list[PolicyEvidence] = Field(default_factory=list)
+    confidence: str
     reason: str | None = None
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, value: str) -> str:
+        text = value.strip().lower()
+        if text not in {"low", "medium", "high"}:
+            raise ValueError("confidence must be low, medium or high")
+        return text
+
+    @field_validator("complex_features", "exclusion_reasons")
+    @classmethod
+    def normalize_policy_lists(cls, value: list[Any]) -> list[Any]:
+        return sorted(set(value))
+
+    @model_validator(mode="after")
+    def validate_route_consistency(self) -> "VerifyResult":
+        criteria = {item.criterion for item in self.evidence}
+        required = set(self.complex_features) | set(self.exclusion_reasons)
+        if criteria != required:
+            raise ValueError("evidence criteria must exactly match features/exclusions")
+        if self.route == "complex":
+            if not self.complex_features or self.exclusion_reasons:
+                raise ValueError("complex route requires features and forbids exclusions")
+            if self.confidence == "low":
+                raise ValueError("low confidence cannot route to complex")
+        elif self.route == "normal":
+            if self.complex_features or not self.exclusion_reasons:
+                raise ValueError("normal route requires exclusions and forbids complex features")
+            if set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
+                raise ValueError("template/prompt exclusions must route to reject")
+        else:
+            if self.complex_features:
+                raise ValueError("reject route forbids complex features")
+            if not set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
+                raise ValueError("reject route requires eval_template or embedded_prompt")
+        return self
 
     @field_validator("reason")
     @classmethod
@@ -66,7 +112,20 @@ class VerifyResult(BaseModel):
         return text
 
     def to_cache_label(self) -> dict[str, Any]:
-        return {"is_complex": self.is_complex, "reason": self.reason}
+        return {
+            "route": self.route,
+            "complex_features": self.complex_features,
+            "exclusion_reasons": self.exclusion_reasons,
+            "evidence": [item.model_dump() for item in self.evidence],
+            "confidence": self.confidence,
+            "reason": self.reason,
+        }
+
+    def admits_complex_for(self, question: str) -> bool:
+        return self.route == "complex" and self.evidence_is_grounded_for(question)
+
+    def evidence_is_grounded_for(self, question: str) -> bool:
+        return evidence_is_grounded(self.evidence, question)
 
 
 def parse_verify_response(raw: str) -> VerifyResult:

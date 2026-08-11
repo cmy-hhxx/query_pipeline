@@ -17,33 +17,23 @@ from typing import Any
 from query_pipeline.config.models import LLMConfig
 from query_pipeline.io.jsonl import read_jsonl_with_bad_lines
 from query_pipeline.llm.client import LLMClient
+from query_pipeline.models.session import VerifyResult
+from query_pipeline.prompts.assemble import load_complex_quality_policy
 
 logger = logging.getLogger(__name__)
 
-AUDIT_PROMPT = """
-你是一个严格的数据审计员。给定一个问句，判断它是否是"复杂金融问句"。
+AUDIT_PROMPT = (
+    """你是独立的 complex 输出精度审计员。只依据输入 question，使用附带的统一政策输出
+三路结构。不得读取答案、chain、已有标签或前文。自然、非模板化且包含至少 3 个彼此
+独立实质条件的量化筛选可以是 complex；共享短语本身不是模板证据。边界不清时 normal，
+只有 eval_template 或 embedded_prompt 可 reject。
 
-判定标准与业务分类体系一致（complex_few_shot 9 类）：
-复杂 = 需要多步分析、计算、筛选、回测、组合构建、框架化判断、预测、比较、决策或执行，
-且答案不能通过一次简单查询/简单计算获得。包括：
-- 交易计划/买卖决策类（给出入场区、止损、止盈、仓位、分批计划——即使针对单标的）
-- 多维度分析（基本面+技术面+资金面+消息面等）
-- 多情景预测（bull/base/bear、概率、触发条件）
-- 回测/统计/取数计算
-- 账户/持仓综合诊断
-- 事件/主题驱动的受益股推荐或影响分析（"战争受益股""事件对板块的影响""从主题找标的"——04 机会挖掘 / 03 分析研究 / 01 事件概念选股）
-- 主题强度排序/分类/梯队划分（"AI 主题最强股并分核心/边缘"）
-
-以下类型判为 不复杂（与 verify 排除清单一致）：
-- 单步查数/单步计算：查一个行情/价格/市值/涨跌幅/收益率，或一次加减乘除
-- 短决策/短评价："XX能买吗""XX怎么样""XX该不该卖"（纯一句话询问，无分析过程要求）
-- 简单显式条件筛选：单层条件按名单过滤（"抓5只中药题材股""整理pcb龙头"）且无计算/统计/回测/分析要求。注意：多条件技术指标组合筛选（均线交叉+量比+时间窗口等多层条件）属于 01 复杂取数计算，判复杂
-- 承接前文：任务对象/候选集合/比较维度来自前文
-- 泛化问题：无具体标的/条件/比较对象
-- 纯陈述/计划告知/闲聊
-
-只输出严格 JSON：{"is_complex": true/false, "reason": "一句话理由"}
+只输出严格 JSON：
+{"route":"complex|normal|reject","complex_features":["受控枚举"],"exclusion_reasons":["受控枚举"],"evidence":[{"criterion":"受控枚举","quote":"question 原文"}],"confidence":"low|medium|high","reason":"一句话理由"}
 """.strip()
+    + "\n\n---\n\n"
+    + load_complex_quality_policy()
+)
 
 
 def _load_rows(path: Path) -> list[dict[str, Any]]:
@@ -58,7 +48,7 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
 
 
 async def audit_rows(
-    rows: list[dict[str, Any]],
+    rows: list[Any],
     *,
     model: str = "gpt-5.4-mini",
     concurrency: int = 64,
@@ -67,7 +57,7 @@ async def audit_rows(
     # 限流由 LLMClient 进程级 semaphore 承担，此处不再叠加第二层。
     results: list[dict[str, Any]] = []
 
-    async def check(row: dict[str, Any]) -> dict[str, Any]:
+    async def check(row: Any) -> dict[str, Any]:
         if not isinstance(row, dict):
             # 防御兜底：_load_rows 已保证 dict，但 audit_rows 也可被直接调用；
             # 非 dict 行按"无法判定"处理，不得让 AttributeError 穿透 gather 炸掉 audit。
@@ -84,7 +74,7 @@ async def audit_rows(
         # 3 次独立判定取多数：LLM 对边界问句的判定有波动，多数裁决更稳。
         # 调用失败 / 字段缺失 / 非布尔：一律记 audit_error 票（"无法判定"），
         # 不得判复杂（掩盖故障）也不得判非复杂（拉低通过率）。
-        verdicts: list[tuple[bool, str]] = []  # (is_complex, reason_or_error_detail)
+        verdicts: list[tuple[bool, str]] = []  # (admissible_hard, reason_or_error_detail)
         errors = 0
         for _ in range(3):
             try:
@@ -92,11 +82,10 @@ async def audit_rows(
                     system_prompt=AUDIT_PROMPT,
                     user_prompt=json.dumps({"question": question}, ensure_ascii=False),
                 )
-                data = json.loads(raw)
-                is_complex = data.get("is_complex")
-                if not isinstance(is_complex, bool):
-                    raise ValueError(f"is_complex 缺失或非布尔: {is_complex!r}")
-                verdicts.append((is_complex, str(data.get("reason") or "")))
+                data = VerifyResult.model_validate(json.loads(raw))
+                if not data.evidence_is_grounded_for(question):
+                    raise ValueError("audit evidence quote must be copied from question")
+                verdicts.append((data.route == "complex", data.reason or data.route))
             except Exception as exc:  # noqa: BLE001 无法判定：单独计数，由错误率闸门拦截
                 errors += 1
                 verdicts.append((True, f"audit_error: {str(exc)[:80]}"))
@@ -126,8 +115,8 @@ def _error_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def conclusion(results: list[dict[str, Any]], *, max_ratio: float, max_error_ratio: float) -> tuple[bool, float, float]:
     """单一结论源：render 与 cli 退出码共用同一判定，避免两处独立实现漂移。
 
-    错误率（审计自身 LLM 判定失败的行占比）与非复杂率分用独立阈值：5% 容错若
-    共用会系统性掩盖审计失效（3 次判定全挂也只是 audit_errors=3，≤5% 即 PASS）。
+    错误率（审计自身 LLM 判定失败的行占比）与非复杂率分用独立阈值；若共用争议率
+    容错会系统性掩盖审计失效（3 次判定全挂也可能被误当作可接受争议）。
     错误率默认 0——任何一行无法判定，审计就无法为整批输出背书，必须 FAIL。
     """
     total = len(results)

@@ -1,4 +1,4 @@
-"""Verify stage: context-aware, per-difficulty rounds, fail-closed."""
+"""Verify stage: current-question policy, corpus review, and fatal infra errors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from query_pipeline.config.loader import load_pipeline_config
+from query_pipeline.pipeline.context import RunSummary
 from query_pipeline.pipeline.runner import run_pipeline
+from tests._profiles import complexity_label, verify_label
 
 def _turns() -> list[dict]:
     names = ("web_search", "finquery", "compute")
@@ -51,18 +53,22 @@ class RecordingClient:
             if "价值判官" in system_prompt:
                 return json.dumps({"is_valuable": True})
             if "已判定为复杂金融问句" in system_prompt:
-                return json.dumps({"category_id": "01"})
+                return json.dumps({"category_id": "01", "reason": "复杂归类"})
             if "有价值但非复杂" in system_prompt:
-                return json.dumps({"category_id": "03"})
-            return json.dumps({"is_complex": True})  # both judged hard
-        if "question" in payload and "prior_questions" in payload:
+                return json.dumps({"category_id": "03", "reason": "普通归类"})
+            return json.dumps(
+                complexity_label(True, goal=payload["current_question"])
+            )  # both judged hard
+        if "question" in payload:
             self.verify_calls.append(payload)
             # 沪深300 stays complex in every round; 茅台 complex round 1, rejected round 2+
             if payload["question"].startswith("帮我构建"):
-                return json.dumps({"is_complex": True, "reason": "复杂"})
-            if "独立判定" in system_prompt:  # round >= 2 (recheck prompt)
-                return json.dumps({"is_complex": False, "reason": "短决策"})
-            return json.dumps({"is_complex": True, "reason": "初判复杂"})
+                return json.dumps(verify_label(True, reason="复杂", evidence_quote=payload["question"]))
+            if system_prompt.startswith("你是第"):  # round >= 2
+                return json.dumps(
+                    verify_label(False, reason="短决策", evidence_quote=payload["question"])
+                )
+            return json.dumps(verify_label(True, reason="初判复杂", evidence_quote=payload["question"]))
         return json.dumps({"translation": "译"})
 
     async def close(self) -> None:
@@ -114,7 +120,7 @@ class VerifyKeyUnitTest(unittest.TestCase):
 
 
 class VerifyStageTest(unittest.TestCase):
-    def _run(self, client_cls=RecordingClient, config_extra: str = "") -> object:
+    def _run(self, client_cls=RecordingClient, config_extra: str = "") -> RunSummary:
         import tempfile
         import textwrap
 
@@ -140,7 +146,6 @@ class VerifyStageTest(unittest.TestCase):
                     verify:
                       enabled: true
                       max_rounds_hard: 5
-                      max_rounds_normal: 2
                     llm:
                       enabled: true
                       model: fake
@@ -155,16 +160,36 @@ class VerifyStageTest(unittest.TestCase):
                 summary = run_pipeline(load_pipeline_config(cfg_path))
             return summary
 
-    def test_verify_receives_prior_questions(self) -> None:
+    def test_verify_receives_only_current_question(self) -> None:
         summary = self._run()
-        # both candidates: prior questions from the same segment
-        client = None  # recorded inside patch scope; assert via rounds instead
-        self.assertEqual(summary.stats["verify_kept"], 1)  # 沪深300 kept, 茅台 rejected round 2
-        self.assertEqual(summary.stats["verify_rejected"], 1)
+        # Explicit 5-round config is still supported; one hard row is downgraded.
+        self.assertEqual(summary.stats["verify_complex_kept"], 1)
+        self.assertEqual(summary.stats["verify_to_normal"], 1)
         self.assertEqual(summary.stats["verify_failed"], 0)
 
+    def test_ungrounded_verify_evidence_fails_the_batch(self) -> None:
+        class UngroundedVerifyClient(RecordingClient):
+            async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                payload = json.loads(user_prompt.split("\n", 1)[1])
+                if "question" in payload:
+                    return json.dumps(
+                        verify_label(
+                            False,
+                            route="reject",
+                            reason="模板",
+                            evidence_quote="问句中不存在的证据",
+                        )
+                    )
+                return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+
+        summary = self._run(UngroundedVerifyClient)
+        self.assertFalse(summary.success)
+        self.assertEqual(summary.stats["verify_failed"], 2)
+        self.assertEqual(summary.stats["verify_rejected_template"], 0)
+        self.assertEqual(summary.stats["output_rows"], 0)
+
     def test_normal_rows_require_non_complex(self) -> None:
-        # A normal row (non-complex per judge) verified as complex must be dropped.
+        # A normal row is not reviewed and can never be upgraded to hard.
         import tempfile
         import textwrap
 
@@ -176,9 +201,9 @@ class VerifyStageTest(unittest.TestCase):
                     return json.dumps({"segments": [{"start": 0, "end": n - 1, "topic": "t"}]})
                 if "current_question" in payload:
                     return json.dumps({"is_valuable": True})
-                if "question" in payload and "prior_questions" in payload:
+                if "question" in payload:
                     # verify claims EVERYTHING is complex -> normal rows must be rejected
-                    return json.dumps({"is_complex": True, "reason": "都复杂"})
+                    return json.dumps(verify_label(True, reason="都复杂", evidence_quote=payload["question"]))
                 return json.dumps({"translation": "译"})
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,7 +230,6 @@ class VerifyStageTest(unittest.TestCase):
                     verify:
                       enabled: true
                       max_rounds_hard: 3
-                      max_rounds_normal: 2
                     llm:
                       enabled: true
                       model: fake
@@ -226,19 +250,24 @@ class VerifyStageTest(unittest.TestCase):
                         if "价值判官" in system_prompt:
                             return json.dumps({"is_valuable": True})
                         if "已判定为复杂金融问句" in system_prompt:
-                            return json.dumps({"category_id": "01"})
+                            return json.dumps({"category_id": "01", "reason": "复杂归类"})
                         if "有价值但非复杂" in system_prompt:
-                            return json.dumps({"category_id": "03"})
-                        return json.dumps({"is_complex": payload["current_question"].startswith("帮我构建")})
-                    if "question" in payload and "prior_questions" in payload:
-                        return json.dumps({"is_complex": True, "reason": "都复杂"})
+                            return json.dumps({"category_id": "03", "reason": "普通归类"})
+                        return json.dumps(
+                            complexity_label(
+                                payload["current_question"].startswith("帮我构建"),
+                                goal=payload["current_question"],
+                            )
+                        )
+                    if "question" in payload:
+                        return json.dumps(verify_label(True, reason="都复杂", evidence_quote=payload["question"]))
                     return json.dumps({"translation": "译"})
 
             with patch("query_pipeline.pipeline.runner.LLMClient", MixedJudgeClient):
                 summary = run_pipeline(load_pipeline_config(cfg_path))
-            # 沪深300 hard kept (rounds 1-3 complex); 茅台 normal rejected by verify
-            self.assertEqual(summary.stats["verify_kept"], 1)
-            self.assertEqual(summary.stats["verify_rejected"], 1)
+            # 沪深300 hard kept; 茅台 normal passes through untouched.
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
+            self.assertEqual(summary.stats["verify_to_normal"], 0)
             self.assertEqual(summary.stats["normal_rows"], 1)
 
 if __name__ == "__main__":

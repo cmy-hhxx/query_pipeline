@@ -94,8 +94,9 @@ class LLMConfig(ConfigModel):
 class VerifyConfig(ConfigModel):
     enabled: bool = True
     prompt_id: str = "verify_complex"
-    max_rounds_hard: int = 5
-    max_rounds_normal: int = 2
+    # 精度优先：hard 默认只做一次独立“最简解法”批判；显式增加时全票通过。
+    # normal 不做反向升级，因此没有复核轮数配置。
+    max_rounds_hard: int = 1
 
     @field_validator("prompt_id")
     @classmethod
@@ -108,24 +109,56 @@ class VerifyConfig(ConfigModel):
         resolve_prompt(prompt_id)
         return prompt_id
 
-    @field_validator("max_rounds_hard", "max_rounds_normal")
+    @field_validator("max_rounds_hard")
     @classmethod
     def validate_max_rounds(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("verify rounds must be >= 1")
+        if value < 0:
+            raise ValueError("verify rounds must be >= 0")
         return value
 
 
 class DedupConfig(ConfigModel):
     enabled: bool = True
+    # semantic 是默认生产路径；lexical 保留旧实现，供无语义签名/无 LLM 时回退。
+    mode: str = "semantic"  # "semantic" | "lexical"
+    semantic_candidate_threshold: float = 0.60
+    max_candidates_per_row: int = 20
     threshold: float = 0.80
     entity_slot: bool = True
+    # 模板族候选：共享长表达只触发语料级复核，绝不直接删除。复核负责区分
+    # eval 模板族、普通语义重复和日期/术语/产品名等自然共享表达。
+    phrase_dedup_enabled: bool = True
+    phrase_dedup_min_shared: int = 3
+    phrase_dedup_min_words: int = 8
+    phrase_dedup_min_chars: int = 8
 
-    @field_validator("threshold")
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        mode = value.strip().lower()
+        if mode not in {"semantic", "lexical"}:
+            raise ValueError("dedup mode must be 'semantic' or 'lexical'")
+        return mode
+
+    @field_validator("threshold", "semantic_candidate_threshold")
     @classmethod
     def validate_threshold(cls, value: float) -> float:
         if not 0.0 <= value <= 1.0:
             raise ValueError("threshold must be in [0, 1]")
+        return value
+
+    @field_validator("max_candidates_per_row")
+    @classmethod
+    def validate_max_candidates(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("max_candidates_per_row must be >= 1")
+        return value
+
+    @field_validator("phrase_dedup_min_shared", "phrase_dedup_min_words", "phrase_dedup_min_chars")
+    @classmethod
+    def validate_phrase_minimums(cls, value: int) -> int:
+        if value < 2:
+            raise ValueError("phrase_dedup minimums must be >= 2")
         return value
 
 

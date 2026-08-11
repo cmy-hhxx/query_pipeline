@@ -14,7 +14,7 @@ from query_pipeline.cli import main as cli_main
 
 
 class FakeClient:
-    """Raises for questions containing 'boom', else returns is_complex."""
+    """Raises for questions containing 'boom', else returns a complex route."""
 
     def __init__(self, config: object) -> None:
         self.config = config
@@ -26,7 +26,21 @@ class FakeClient:
         question = payload.get("question", "")
         if "boom" in question:
             raise RuntimeError("simulated API outage")
-        return json.dumps({"is_complex": True, "reason": "多步分析"})
+        return json.dumps(
+            {
+                "route": "complex",
+                "complex_features": ["multi_dimension_attribution"],
+                "exclusion_reasons": [],
+                "evidence": [
+                    {
+                        "criterion": "multi_dimension_attribution",
+                        "quote": question,
+                    }
+                ],
+                "confidence": "high",
+                "reason": "多步分析",
+            }
+        )
 
     async def close(self) -> None:
         return None
@@ -60,6 +74,21 @@ class AuditTest(unittest.TestCase):
             results = asyncio.run(audit_rows(rows))
         self.assertEqual(results[0]["audit_errors"], 3)
         self.assertIn("无法判定", render(results, max_ratio=0.05))
+
+    def test_ungrounded_evidence_is_unable_to_judge(self) -> None:
+        class UngroundedClient(FakeClient):
+            async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                payload = json.loads(user_prompt)
+                result = json.loads(
+                    await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
+                )
+                result["evidence"][0]["quote"] = payload["question"] + "（不存在）"
+                return json.dumps(result)
+
+        with patch("query_pipeline.audit.LLMClient", UngroundedClient):
+            results = asyncio.run(audit_rows([_row("t1", "正常问题")]))
+
+        self.assertEqual(results[0]["audit_errors"], 3)
 
     def test_healthy_audit_passes(self) -> None:
         rows = [_row("t1", "查一下茅台现价"), _row("t2", "帮我算个平均值")]

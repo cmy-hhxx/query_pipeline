@@ -51,9 +51,11 @@ def run(
     concurrency: int = 256,
     stages: list[str] | None = None,
     post_enabled: bool = True,
+    dedup_mode: str = "semantic",
+    semantic_dedup_threshold: float | None = None,
+    max_dedup_candidates: int = 20,
     dedup_threshold: float | None = None,
     verify_rounds_hard: int | None = None,
-    verify_rounds_normal: int | None = None,
     work_dir: str | Path | None = None,
     log_dir: str | Path | None = None,
     batch_id: str | None = None,
@@ -77,8 +79,11 @@ def run(
         concurrency: parallel LLM calls.
         stages: custom stage list (default: the built-in funnel order).
         post_enabled: run dedup + translate after verify.
-        dedup_threshold / verify_rounds_hard / verify_rounds_normal: knobs
-            with pipeline defaults when omitted.
+        dedup_mode: "semantic" (default) or legacy "lexical".
+        semantic_dedup_threshold / max_dedup_candidates: semantic candidate
+            generation knobs. ``dedup_threshold`` is the lexical fallback knob.
+        verify_rounds_hard: hard-question critic rounds; uses the pipeline
+            default when omitted. Normal rows are never upgraded by verify.
         work_dir: scratch dir for caches/checkpoints (default: the output dir).
         log_dir: ordinary/business log root (default: ``<output_dir>/logs``).
         batch_id: optional stable batch identity; omit to generate one.
@@ -136,8 +141,7 @@ def run(
         rule_gate=rule_gate,
         judge=JudgeConfig(),
         verify=VerifyConfig(
-            max_rounds_hard=verify_rounds_hard if verify_rounds_hard is not None else 5,
-            max_rounds_normal=verify_rounds_normal if verify_rounds_normal is not None else 2,
+            max_rounds_hard=verify_rounds_hard if verify_rounds_hard is not None else 1,
         ),
         llm=LLMConfig(
             enabled=llm_enabled,
@@ -148,6 +152,13 @@ def run(
         post=PostConfig(
             enabled=post_enabled,
             dedup=DedupConfig(
+                mode=dedup_mode,
+                semantic_candidate_threshold=(
+                    semantic_dedup_threshold
+                    if semantic_dedup_threshold is not None
+                    else 0.60
+                ),
+                max_candidates_per_row=max_dedup_candidates,
                 threshold=dedup_threshold if dedup_threshold is not None else 0.80,
                 entity_slot=True,
             ),

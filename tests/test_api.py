@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from query_pipeline import run as api_run
 from query_pipeline.cli import main as cli_main
+from tests._profiles import complexity_label, verify_label
 
 def _session_lines() -> str:
     import json as _json
@@ -55,14 +56,14 @@ class RecordingClient:
             if "价值判官" in system_prompt:
                 return json.dumps({"is_valuable": True})
             if "已判定为复杂金融问句" in system_prompt:
-                return json.dumps({"category_id": "01"})
+                return json.dumps({"category_id": "01", "reason": "复杂归类"})
             if "有价值但非复杂" in system_prompt:
-                return json.dumps({"category_id": "03"})
-            return json.dumps({"is_complex": True})
+                return json.dumps({"category_id": "03", "reason": "普通归类"})
+            return json.dumps(complexity_label(True, goal=payload["current_question"]))
         if "简单问句识别器" in system_prompt:  # simple_finder 视角
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:
-            return json.dumps({"is_complex": True, "reason": "复杂"})
+            return json.dumps(verify_label(True, reason="复杂", evidence_quote=payload["question"]))
         return json.dumps({"translation": "译"})
 
     async def close(self) -> None:

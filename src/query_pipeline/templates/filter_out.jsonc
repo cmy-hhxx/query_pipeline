@@ -82,7 +82,43 @@
     "reason": "分类调用输出的归类理由",  // classify 输出，必填（QC meta 规则要求非空）
     "request_time": "2026-08-05 04:01:00", // 原始问句时间字符串，与 request_time_ms 并存（ms 给机器、字符串给人/溯源）
     "run_id": "run_id",              // session: turn.run_id（run UUID）；chat 源无此字段 → 空
-    "last_event_type": "runFinished" // session: turn.last_event_type；回答质量门控要求 runFinished（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 会被过滤）；chat 源无此字段 → null
+    "last_event_type": "runFinished", // session: turn.last_event_type；回答质量门控要求 runFinished（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 会被过滤）；chat 源无此字段 → null
+    "value_profile": {                 // 价值/自然度结构；严重模板、无任务、非自包含问句在价值门拒绝
+      "is_valuable": true,
+      "has_executable_task": true,
+      "self_contained": true,
+      "template_severity": "none",
+      "contains_embedded_prompt": false,
+      "reason": "自然且自包含的金融任务"
+    },
+    "contains_embedded_prompt": false,
+    "complexity_profile": {            // 结构化三路裁决；只依据 input.text
+      "route": "complex",
+      "complex_features": ["multi_dimension_attribution"],
+      "exclusion_reasons": [],
+      "evidence": [
+        {"criterion": "multi_dimension_attribution", "quote": "结合公告、上下游价格和竞品数据归因"}
+      ],
+      "confidence": "high",
+      "question_quality": "high",
+      "semantic_signature": {
+        "goal": "explain performance change",
+        "subject_type": "listed company",
+        "operations": ["compare periods", "synthesize causes"],
+        "data_dimensions": ["financials", "industry", "events"],
+        "temporal_shape": "multi_period",
+        "output_shape": ["evidence", "causal conclusion"]
+      },
+      "reason": "需要跨期证据综合归因"
+    },
+    "semantic_signature": {            // 上述签名的便捷副本，供去重/QC 直接读取
+      "goal": "explain performance change",
+      "subject_type": "listed company",
+      "operations": ["compare periods", "synthesize causes"],
+      "data_dimensions": ["financials", "industry", "events"],
+      "temporal_shape": "multi_period",
+      "output_shape": ["evidence", "causal conclusion"]
+    }
     // 逃生字段示例（当前不填，按需扩展；注意 translation 是顶层字段，不放在 meta）：
     // "translate_failed": true,   // 翻译失败标记（translate 阶段写入）。QC meta 规则据此区分
     //                             // "翻译失败"（fail-open，null 可接受）与"从未翻译"（无标记 → fail）

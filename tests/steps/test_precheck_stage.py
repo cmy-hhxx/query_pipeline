@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from query_pipeline import run as api_run
 from query_pipeline.pipeline.stages import DEFAULT_STAGES
+from query_pipeline.precheck import precheck
+from tests._profiles import complexity_label, verify_label
 
 
 def _session_lines(n_turns: int = 1, *, with_chain: bool = True) -> str:
@@ -45,9 +47,13 @@ class FakeClient:
         payload = json.loads(user_prompt.split("\n", 1)[1])
         if "questions" in payload:
             return json.dumps({"segments": [{"start": 0, "end": 0, "topic": "t"}]})
-        if "current_question" in payload:
+        if "current_question" in payload and "价值判官" in system_prompt:
             return json.dumps({"is_valuable": True})
-        return json.dumps({"is_complex": True, "reason": "复杂"})
+        if "current_question" in payload:
+            return json.dumps(complexity_label(True, goal=payload["current_question"]))
+        if "question" in payload:
+            return json.dumps(verify_label(True, reason="复杂", evidence_quote=payload["question"]))
+        return json.dumps({"category_id": "03", "reason": "归类"})
 
     async def close(self) -> None:
         return None
@@ -114,6 +120,32 @@ class PrecheckStageTest(unittest.TestCase):
             self.assertTrue(pc["ok"])
             self.assertEqual(pc["chain_coverage"], 1.0)
             self.assertEqual(pc["issues"], [])
+
+    def test_chat_context_with_non_object_turn_is_not_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "input.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "trace_id": "tr1",
+                        "judge_data": {
+                            "case_id": "c1",
+                            "context": ["invalid turn"],
+                            "input": {"text": "帮我分析茅台的估值"},
+                            "text_answer": "分析如下",
+                            "chain": [{"plan": "p", "tools": []}],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = precheck(source, format="chat")
+
+        self.assertEqual(report.eligible_turns, 0)
+        self.assertFalse(report.ok)
+        self.assertIn("no_eligible_turns", {issue.code for issue in report.issues})
 
 
 if __name__ == "__main__":

@@ -36,7 +36,6 @@
   .branch-answer { grid-column: 1; }
   .branch-verify,
   .branch-post { grid-column: 2; }
-  .branch-simple { grid-column: 3; }
   .branch-answer,
   .branch-post { grid-row: 2; }
 

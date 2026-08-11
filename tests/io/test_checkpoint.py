@@ -13,6 +13,7 @@ from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.io.checkpoint import Checkpoint, content_key, stage_fingerprint
 from query_pipeline.llm.cache import src_hash
 from query_pipeline.pipeline.runner import run_pipeline
+from tests._profiles import complexity_label, verify_label
 
 def _make_turn(idx: int, question: str) -> dict[str, Any]:
     if idx % 2 == 0:
@@ -78,16 +79,47 @@ class ScriptedClient:
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:  # classify normal
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "families" in payload:  # template-family review
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "family_id": family["family_id"],
+                            "label": "natural_shared_phrase",
+                            "confidence": "high",
+                            "reason": "测试样本只是自然共享表达",
+                        }
+                        for family in payload["families"]
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        if "pairs" in payload:  # semantic duplicate review
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": pair["id"], "label": "distinct", "reason": "测试样本语义不同"}
+                        for pair in payload["pairs"]
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if "current_question" in payload:  # complexity gate
             if payload["current_question"] in self.session_fail:
                 raise RuntimeError("simulated network failure")
-            return json.dumps({"is_complex": True, "reason": "复杂"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(True, reason="复杂", goal=payload["current_question"]),
+                ensure_ascii=False,
+            )
         if "简单问句识别器" in system_prompt:  # simple_finder 视角
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # verify
             if payload["question"] in self.verify_fail:
                 raise RuntimeError("simulated network failure")
-            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+            return json.dumps(
+                verify_label(True, reason="自身复杂", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
         if "text" in payload:  # translate
             if payload["text"] in self.translate_fail:
                 raise RuntimeError("simulated network failure")
@@ -191,14 +223,17 @@ class SessionResumeTest(unittest.TestCase):
             summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
+            self.assertEqual(summary1.stats["final_complex_rows"], 2)
             cp_path = tmp_path / "work" / "runtime" / "checkpoints" / "judge.jsonl"
             self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
-            # Run 2: only t1's judge re-runs; t0/t2 replay from checkpoint.
+            # Run 2: only t1's judge re-runs; t0/t2 replay from judge cache.
+            # Run 1 skipped Verify because the judge batch was incomplete, so
+            # all three rows now receive their first independent verification.
             summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["llm_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
-            self.assertEqual(summary2.stats["verify_kept"], 3)
+            self.assertEqual(summary2.stats["verify_complex_kept"], 3)
             # t1 re-runs through the funnel: complexity + classify calls
             # (value_gate replays from the LLM cache written in run 1).
             self.assertEqual(
@@ -207,7 +242,7 @@ class SessionResumeTest(unittest.TestCase):
             )
             self.assertEqual(
                 [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
-                ["S1 complex query"],
+                ["S0 complex query", "S1 complex query", "S2 complex query"],
             )
             self.assertEqual(len(_checkpoint_keys(cp_path)), 3)
 
@@ -222,17 +257,21 @@ class VerifyResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            # Run 1: verify for V1 fails (fail-closed drops the row, and the
-            # failure is NOT checkpointed); V0/V2 are checkpointed cleanly.
+            # Run 1: verify for V1 fails. The run is not published and the
+            # failure is not checkpointed, so it retries on the next run.
             summary1, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
-            self.assertEqual(summary1.stats["verify_kept"], 2)
+            self.assertEqual(summary1.stats["verify_complex_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
+            self.assertEqual(summary1.stats["verify_uncertain"], 0)
+            self.assertEqual(summary1.stats["verify_to_normal"], 0)
             self.assertEqual(summary1.stats["complex_rows"], 3)
+            self.assertEqual(summary1.stats["final_complex_rows"], 2)
+            self.assertFalse(summary1.success)
 
             # Run 2: V0/V2 replay from checkpoints (zero LLM); V1's failure is
             # retried and succeeds — a transient failure must not be sticky.
             summary2, client2 = run_pipeline_with_fakes(cfg)
-            self.assertEqual(summary2.stats["verify_kept"], 3)
+            self.assertEqual(summary2.stats["verify_complex_kept"], 3)
             self.assertEqual(summary2.stats["verify_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
             self.assertEqual(
@@ -319,14 +358,14 @@ class CheckpointInvalidationTest(unittest.TestCase):
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
             summary1, _ = run_pipeline_with_fakes(cfg)
-            self.assertEqual(summary1.stats["verify_kept"], 1)
+            self.assertEqual(summary1.stats["verify_complex_kept"], 1)
 
             # 输入追加一个会话（其余不变）+ 全新 cache：verify 仍须重新验证旧会话
             _write_jsonl(tmp_path / "input.jsonl", sessions + [_session("t1", "R1")])
             cfg2 = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
             cfg2.llm.cache = tmp_path / "work" / "llm_cache2.jsonl"
             summary2, client2 = run_pipeline_with_fakes(cfg2)
-            self.assertEqual(summary2.stats["verify_kept"], 2)
+            self.assertEqual(summary2.stats["verify_complex_kept"], 2)
             verify_calls = [
                 c["question"]
                 for c in client2.calls
@@ -355,7 +394,7 @@ class CheckpointInvalidationTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", factory(clients, {"D0 complex query"})):
                 summary1 = run_pipeline(cfg)
             self.assertEqual(summary1.stats["complex_rows"], 1)
-            self.assertEqual(summary1.stats["verify_kept"], 1)
+            self.assertEqual(summary1.stats["verify_complex_kept"], 1)
 
             with patch("query_pipeline.pipeline.runner.LLMClient", factory(clients, set())), patch.dict(
                 "query_pipeline.prompts.PROMPTS", {"complexity_gate": "complexity_gate 已更新（内容变化）"}
@@ -365,13 +404,13 @@ class CheckpointInvalidationTest(unittest.TestCase):
             # judge 重跑：复杂度门改为非复杂 → normal 行
             self.assertEqual(summary2.stats["normal_rows"], 1)
             self.assertEqual(summary2.stats["complex_rows"], 0)
-            # verify 不得重放 hard 的 keep：normal 期望=非复杂，按缓存 round1 判定应拒绝
-            self.assertEqual(summary2.stats["verify_rejected"], 1)
-            self.assertEqual(summary2.stats["verify_kept"], 0)
-            # verify checkpoint 出现第二个键（normal 难度）
+            # normal 行不参加复核，也绝不被反向升级。
+            self.assertEqual(summary2.stats["verify_to_normal"], 0)
+            self.assertEqual(summary2.stats["verify_complex_kept"], 0)
+            # normal 行不新增 verify checkpoint 键。
             cp = _read_jsonl(tmp_path / "work" / "runtime" / "checkpoints" / "verify.jsonl")
             keys = {r["key"] for r in cp if r.get("type") != "meta"}
-            self.assertEqual(len(keys), 2)
+            self.assertEqual(len(keys), 1)
 
     def test_judge_checkpoint_old_format_migrated(self) -> None:
         # 第四轮 #3：存量旧格式 judge checkpoint（每会话含 rows/judged，MB 级
@@ -463,7 +502,6 @@ def _write_config(tmp_path: Path, *, post_enabled: bool) -> Path:
               enabled: true
               prompt_id: verify_complex
               max_rounds_hard: 1
-              max_rounds_normal: 1
             {post_block}
             llm:
               enabled: true
@@ -526,9 +564,44 @@ class DifficultyFlipClient(ScriptedClient):
             return json.dumps({"category_id": "03", "reason": "复杂归类"}, ensure_ascii=False)
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
+        if "families" in payload:
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "family_id": family["family_id"],
+                            "label": "natural_shared_phrase",
+                            "confidence": "high",
+                            "reason": "自然共享表达",
+                        }
+                        for family in payload["families"]
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        if "pairs" in payload:
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": pair["id"], "label": "distinct", "reason": "语义不同"}
+                        for pair in payload["pairs"]
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if "current_question" in payload:
             is_complex = payload["current_question"] in self.complex_qs
-            return json.dumps({"is_complex": is_complex, "reason": "判定"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(
+                    is_complex,
+                    reason="判定",
+                    goal=payload["current_question"],
+                ),
+                ensure_ascii=False,
+            )
         if "question" in payload:
-            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+            return json.dumps(
+                verify_label(True, reason="自身复杂", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
         raise AssertionError(f"unexpected payload: {sorted(payload)}")

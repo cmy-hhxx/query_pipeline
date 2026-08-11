@@ -17,6 +17,7 @@ from unittest.mock import patch
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.pipeline.runner import run_pipeline
 from query_pipeline.prompts import resolve_prompt
+from tests._profiles import complexity_label, verify_label
 
 def _make_turn(
     idx: int,
@@ -80,8 +81,8 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["normal_rows"], 1)
             self.assertEqual(summary.stats["llm_failed"], 0)
-            self.assertEqual(summary.stats["verify_kept"], 2)  # hard keep + normal keep
-            self.assertEqual(summary.stats["verify_rejected"], 0)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
+            self.assertEqual(summary.stats["verify_to_normal"], 0)
             self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(summary.stats["category_counts"], {"01": 1})
             self.assertEqual(summary.stats["category_counts_normal"], {"03": 1})
@@ -95,7 +96,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["input"]["text"], "Q2 复杂取数")
             self.assertEqual(row["context"], [{"question": "Q1 简单查询", "answer": "answer0 " + "x" * 60}])
             self.assertEqual(row["difficulty_level"], "hard")
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "r1", "last_event_type": None})
+            self.assertEqual(row["meta"]["reason"], "多步工具调用取数")
+            self.assertIn("complexity_profile", row["meta"])
+            self.assertIn("semantic_signature", row["meta"])
             self.assertIsNone(row["translation"])  # 中文原文 → null
             normal = rows[1]
             self.assertEqual(normal["trace_id"], "trace2")
@@ -112,18 +115,19 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeFailingSessionLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertTrue(summary.success)  # llm_failed counted, not fatal
+            self.assertFalse(summary.success)  # judge infrastructure failures are fatal
             # segmentation failure -> whole session is one segment; judge failure on turn1 dropped.
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["llm_failed"], 1)
-            # verify failure is fail-closed: the surviving row is dropped.
-            self.assertEqual(summary.stats["verify_failed"], 1)
-            self.assertEqual(summary.stats["verify_kept"], 0)
-            # run succeeds (llm_failed counted, not fatal); empty output is written
+            # Verify is skipped after the upstream failure; the incomplete
+            # batch is not published and no partial verdict is checkpointed.
+            self.assertEqual(summary.stats["verify_failed"], 0)
+            self.assertEqual(summary.stats["verify_complex_kept"], 0)
+            self.assertEqual(summary.stats["verify_to_normal"], 0)
+            self.assertEqual(summary.stats["verify_uncertain"], 0)
             out_path = Path(summary.output_files["cleaned_queries"])
-            self.assertTrue(out_path.exists())
-            self.assertEqual(out_path.read_text(encoding="utf-8").strip(), "")
+            self.assertFalse(out_path.exists())
 
     def test_end_to_end_value_gate_rejects_context_only_followups(self) -> None:
         # The value gate (first semantic layer) rejects the context-only
@@ -145,8 +149,8 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["candidates"], 2)
             self.assertEqual(summary.stats["value_rejected"], 1)
-            self.assertEqual(summary.stats["verify_kept"], 1)
-            self.assertEqual(summary.stats["verify_rejected"], 0)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
+            self.assertEqual(summary.stats["verify_to_normal"], 0)
             self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(summary.stats["complex_rows"], 1)
 
@@ -157,7 +161,33 @@ class SessionPipelineContractTest(unittest.TestCase):
                 tmp_path / "work" / "runtime" / "diagnostics" / "verified.jsonl"
             )
             self.assertEqual([v["trace_id"] for v in verified], ["trace1"])
-            self.assertEqual(verified[0]["is_complex"], True)
+            self.assertEqual(verified[0]["route"], "complex")
+
+    def test_verify_reject_is_absent_from_every_final_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            session = {"thread_id": "t1", "context": _sample_turns()}
+            _write_jsonl(tmp_path / "input.jsonl", [session])
+            cfg = load_pipeline_config(_write_config(tmp_path, llm_enabled=True))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakeRejectVerifyClient):
+                summary = run_pipeline(cfg)
+
+            self.assertTrue(summary.success)
+            self.assertEqual(summary.stats["verify_rejected_template"], 1)
+            self.assertEqual(summary.stats["verify_complex_kept"], 0)
+            self.assertEqual(summary.stats["final_complex_rows"], 0)
+            self.assertEqual(summary.stats["final_normal_rows"], 1)
+            self.assertEqual(_read_jsonl(Path(summary.output_files["complex_queries"])), [])
+            cleaned = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
+            normal = _read_jsonl(Path(summary.output_files["normal_queries"]))
+            self.assertEqual([row["trace_id"] for row in cleaned], ["trace2"])
+            self.assertEqual([row["trace_id"] for row in normal], ["trace2"])
+            rejected = _read_jsonl(
+                tmp_path / "work" / "runtime" / "diagnostics" / "complex_policy_rejected.jsonl"
+            )
+            self.assertEqual([row["trace_id"] for row in rejected], ["trace1"])
+            self.assertEqual(rejected[0]["method"], "single_question_verify")
 
     def test_verify_multi_round_cascade(self) -> None:
         # Cascade filter: "reject r1" drops in round 1, "reject r2" survives
@@ -187,8 +217,8 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
             client = clients[0]
 
-            self.assertEqual(summary.stats["verify_kept"], 1)
-            self.assertEqual(summary.stats["verify_rejected"], 2)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
+            self.assertEqual(summary.stats["verify_to_normal"], 2)
             self.assertEqual(summary.stats["verify_failed"], 0)
             self.assertEqual(
                 client.rounds_called,
@@ -200,26 +230,37 @@ class SessionPipelineContractTest(unittest.TestCase):
             )
 
             rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
-            self.assertEqual([r["input"]["text"] for r in rows], ["帮我分析贵州茅台的估值并给出买卖建议"])
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(
+                [r["difficulty_level"] for r in rows], ["hard", "normal", "normal"]
+            )
+            for downgraded in rows[1:]:
+                profile = downgraded["meta"]["complexity_profile"]
+                self.assertEqual(profile["route"], "normal")
+                self.assertEqual(profile["complex_features"], [])
+                self.assertTrue(profile["exclusion_reasons"])
+                self.assertTrue(profile["evidence"])
+                self.assertIn("verify_reason", downgraded["meta"])
+                self.assertIn("normal_classification_reason", downgraded["meta"])
 
             verified = _read_jsonl(
                 tmp_path / "work" / "runtime" / "diagnostics" / "verified.jsonl"
             )
             self.assertEqual([v["trace_id"] for v in verified], ["trace0", "trace1", "trace2"])
             by_q = {v["question"]: v for v in verified}
-            self.assertTrue(by_q["帮我分析贵州茅台的估值并给出买卖建议"]["is_complex"])
+            self.assertEqual(by_q["帮我分析贵州茅台的估值并给出买卖建议"]["route"], "complex")
             self.assertEqual([r["round"] for r in by_q["帮我分析贵州茅台的估值并给出买卖建议"]["rounds"]], [1, 2, 3])
-            self.assertFalse(by_q["分析一下宁德时代的三季度业绩并预测走势"]["is_complex"])
+            self.assertEqual(by_q["分析一下宁德时代的三季度业绩并预测走势"]["route"], "normal")
             self.assertEqual([r["round"] for r in by_q["分析一下宁德时代的三季度业绩并预测走势"]["rounds"]], [1])
-            self.assertFalse(by_q["计算比亚迪过去五年的平均市盈率"]["is_complex"])
+            self.assertEqual(by_q["计算比亚迪过去五年的平均市盈率"]["route"], "normal")
             self.assertEqual(
-                [(r["round"], r["is_complex"]) for r in by_q["计算比亚迪过去五年的平均市盈率"]["rounds"]],
-                [(1, True), (2, False)],
+                [(r["round"], r["route"]) for r in by_q["计算比亚迪过去五年的平均市盈率"]["rounds"]],
+                [(1, "complex"), (2, "normal")],
             )
 
     def test_verify_multi_round_error_mid_round_fail_closed(self) -> None:
-        # Round 2 of the "flaky" question raises: fail-closed drops the row
-        # (verify_failed=1) but does NOT checkpoint the failure — a re-run
+        # Round 2 of the "flaky" question raises: hard admission fails and the
+        # row is downgraded, but the failure is not checkpointed — a re-run
         # retries it (round 1 replays from llm_cache, round 2 calls the LLM
         # again). A transient outage must not permanently poison the output.
         with tempfile.TemporaryDirectory() as tmp:
@@ -244,9 +285,11 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
             client = clients[0]
 
-            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
             self.assertEqual(summary.stats["verify_failed"], 1)
-            self.assertEqual(summary.stats["verify_rejected"], 0)
+            self.assertEqual(summary.stats["verify_to_normal"], 0)
+            self.assertEqual(summary.stats["verify_uncertain"], 0)
+            self.assertFalse(summary.success)
             self.assertEqual(
                 client.rounds_called,
                 {
@@ -264,17 +307,14 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             with patch("query_pipeline.pipeline.runner.LLMClient", factory2):
                 summary2 = run_pipeline(cfg)
-            self.assertEqual(summary2.stats["verify_kept"], 1)
+            self.assertEqual(summary2.stats["verify_complex_kept"], 1)
             self.assertEqual(summary2.stats["verify_failed"], 1)
+            self.assertEqual(summary2.stats["verify_uncertain"], 0)
             # the errored row is retried: exactly one LLM call (round 2 of the
             # flaky question; round 1 and the healthy row replay from llm_cache)
             self.assertEqual(len(clients2[0].calls), 1)
 
-            rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
-            self.assertEqual(
-                {r["input"]["text"] for r in rows},
-                {"帮我构建一个沪深300的增强策略并回测"},
-            )
+            self.assertFalse(Path(summary.output_files["cleaned_queries"]).exists())
 
     def _corrupt_cache_entry(self, cache_path: Path, step_prefix: str, label: dict[str, Any]) -> None:
         """把 cache 文件中指定 step 的第一个 label 替换为坏值。"""
@@ -369,7 +409,7 @@ class SessionPipelineContractTest(unittest.TestCase):
                 summary = run_pipeline(cfg)
             client = clients[0]
 
-            self.assertEqual(summary.stats["verify_kept"], 2)  # 未被坏缓存丢弃（hard+normal 各 1）
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
             self.assertEqual(summary.stats["verify_failed"], 0)
             verify_calls = [
                 c
@@ -397,7 +437,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakePostStageLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertEqual(summary.stats["verify_kept"], 2)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
             self.assertEqual(summary.stats["dedup_removed"], 1)
             self.assertEqual(summary.stats["translated"], 1)
             self.assertEqual(summary.stats["translate_skipped"], 0)
@@ -441,7 +481,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["segments"], 1)  # single whole-session segment, no segmentation call
             self.assertEqual(summary.stats["candidates"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
-            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
 
             rows = _read_jsonl(Path(summary.output_files["cleaned_queries"]))
             self.assertEqual(len(rows), 1)
@@ -454,7 +494,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(row["tools"], ["web_search"])
             self.assertEqual(row["raw_answer"], "raw_answer " + "y" * 60)
             self.assertEqual(row["text_answer"], "text_answer " + "y" * 60)
-            self.assertEqual(row["meta"], {"reason": "多步工具调用取数", "request_time": "2026-08-05 04:01:00", "run_id": "", "last_event_type": None})
+            self.assertEqual(row["meta"]["reason"], "多步工具调用取数")
+            self.assertIn("complexity_profile", row["meta"])
+            self.assertIn("semantic_signature", row["meta"])
 
     def test_end_to_end_chat_respects_tool_gates(self) -> None:
         # Chat records always carry judge_data.chain, so the chain/tool AND-gates
@@ -500,7 +542,7 @@ class SessionPipelineContractTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["candidates"], 1)  # only the toolful case
             self.assertEqual(summary.stats["complex_rows"], 1)
-            self.assertEqual(summary.stats["verify_kept"], 1)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
 
     def test_end_to_end_chat_empty_answer_fails_precheck(self) -> None:
         # An all-ineligible chat batch is rejected before any LLM runtime is initialized.
@@ -526,9 +568,9 @@ class SessionPipelineContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no_eligible_turns"):
                 run_pipeline(cfg)
 
-    def test_unexpected_candidate_error_does_not_fail_run(self) -> None:
+    def test_unexpected_candidate_error_fails_batch_without_session_crash(self) -> None:
         # 兜底网返回 None（如 cache 磁盘 OSError）：单候选按 llm_failed 计，
-        # debug 推导不得再对 None 崩溃 → 会话不得变 session_error、run 不得失败。
+        # debug 推导不得再对 None 崩溃 → 会话不变成 session_error，但批次不得发布。
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             session = {"thread_id": "t1", "context": _sample_turns()}
@@ -540,13 +582,13 @@ class SessionPipelineContractTest(unittest.TestCase):
             ):
                 summary = run_pipeline(cfg)
 
-            self.assertTrue(summary.success)
+            self.assertFalse(summary.success)
             self.assertEqual(summary.stats["session_errors"], 0)
             self.assertGreater(summary.stats["llm_failed"], 0)
 
     def test_api_4xx_in_funnel_drops_candidate_not_session(self) -> None:
         # fix #9 让 4xx 立即抛出；funnel 必须捕获 APIStatusError 按候选失败处理
-        # （否则逃逸到兜底网 → debug 崩溃 → 整会话 error → run 失败）。
+        # 并记录 llm_failed；会话不崩溃，但整批不发布并可重试。
         import httpx
         from openai import BadRequestError
 
@@ -567,7 +609,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FourHundredClient):
                 summary = run_pipeline(cfg)
 
-            self.assertTrue(summary.success)
+            self.assertFalse(summary.success)
             self.assertEqual(summary.stats["session_errors"], 0)
             self.assertEqual(summary.stats["llm_failed"], 2)  # 两个候选均 400 → 丢弃
             self.assertEqual(summary.stats["complex_rows"], 0)
@@ -713,7 +755,10 @@ def _funnel_response(system_prompt: str, payload: dict[str, Any]) -> str | None:
         return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
     q = payload["current_question"]
     return json.dumps(
-        {"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False
+        complexity_label(
+            q == "Q2 复杂取数", reason="判定", goal=q
+        ),
+        ensure_ascii=False,
     )
 
 class FakeSessionLLMClient:
@@ -743,11 +788,34 @@ class FakeSessionLLMClient:
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         # verify (standalone question): keep Q2 complex, others non-complex
         if payload["question"] == "Q2 复杂取数":
-            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
-        return json.dumps({"is_complex": False, "reason": "单独看不复杂"}, ensure_ascii=False)
+            return json.dumps(
+                verify_label(True, reason="自身复杂", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            verify_label(False, reason="单独看不复杂", evidence_quote=payload["question"]),
+            ensure_ascii=False,
+        )
 
     async def close(self) -> None:
         return None
+
+
+class FakeRejectVerifyClient(FakeSessionLLMClient):
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        payload = json.loads(user_prompt.split("\n", 1)[1])
+        if "question" in payload:
+            return json.dumps(
+                verify_label(
+                    False,
+                    route="reject",
+                    exclusion_reasons=["eval_template"],
+                    evidence_quote=payload["question"],
+                    reason="严重 eval 模板",
+                ),
+                ensure_ascii=False,
+            )
+        return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
 
 class FakePostStageLLMClient:
     """Handles segment/judge/verify/translate payloads.
@@ -775,11 +843,17 @@ class FakePostStageLLMClient:
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:
-            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(True, reason="上下文复杂", goal=payload["current_question"]),
+                ensure_ascii=False,
+            )
         if "简单问句识别器" in system_prompt:  # simple_finder 视角
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # verify
-            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
+            return json.dumps(
+                verify_label(True, reason="自身复杂", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
         if "text" in payload:  # translate
             return json.dumps({"translation": "翻译：" + payload["text"]}, ensure_ascii=False)
         raise AssertionError(f"unexpected payload keys: {sorted(payload)}")
@@ -812,12 +886,21 @@ class FakeJudgeThenVerifyClient:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:  # complexity gate
             q = payload["current_question"]
-            return json.dumps({"is_complex": q == "Q2 复杂取数", "reason": "判定"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(q == "Q2 复杂取数", reason="判定", goal=q),
+                ensure_ascii=False,
+            )
         if "简单问句识别器" in system_prompt:  # simple_finder 视角
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if payload["question"] == "Q2 复杂取数":
-            return json.dumps({"is_complex": True, "reason": "自身复杂"}, ensure_ascii=False)
-        return json.dumps({"is_complex": False, "reason": "单独看是承接句"}, ensure_ascii=False)
+            return json.dumps(
+                verify_label(True, reason="自身复杂", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            verify_label(False, reason="单独看是承接句", evidence_quote=payload["question"]),
+            ensure_ascii=False,
+        )
 
     async def close(self) -> None:
         return None
@@ -839,7 +922,10 @@ class FakeFailingSessionLLMClient:
         if "current_question" in payload:  # complexity gate
             if payload["current_question"] == "Q2 复杂取数":
                 raise RuntimeError("simulated judge failure")
-            return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(True, reason="需要预测", goal=payload["current_question"]),
+                ensure_ascii=False,
+            )
         raise RuntimeError("simulated verify failure")
 
     async def close(self) -> None:
@@ -875,7 +961,10 @@ class FakeVerifyCascadeLLMClient:
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:
-            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(True, reason="上下文复杂", goal=payload["current_question"]),
+                ensure_ascii=False,
+            )
         question = payload["question"]
         if system_prompt == resolve_prompt("verify_complex"):
             round_no = 1
@@ -887,7 +976,14 @@ class FakeVerifyCascadeLLMClient:
             raise AssertionError(f"unexpected verify system prompt: {system_prompt[:60]!r}")
         self.rounds_called.setdefault(question, []).append(round_no)
         is_complex = _CASCADE_VERDICTS[question][round_no]
-        return json.dumps({"is_complex": is_complex, "reason": f"第{round_no}轮"}, ensure_ascii=False)
+        return json.dumps(
+            verify_label(
+                is_complex,
+                reason=f"第{round_no}轮",
+                evidence_quote=payload["question"],
+            ),
+            ensure_ascii=False,
+        )
 
     async def close(self) -> None:
         return None
@@ -913,7 +1009,10 @@ class FakeVerifyMidRoundErrorLLMClient:
         if "有价值但非复杂" in system_prompt:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:
-            return json.dumps({"is_complex": True, "reason": "上下文复杂"}, ensure_ascii=False)
+            return json.dumps(
+                complexity_label(True, reason="上下文复杂", goal=payload["current_question"]),
+                ensure_ascii=False,
+            )
         question = payload["question"]
         if system_prompt == resolve_prompt("verify_complex"):
             round_no = 1
@@ -924,7 +1023,10 @@ class FakeVerifyMidRoundErrorLLMClient:
         self.rounds_called.setdefault(question, []).append(round_no)
         if question == "分析一下中概股的估值并给出配置建议" and round_no == 2:
             raise RuntimeError("simulated verify failure")
-        return json.dumps({"is_complex": True, "reason": "复杂"}, ensure_ascii=False)
+        return json.dumps(
+            verify_label(True, reason="复杂", evidence_quote=payload["question"]),
+            ensure_ascii=False,
+        )
 
     async def close(self) -> None:
         return None
@@ -985,7 +1087,6 @@ def _write_config(
               enabled: true
               prompt_id: verify_complex
               max_rounds_hard: 3
-              max_rounds_normal: 2
             {post_block}
             llm:
               enabled: {str(llm_enabled).lower()}

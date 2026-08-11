@@ -17,7 +17,7 @@ from query_pipeline.prompts.assemble import (
     build_complex_classify_prompt,
     build_normal_classify_prompt,
     build_verify_prompt,
-    parse_bad_cases,
+    load_complex_quality_policy,
     parse_complex_few_shot,
     parse_normal_few_shot,
 )
@@ -55,15 +55,6 @@ _NORMAL_SAMPLE = """\
 
 易混类别：
 - 03-stock-diagnosis-and-data-lookup: 03 是查数。
-"""
-
-_BAD_SAMPLE = """\
-结合市场信息分析一下605499股票走势 -- 仅为单项行情
-科技硬件、涨价链各推5只个股 -- 仅按显式条件列名单
-给我整理pcb的龙头企业，要求财务状态好，订单多
-以及 问句复制 AI 的输入，这个也要删
-看下来几个点吧
-1、简单取数计算的，这个务必限制；
 """
 
 class ParseComplexTest(unittest.TestCase):
@@ -172,22 +163,6 @@ class FailLoudTest(unittest.TestCase):
                 build_normal_classify_prompt()
 
 
-class BadCasesTest(unittest.TestCase):
-    def test_annotation_lines_skipped(self) -> None:
-        cases = parse_bad_cases(_BAD_SAMPLE)
-        self.assertEqual(
-            cases,
-            (
-                "结合市场信息分析一下605499股票走势",
-                "科技硬件、涨价链各推5只个股",
-                "给我整理pcb的龙头企业，要求财务状态好，订单多",
-            ),
-        )
-
-    def test_real_file_has_negative_examples(self) -> None:
-        text = (templates_dir() / "bad_cases_for_complex.md").read_text(encoding="utf-8")
-        self.assertGreaterEqual(len(parse_bad_cases(text)), 10)
-
 class BuildPromptTest(unittest.TestCase):
     def test_complex_classify_prompt_embeds_taxonomy(self) -> None:
         prompt = build_complex_classify_prompt()
@@ -201,18 +176,19 @@ class BuildPromptTest(unittest.TestCase):
         self.assertIn("易混类别", prompt)
         self.assertIn("16-macro-information-qa", prompt)
 
-    def test_verify_prompt_injects_bad_cases(self) -> None:
+    def test_verify_prompt_injects_canonical_policy(self) -> None:
         base = "判断是否复杂。"
         injected = build_verify_prompt(base)
         self.assertIn(base, injected)
-        self.assertIn("已被确认为不复杂", injected)
-        self.assertIn("605499", injected)
+        self.assertIn("natural_multi_condition_screen", injected)
+        self.assertIn(load_complex_quality_policy(), injected)
 
     def test_registry_serves_assembled_prompts(self) -> None:
         self.assertIn("complex-topic/", resolve_prompt("classify_complex"))
         self.assertIn("易混类别", resolve_prompt("classify_normal"))
-        self.assertIn("已被确认为不复杂", resolve_prompt("verify_complex"))
-        self.assertIn("已被确认为不复杂", resolve_prompt("verify_recheck"))
+        self.assertIn("natural_multi_condition_screen", resolve_prompt("verify_complex"))
+        self.assertIn("natural_multi_condition_screen", resolve_prompt("verify_recheck"))
+        self.assertIn("natural_shared_phrase", resolve_prompt("template_family"))
 
 if __name__ == "__main__":
     unittest.main()
@@ -227,29 +203,13 @@ class PromptContractTest(unittest.TestCase):
         self.assertIn("同一个主题不能再次出现", segment_prompt)
         self.assertIn("宏观", segment_prompt)
 
-        judge_prompt = resolve_prompt("complex_judge")
-        for category_id, name in {
-            "01": "复杂取数计算",
-            "05": "资产配置",
-            "07": "策略触发任务类",
-            "09": "动作类",
-        }.items():
-            self.assertIn(f"{category_id} {name}", judge_prompt)
-        self.assertIn("is_complex", judge_prompt)
-        self.assertIn("category_id", judge_prompt)
-        self.assertIn("reason", judge_prompt)
-        # category definitions + priority rules embedded (guards 08/09 boundary collapse)
-        self.assertIn("长期帮我盯着并迭代", judge_prompt)
-        self.assertIn("→ 优先 09", judge_prompt)
-        # few_shot.md examples fused in (07 remapped to trigger/setup semantics;
-        # backtest-audit questions fall under 03 now)
-        self.assertIn("每类典型示例", judge_prompt)
-        self.assertIn("回测一个基于5周均线的短线择时策略", judge_prompt)
-        self.assertIn("审计一个多因子策略", judge_prompt)
-        self.assertIn("07/08/09 边界", judge_prompt)
-        # screening caliber: pure filters are non-complex; validation+trend-point tasks stay 01
-        self.assertIn("仅按显式条件过滤", judge_prompt)
-        self.assertIn("validate the BAR columns", judge_prompt)
+        complexity_prompt = resolve_prompt("complexity_gate")
+        self.assertIn('"route"', complexity_prompt)
+        self.assertIn("natural_multi_condition_screen", complexity_prompt)
+        self.assertIn("eval_template", complexity_prompt)
+        # Natural 3+ condition screens are complex; simple one-condition filters are normal.
+        self.assertIn("至少 3 个", complexity_prompt)
+        self.assertIn("simple_filter_ranking", complexity_prompt)
 
 
 class LazyPromptBuildTest(unittest.TestCase):

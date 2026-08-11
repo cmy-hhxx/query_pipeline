@@ -20,10 +20,6 @@ _ITEM_BULLET = re.compile(r"^[-•]\s*(.+)$")
 _NORMAL_HEADER = re.compile(r"^##\s+(\d{2})-(.+?)\s*\|\s*(.+)$")
 _SECTION = re.compile(r"^(定义|适用场景|排除场景|边界规则|易混类别)：\s*(.*)$")
 
-_BAD_CASE = re.compile(r"^(?P<case>.+?)(?:\s*--\s*.+)?$")
-_ANNOTATION = re.compile(r"^(?:以及|看下来|\d+、)")
-
-
 @dataclass(frozen=True)
 class ComplexCategorySpec:
     id: str
@@ -41,6 +37,11 @@ class NormalCategorySpec:
 
 def _read(name: str) -> str:
     return (templates_dir() / name).read_text(encoding="utf-8")
+
+
+def load_complex_quality_policy() -> str:
+    """Return the packaged, single-source complex admission policy."""
+    return _read("complex_quality_policy.md").strip()
 
 
 def parse_complex_few_shot(text: str) -> dict[str, ComplexCategorySpec]:
@@ -168,25 +169,6 @@ def parse_normal_few_shot(text: str) -> dict[str, NormalCategorySpec]:
     return specs
 
 
-def parse_bad_cases(text: str) -> tuple[str, ...]:
-    """Extract negative examples from bad_cases_for_complex.md.
-
-    ``<example> -- <reason>`` lines and bare example lines both count;
-    annotation notes (以及/看下来/N、 prefixed) are skipped.
-    """
-    cases: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or _ANNOTATION.match(line):
-            continue
-        match = _BAD_CASE.match(line)
-        if match:
-            case = match.group("case").strip()
-            if case:
-                cases.append(case)
-    return tuple(cases)
-
-
 def _require_complete_specs(spec_ids: set[str], taxonomy_ids: set[str], source: str) -> None:
     """templates 是唯一事实源：taxonomy ↔ few_shot spec 必须一一对应，缺失即 fail-loud。
 
@@ -257,13 +239,5 @@ def build_normal_classify_prompt() -> str:
 
 
 def build_verify_prompt(base_prompt: str) -> str:
-    """Append confirmed negative examples to a verify prompt."""
-    cases = parse_bad_cases(_read("bad_cases_for_complex.md"))
-    if not cases:
-        return base_prompt
-    block = "\n".join(f"- {case}" for case in cases)
-    return (
-        base_prompt
-        + "\n\n以下问句已被确认为不复杂（负例，判定时参照，不要与之冲突）：\n"
-        + block
-    )
+    """Append the canonical policy to a complex verification prompt."""
+    return base_prompt + "\n\n---\n\n" + load_complex_quality_policy()

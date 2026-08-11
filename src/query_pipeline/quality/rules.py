@@ -291,6 +291,54 @@ def _dataset_near_duplicate(records: list[dict[str, Any]]) -> tuple[bool, str, l
     return False, f"发现 {len(dropped)} 条近重复问句（实体槽化 token-Jaccard≥{NEAR_DUP_THRESHOLD}）", evidence
 
 
+def semantic_duplicate_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Conservative residual rate from exact canonical semantic signatures.
+
+    Candidate similarity alone is not evidence of duplication, so QC only
+    counts repeated complete signatures here. Production removal still
+    requires the independent pair judge.
+    """
+    groups: dict[str, list[str]] = {}
+    signed = 0
+    for row in records:
+        meta = row.get("meta")
+        signature = meta.get("semantic_signature") if isinstance(meta, dict) else None
+        if not isinstance(signature, dict):
+            continue
+        signed += 1
+        canonical = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        groups.setdefault(canonical, []).append(str(row.get("trace_id") or ""))
+    duplicate_families = [members for members in groups.values() if len(members) > 1]
+    redundant = sum(len(members) - 1 for members in duplicate_families)
+    return {
+        "semantic_signature_rows": signed,
+        "residual_template_families": len(duplicate_families),
+        "residual_template_redundant_rows": redundant,
+        "residual_template_duplicate_rate": redundant / len(records) if records else 0.0,
+    }
+
+
+def _dataset_semantic_duplicate(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
+    metrics = semantic_duplicate_metrics(records)
+    families: dict[str, list[str]] = {}
+    for row in records:
+        meta = row.get("meta")
+        signature = meta.get("semantic_signature") if isinstance(meta, dict) else None
+        if isinstance(signature, dict):
+            canonical = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            families.setdefault(canonical, []).append(str(row.get("trace_id") or ""))
+    evidence = [
+        ", ".join(members[:8]) for members in families.values() if len(members) > 1
+    ][:20]
+    rate = metrics["residual_template_duplicate_rate"]
+    ok = rate <= 0.02
+    detail = (
+        f"残余模板家族 {metrics['residual_template_families']} 个，"
+        f"冗余 {metrics['residual_template_redundant_rows']} 条，占 {rate:.2%}"
+    )
+    return ok, detail, evidence
+
+
 def _dataset_length_outlier(records: list[dict[str, Any]]) -> tuple[bool, str, list[str]]:
     if not records:
         return True, "无记录", []
@@ -366,6 +414,7 @@ def _dataset_unknown_fields(records: list[dict[str, Any]]) -> tuple[bool, str, l
 DATASET_RULES: list[DatasetRule] = [
     DatasetRule("constant_field", _dataset_constant_field),
     DatasetRule("near_duplicate", _dataset_near_duplicate),
+    DatasetRule("semantic_signature_duplicate", _dataset_semantic_duplicate),
     DatasetRule("length_outlier", _dataset_length_outlier),
     DatasetRule("category_skew", _dataset_category_skew),
     DatasetRule("empty_field_rate", _dataset_empty_rate),

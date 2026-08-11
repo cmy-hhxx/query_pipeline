@@ -43,6 +43,7 @@ async def run_judge_stage(
     never persisted (a 500-session checkpoint grew to 91MB before this).
     """
     cfg = ctx.config
+    ctx.path("judge_policy_rejected.jsonl").unlink(missing_ok=True)
     ctx.prune_debug_artifacts("segments.jsonl", "candidates.jsonl", "judged.jsonl")
     if not ctx.sessions:
         ctx.rows = []
@@ -52,11 +53,13 @@ async def run_judge_stage(
                 "candidates": 0,
                 "complex_rows": 0,
                 "normal_rows": 0,
+                "complexity_rejected": 0,
                 "value_rejected": 0,
                 "llm_failed": 0,
                 "empty_sessions": 0,
                 "category_counts": {},
                 "category_counts_normal": {},
+                "complex_feature_counts_initial": {},
             }
         )
         return ctx
@@ -70,11 +73,13 @@ async def run_judge_stage(
                 "candidates": sum(len(v) for v in ctx.candidates.values()),
                 "complex_rows": 0,
                 "normal_rows": 0,
+                "complexity_rejected": 0,
                 "value_rejected": 0,
                 "llm_failed": 0,
                 "empty_sessions": 0,
                 "category_counts": {},
                 "category_counts_normal": {},
+                "complex_feature_counts_initial": {},
             }
         )
         return ctx
@@ -84,6 +89,7 @@ async def run_judge_stage(
     counters: Counter[str] = Counter()
     complex_categories: Counter[str] = Counter()
     normal_categories: Counter[str] = Counter()
+    complex_features: Counter[str] = Counter()
     debug_judged: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
 
@@ -110,11 +116,18 @@ async def run_judge_stage(
             continue
         sess_rows, sess_stats, judged = result
         rows.extend(sess_rows)
-        counters.update({k: v for k, v in sess_stats.items() if k not in ("categories", "categories_normal", "error")})
+        counters.update(
+            {
+                k: v
+                for k, v in sess_stats.items()
+                if k not in ("categories", "categories_normal", "complex_features", "error")
+            }
+        )
         if "error" in sess_stats:
             counters["session_errors"] += 1
         complex_categories.update(sess_stats.get("categories") or {})
         normal_categories.update(sess_stats.get("categories_normal") or {})
+        complex_features.update(sess_stats.get("complex_features") or {})
         debug_judged.extend(judged)
 
     ctx.rows = rows
@@ -127,12 +140,22 @@ async def run_judge_stage(
             "candidates": candidates,
             "complex_rows": counters.get("complex_rows", 0),
             "normal_rows": counters.get("normal_rows", 0),
+            "complexity_rejected": counters.get("complexity_rejected", 0),
             "value_rejected": value_rejected,
+            "value_rejected_no_task": counters.get("value_rejected_no_task", 0),
+            "value_rejected_not_self_contained": counters.get(
+                "value_rejected_not_self_contained", 0
+            ),
+            "value_rejected_template": counters.get("value_rejected_template", 0),
+            "value_rejected_other": counters.get("value_rejected_other", 0),
             "llm_failed": llm_failed,
             "empty_sessions": counters.get("empty_sessions", 0),
             "session_errors": counters.get("session_errors", 0),
             "category_counts": {cid: complex_categories[cid] for cid in sorted(complex_categories)},
             "category_counts_normal": {cid: normal_categories[cid] for cid in sorted(normal_categories)},
+            "complex_feature_counts_initial": {
+                feature: complex_features[feature] for feature in sorted(complex_features)
+            },
         }
     )
     logger.info(
@@ -182,10 +205,13 @@ async def _process_session(
     rows: list[dict[str, Any]] = []
     llm_failed = 0
     value_rejected = 0
+    value_rejection_kinds: Counter[str] = Counter()
     complex_count = 0
     normal_count = 0
     complex_categories: Counter[str] = Counter()
     normal_categories: Counter[str] = Counter()
+    complex_features: Counter[str] = Counter()
+    complexity_rejected = 0
     for j in judged:
         if j is None:  # run_concurrent 兜底网捕获的意外异常（如 cache 磁盘 OSError）
             llm_failed += 1
@@ -195,9 +221,16 @@ async def _process_session(
             continue
         if j.get("dropped") == "value":
             value_rejected += 1
+            value = j.get("value")
+            kind = value.rejection_kind if value is not None else "other"
+            value_rejection_kinds[kind] += 1
+            continue
+        if j.get("dropped") == "complexity_reject":
+            complexity_rejected += 1
             continue
         idx = j["idx"]
-        if j["complexity"].is_complex:
+        complex_features.update(j["complexity"].complex_features)
+        if j["complexity"].admits_hard_for(session.turns[idx].question):
             complex_count += 1
             complex_categories[j["category_id"]] += 1
         else:
@@ -211,6 +244,8 @@ async def _process_session(
                 j["category_id"],
                 j.get("reason"),
                 j["difficulty"],
+                j["complexity"].model_dump(mode="json"),
+                j["value"].model_dump(mode="json"),
             )
         )
 
@@ -226,10 +261,16 @@ async def _process_session(
                 "idx": j.get("idx"),
                 "question": turns[j["idx"]].question[:200] if j.get("idx") is not None else "",
                 "is_valuable": bool(getattr(j.get("value"), "is_valuable", None)),
-                "is_complex": bool(getattr(j.get("complexity"), "is_complex", None)),
+                "value_profile": (
+                    j["value"].model_dump(mode="json") if j.get("value") is not None else None
+                ),
+                "route": getattr(j.get("complexity"), "route", None),
                 "difficulty": j.get("difficulty"),
                 "category_id": j.get("category_id"),
                 "reason": j.get("reason"),
+                "complexity_profile": (
+                    j["complexity"].model_dump(mode="json") if j.get("complexity") is not None else None
+                ),
                 "error": j.get("error"),
             }
         )
@@ -237,10 +278,16 @@ async def _process_session(
         "candidates": len(candidates),
         "complex_rows": complex_count,
         "normal_rows": normal_count,
+        "complexity_rejected": complexity_rejected,
         "value_rejected": value_rejected,
+        **{
+            f"value_rejected_{kind}": count
+            for kind, count in value_rejection_kinds.items()
+        },
         "llm_failed": llm_failed,
         "categories": dict(complex_categories),
         "categories_normal": dict(normal_categories),
+        "complex_features": dict(complex_features),
     }
     return rows, stats, debug
 
@@ -249,6 +296,20 @@ def _write_debug_files(ctx: PipelineContext, judged: list[dict[str, Any]]) -> No
     ctx.work_dir.mkdir(parents=True, exist_ok=True)
     if judged:
         write_jsonl(ctx.path("judged.jsonl"), judged)
+        policy_rejected = [
+            row
+            for row in judged
+            if row.get("route") == "reject"
+            or (
+                isinstance(row.get("value_profile"), dict)
+                and (
+                    row["value_profile"].get("template_severity") == "severe"
+                    or row["value_profile"].get("contains_embedded_prompt") is True
+                )
+            )
+        ]
+        if policy_rejected:
+            write_jsonl(ctx.path("judge_policy_rejected.jsonl"), policy_rejected)
     if ctx.segments:
         seg_records = [
             {"thread_id": tid, "seg_idx": i, "start": seg.start, "end": seg.end, "topic": seg.topic}

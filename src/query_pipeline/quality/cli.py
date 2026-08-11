@@ -15,6 +15,7 @@ from query_pipeline.llm.cache import load_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.logging_setup import logging_session
 from query_pipeline.quality import aggregate, judge as judge_mod, report, rules
+from query_pipeline.quality.gold_gate import evaluate_complex_policy_gold
 from query_pipeline.quality.paths import llm_cache_path, project_root, qc_dir, source_path
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--ratio", type=float, default=0.05, help="LLM 抽样比例（默认 0.05）")
     run.add_argument("--seed", type=int, default=42, help="抽样随机种子（默认 42）")
     run.add_argument("--no-llm", action="store_true", help="跳过 LLM 抽检，只跑规则")
+    run.add_argument(
+        "--gold-gate",
+        action="store_true",
+        help="启用人工 complex 正负例发布闸门（aime/iwencai）",
+    )
     run.add_argument("--model", default="gpt-5.4-mini", help="judge 模型（默认复用管线模型）")
     run.add_argument("--concurrency", type=int, default=64, help="LLM 并发数")
     run.add_argument("--input", type=Path, help="输出 jsonl 路径覆盖（默认 outputs/<dataset>/cleaned_queries.jsonl）")
@@ -109,6 +115,15 @@ def _run_quality(
         aggregate.record_key(row): rules.check_record(row) for row in records
     }
     dataset_rules = rules.run_dataset_rules(records)
+    try:
+        complex_policy_gold = (
+            evaluate_complex_policy_gold(records, args.dataset)
+            if getattr(args, "gold_gate", False)
+            else None
+        )
+    except ValueError as exc:
+        print(f"错误：{exc}")
+        return 1
 
     # 2. LLM sampling (skip with --no-llm)
     judge_results: dict[str, dict[str, Any]] = {}
@@ -133,6 +148,7 @@ def _run_quality(
         ratio=args.ratio,
         seed=args.seed,
         bad_lines=skipped,
+        complex_policy_gold=complex_policy_gold,
     )
 
     write_jsonl(out_dir / "results.jsonl", results)
@@ -161,6 +177,8 @@ def _run_quality(
 
     report.print_terminal(overview)
     print(f"QC 产物目录：{out_dir}")
+    if getattr(args, "gold_gate", False) and not overview["quality_gate"]["passed"]:
+        return 1
     return 0
 
 

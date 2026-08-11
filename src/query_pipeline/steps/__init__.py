@@ -1,7 +1,6 @@
 
 from query_pipeline.pipeline.stages import register
 from query_pipeline.steps.answer_gate_stage import run_answer_gate_stage
-from query_pipeline.steps.simple_gate_stage import run_simple_gate_stage
 from query_pipeline.steps.judge_stage import run_judge_stage
 from query_pipeline.steps.post_stage import run_post_stage
 from query_pipeline.steps.precheck_stage import run_precheck_stage
@@ -16,6 +15,5 @@ register("segment")(run_segment_stage)
 register("rule_gate")(run_rule_gate_stage)
 register("judge")(run_judge_stage)
 register("verify")(run_verify_stage)
-register("simple_gate")(run_simple_gate_stage)
 register("answer_gate")(run_answer_gate_stage)
 register("post")(run_post_stage)

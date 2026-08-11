@@ -38,7 +38,9 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(dropped[1]["dedup_of_trace_id"], "r1")
         self.assertEqual(dropped[0]["similarity"], 1.0)
         self.assertGreaterEqual(dropped[1]["similarity"], 0.8)
-        self.assertEqual(dropped[0]["method"], "template_merge")  # identical skeleton group
+        # 共享长表达不再由确定性层直接删除；这里由相同归一化骨架合并。
+        self.assertEqual(dropped[0]["method"], "template_merge")
+        self.assertEqual(dropped[1]["method"], "token_jaccard")
 
     def test_near_duplicate_survives_high_threshold(self) -> None:
         kept, dropped = dedup_rows([_row(_BASE, "r1"), _row(_NEAR, "r2")], DedupConfig(threshold=0.99))
@@ -54,6 +56,49 @@ class DedupTest(unittest.TestCase):
     def test_empty_text_never_dropped(self) -> None:
         rows = [_row("", "r1"), _row("", "r2"), _row("   ", "r3")]
         kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(dropped, [])
+
+    def test_template_phrase_english_family_is_not_deleted_without_review(self) -> None:
+        suffix = "use capex = PaymentsToAcquirePropertyPlantAndEquipment from the SEC 10-K."
+        rows = [
+            _row(f"Did Rambus improve asset productivity in FY2024? Calculate revenue growth for FY2023 and FY2024. {suffix}", "r1"),
+            _row(f"Did Semtech improve cash generation in FY2024? Calculate OCF margin for FY2023 and FY2024. {suffix}", "r2"),
+            _row(f"Did Qorvo improve gross margin in FY2024? Calculate gross margin for FY2023 and FY2024. {suffix}", "r3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(dropped, [])
+
+    def test_template_phrase_chinese_family_is_not_deleted_without_review(self) -> None:
+        prefix = "请以专业分析师身份，从近一个月的基本面、财务、估值、风险，对比一下"
+        rows = [
+            _row(prefix + "华海清科 和中芯国际", "c1"),
+            _row(prefix + "科森科技 和福瑞医科", "c2"),
+            _row(prefix + "太辰光 和巨人网络", "c3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(dropped, [])
+
+    def test_template_phrase_below_threshold_kept(self) -> None:
+        suffix = "use capex = PaymentsToAcquirePropertyPlantAndEquipment from the SEC 10-K."
+        rows = [
+            _row(f"Did Rambus improve asset productivity? {suffix}", "r1"),
+            _row(f"Did Semtech improve cash generation? {suffix}", "r2"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig())
+        self.assertEqual([row["trace_id"] for row in kept], ["r1", "r2"])
+        self.assertEqual(dropped, [])
+
+    def test_template_phrase_disabled(self) -> None:
+        suffix = "use capex = PaymentsToAcquirePropertyPlantAndEquipment from the SEC 10-K."
+        rows = [
+            _row(f"Did Rambus improve asset productivity? {suffix}", "r1"),
+            _row(f"Did Semtech improve cash generation? {suffix}", "r2"),
+            _row(f"Did Qorvo improve gross margin? {suffix}", "r3"),
+        ]
+        kept, dropped = dedup_rows(rows, DedupConfig(phrase_dedup_enabled=False))
         self.assertEqual(len(kept), 3)
         self.assertEqual(dropped, [])
 
@@ -292,7 +337,10 @@ class BlockingScaleTest(unittest.TestCase):
                 rows.append(_row(f"帮我分析一下{e}的走势，{unique}和技术面给出操作建议", f"t{t}_{e}"))
         self.assertEqual(len(rows), 100_000)
         start = time.monotonic()
-        kept, dropped = dedup_rows(rows, DedupConfig(enabled=True, threshold=0.80))
+        # 本测试只隔离确定性模板/Jaccard 层；语料级共享表达复核在 Verify 中单独测试。
+        kept, dropped = dedup_rows(
+            rows, DedupConfig(enabled=True, threshold=0.80, phrase_dedup_enabled=False)
+        )
         elapsed = time.monotonic() - start
         # each 10-variant template group keeps 1 representative
         self.assertEqual(len(kept), 10_000)

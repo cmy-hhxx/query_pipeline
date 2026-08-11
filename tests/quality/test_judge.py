@@ -69,10 +69,15 @@ class FakeJudgeClient:
         payload = json.loads(user_prompt.split("\n", 1)[1])
         if payload["question"].startswith("今天"):
             return json.dumps(
-                {"question_quality": "high", "label_ok": True, "reason": "清晰完整"}
+                {
+                    "question_quality": "high",
+                    "label_ok": True,
+                    "difficulty_ok": True,
+                    "reason": "清晰完整",
+                }
             )
         return json.dumps(
-            {"question_quality": "low", "label_ok": False, "reason": "低质"}
+            {"question_quality": "low", "label_ok": False, "difficulty_ok": False, "reason": "低质"}
         )
 
 class JudgeTest(unittest.TestCase):
@@ -202,7 +207,7 @@ class JudgeTest(unittest.TestCase):
             cache_path = Path(tmp) / "llm_cache.jsonl"
             client = self._client()
             system_prompt = build_judge_system_prompt()
-            model = client.config.model
+            model = getattr(client.config, "model")
             user_prompt = build_judge_user_prompt(records[0])
             cache_key = make_cache_key(user_prompt, step=judge_mod.QC_STEP, model=model, prompt=system_prompt)
             cache = {cache_key: {"question_quality": "bogus", "label_ok": True, "reason": ""}}
@@ -217,4 +222,3 @@ class JudgeTest(unittest.TestCase):
             self.assertIsNone(verdicts[0]["error"])  # 重调后正常判定
             self.assertEqual(client.calls, 1)  # 缓存被驱逐并重新调用
             self.assertEqual(cache[cache_key]["question_quality"], "high")  # 新 label 已写入
-

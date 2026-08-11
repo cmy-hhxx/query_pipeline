@@ -19,6 +19,7 @@ from query_pipeline.quality.prompts import QC_STEP, build_judge_system_prompt, b
 class JudgeResult(BaseModel):
     question_quality: str
     label_ok: bool
+    difficulty_ok: bool
     reason: str = ""
 
     @field_validator("question_quality")
@@ -73,6 +74,7 @@ async def judge_one(
                 {
                     "question_quality": parsed.question_quality,
                     "label_ok": parsed.label_ok,
+                    "difficulty_ok": parsed.difficulty_ok,
                     "reason": parsed.reason,
                 },
                 meta={"step": QC_STEP, "model": model, "trace_id": trace_id},
@@ -82,6 +84,7 @@ async def judge_one(
             "trace_id": key,
             "question_quality": parsed.question_quality,
             "label_ok": parsed.label_ok,
+            "difficulty_ok": parsed.difficulty_ok,
             "reason": parsed.reason,
             "error": None,
         }
@@ -90,6 +93,7 @@ async def judge_one(
             "trace_id": key,
             "question_quality": None,
             "label_ok": None,
+            "difficulty_ok": None,
             "reason": "",
             "error": str(exc)[:200],
         }
@@ -130,6 +134,7 @@ async def run_llm_judge(
             "trace_id": record_key(row),
             "question_quality": None,
             "label_ok": None,
+            "difficulty_ok": None,
             "reason": "",
             "error": "judge 意外失败（run_concurrent 兜底网）",
         }

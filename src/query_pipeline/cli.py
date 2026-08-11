@@ -35,9 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--min-tool-calls", type=int, default=None, help="rule_gate 工具调用数门槛（默认 session 7 / chat 3）")
     run_parser.add_argument("--min-unique-tools", type=int, default=None, help="rule_gate 工具种数门槛（默认 session 2 / chat 2）")
     run_parser.add_argument("--no-reject-rules", action="store_true", help="关闭 reject 规则")
-    run_parser.add_argument("--verify-rounds", type=int, default=None, help="hard 复杂问句 verify 轮数（默认 5）")
-    run_parser.add_argument("--verify-rounds-normal", type=int, default=None, help="normal 问句 verify 轮数（默认 2）")
-    run_parser.add_argument("--dedup-threshold", type=float, default=None, help="去重 Jaccard 阈值（默认 0.80）")
+    run_parser.add_argument("--verify-rounds", type=int, default=None, help="hard 复杂问句严格复核轮数（默认 1）")
+    run_parser.add_argument("--dedup-mode", choices=("semantic", "lexical"), default="semantic", help="去重模式（默认 semantic）")
+    run_parser.add_argument("--semantic-dedup-threshold", type=float, default=None, help="语义签名候选阈值（默认 0.60）")
+    run_parser.add_argument("--max-dedup-candidates", type=int, default=20, help="每行最多语义去重候选数（默认 20）")
+    run_parser.add_argument("--dedup-threshold", type=float, default=None, help="lexical 回退 Jaccard 阈值（默认 0.80）")
     run_parser.add_argument("--api-key", default=None, help="OPENAI_API_KEY 覆盖（默认读 .env）")
     run_parser.add_argument("--base-url", default=None, help="OPENAI_BASE_URL 覆盖（默认读 .env）")
     _add_log_args(run_parser)
@@ -62,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
         "audit", help="对 complex_queries 输出做严格复核（独立 LLM），报告非复杂占比"
     )
     audit_parser.add_argument("input", help="complex_queries.jsonl 路径")
-    audit_parser.add_argument("--max-ratio", type=float, default=0.05, help="非复杂率阈值（默认 5%%，超出则退出码 1）")
+    audit_parser.add_argument("--max-ratio", type=float, default=0.02, help="非复杂争议率阈值（默认 2%%，超出则退出码 1）")
     audit_parser.add_argument("--max-error-ratio", type=float, default=0.0, help="无法判定行占比阈值（默认 0：任何一行判定失败即 FAIL；独立于非复杂率）")
     audit_parser.add_argument("--model", default="gpt-5.4-mini")
     audit_parser.add_argument("--concurrency", type=int, default=64)
@@ -82,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
             concurrency=args.concurrency,
             stages=stages,
             post_enabled=not args.no_post,
+            dedup_mode=args.dedup_mode,
+            semantic_dedup_threshold=args.semantic_dedup_threshold,
+            max_dedup_candidates=args.max_dedup_candidates,
             work_dir=args.work_dir,
             log_dir=args.log_dir,
             batch_id=args.batch_id,
@@ -92,7 +97,6 @@ def main(argv: list[str] | None = None) -> int:
             min_unique_tools=args.min_unique_tools,
             reject_rules=not args.no_reject_rules,
             verify_rounds_hard=args.verify_rounds,
-            verify_rounds_normal=args.verify_rounds_normal,
             api_key=args.api_key,
             base_url=args.base_url,
             verbose=args.verbose,

@@ -1,8 +1,8 @@
 # docs/html — 架构说明页（模块化拆分版）
 
 `query-cleaning-pipeline.html` 是 query_pipeline 清洗标注管线的单页架构说明：
-8 阶段流程（preclean → segment → rule_gate → judge → verify → simple_gate → answer_gate → post）、
-输出去向、真实运行数据漏斗、双分类体系（复杂 9 类 + 普通 16 类）与全部生产提示词（9 个面板）。
+8 阶段流程（precheck → preclean → segment → rule_gate → judge → verify → answer_gate → post）、
+输出去向、真实运行数据漏斗、双分类体系（复杂 9 类 + 普通 16 类）与全部生产提示词（10 个面板）。
 本目录把单文件拆成模块化部件，由构建脚本拼装回离线自包含的单页。
 
 ## 目录结构
@@ -34,8 +34,8 @@ docs/html/
 
 提示词面板**不手写**：`build.py` 构建时直接导入运行时
 `query_pipeline.prompts`（惰性构建，读 `templates/*.md` 并做 fail-loud 校验），
-生成全部 9 个面板（segment / value_gate / complexity_gate / complex_judge /
-classify_complex / classify_normal / verify_complex / verify_recheck /
+生成全部 10 个面板（segment / value_gate / complexity_gate / classify_complex /
+classify_normal / verify_complex / verify_recheck / template_family / dedup_pair /
 translate）——页面展示的提示词与代码永远同步。
 
 ## 构建

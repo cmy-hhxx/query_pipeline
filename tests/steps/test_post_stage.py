@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]  # repo root (tests/steps/ -> project
 from query_pipeline.config.loader import load_pipeline_config
 from query_pipeline.io.jsonl import read_jsonl, write_jsonl
 from query_pipeline.pipeline.runner import run_pipeline
+from tests._profiles import complexity_label, verify_label
 
 def _row(text: str, trace_id: str) -> dict[str, Any]:
     return {
@@ -92,20 +93,42 @@ class FakePipelineLLMClient:
             return json.dumps({"category_id": "03", "reason": "普通归类"}, ensure_ascii=False)
         if "current_question" in payload:  # complexity gate
             if payload["current_question"] == self.COMPLEX:
-                return json.dumps({"is_complex": True, "reason": "需要预测"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "reason": "简单查询"}, ensure_ascii=False)
+                return json.dumps(
+                    complexity_label(
+                        True, reason="需要预测", goal=payload["current_question"]
+                    ),
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                complexity_label(
+                    False, reason="简单查询", goal=payload["current_question"]
+                ),
+                ensure_ascii=False,
+            )
         if "简单问句识别器" in system_prompt:  # simple_finder 视角
             return json.dumps({"is_simple": False, "reason": "不是简单问句"}, ensure_ascii=False)
         if "question" in payload:  # pass-2 verify (standalone)
             if payload["question"] == self.COMPLEX:
-                return json.dumps({"is_complex": True, "reason": "独立成立"}, ensure_ascii=False)
-            return json.dumps({"is_complex": False, "reason": "独立不成立"}, ensure_ascii=False)
+                return json.dumps(
+                    verify_label(True, reason="独立成立", evidence_quote=payload["question"]),
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                verify_label(False, reason="独立不成立", evidence_quote=payload["question"]),
+                ensure_ascii=False,
+            )
         return json.dumps({"translation": "利率上升如何影响债券价格？"}, ensure_ascii=False)
 
     async def close(self) -> None:
         return None
 
-def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    post_enabled: bool = True,
+    dedup_enabled: bool = True,
+    dedup_mode: str = "semantic",
+) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         textwrap.dedent(
@@ -137,7 +160,8 @@ def _write_config(tmp_path: Path, *, post_enabled: bool = True) -> Path:
             post:
               enabled: {str(post_enabled).lower()}
               dedup:
-                enabled: true
+                enabled: {str(dedup_enabled).lower()}
+                mode: {dedup_mode}
                 threshold: 0.80
                 entity_slot: true
               translate:
@@ -190,7 +214,7 @@ class PostStagePipelineTest(unittest.TestCase):
 
             self.assertEqual(summary.stats["complex_rows"], 2)  # judged hard rows
             self.assertEqual(summary.stats["output_rows"], 1)  # post-dedup
-            self.assertEqual(summary.stats["verify_kept"], 2)
+            self.assertEqual(summary.stats["verify_complex_kept"], 1)
             self.assertEqual(summary.stats["dedup_removed"], 1)
             self.assertEqual(summary.stats["translated"], 1)
             self.assertEqual(summary.stats["translate_skipped"], 0)
@@ -213,19 +237,70 @@ class PostStagePipelineTest(unittest.TestCase):
     def test_post_stage_disabled_no_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            write_jsonl(tmp_path / "input.jsonl", [{"thread_id": "t1", "context": _turns("s1")}])
+            write_jsonl(
+                tmp_path / "input.jsonl",
+                [
+                    {"thread_id": "t1", "context": _turns("s1")},
+                    {"thread_id": "t2", "context": _turns("s2")},
+                ],
+            )
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
             with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertEqual(summary.stats["complex_rows"], 1)
+            self.assertEqual(summary.stats["complex_rows"], 2)
             self.assertEqual(summary.stats["dedup_removed"], 0)  # post disabled
             rows = list(read_jsonl(tmp_path / "out" / "cleaned_queries.jsonl"))
-            self.assertEqual(
-                rows[0]["meta"], {"reason": "需要预测", "request_time": "2026-08-05 04:01:00", "run_id": "s1r1", "last_event_type": None}
-            )  # post stage 不再触碰 meta
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["meta"]["reason"], "需要预测")
+            self.assertIn("complexity_profile", rows[0]["meta"])
+            self.assertIn("semantic_signature", rows[0]["meta"])
             self.assertIsNone(rows[0]["translation"])  # 中文原文 → null（post 关闭时亦然）
+
+    def test_dedup_disabled_keeps_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            write_jsonl(
+                tmp_path / "input.jsonl",
+                [
+                    {"thread_id": "t1", "context": _turns("s1")},
+                    {"thread_id": "t2", "context": _turns("s2")},
+                ],
+            )
+            cfg = load_pipeline_config(_write_config(tmp_path, dedup_enabled=False))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertEqual(summary.stats["dedup_removed"], 0)
+            self.assertNotIn("verify_corpus_review_done", summary.stats)
+            self.assertEqual(
+                len(list(read_jsonl(tmp_path / "out" / "cleaned_queries.jsonl"))),
+                2,
+            )
+
+    def test_lexical_mode_skips_semantic_verify_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            write_jsonl(
+                tmp_path / "input.jsonl",
+                [
+                    {"thread_id": "t1", "context": _turns("s1")},
+                    {"thread_id": "t2", "context": _turns("s2")},
+                ],
+            )
+            cfg = load_pipeline_config(_write_config(tmp_path, dedup_mode="lexical"))
+
+            with patch("query_pipeline.pipeline.runner.LLMClient", FakePipelineLLMClient):
+                summary = run_pipeline(cfg)
+
+            self.assertNotIn("verify_corpus_review_done", summary.stats)
+            self.assertEqual(summary.stats["dedup_removed"], 1)
+            self.assertEqual(
+                len(list(read_jsonl(tmp_path / "out" / "cleaned_queries.jsonl"))),
+                1,
+            )
 
 if __name__ == "__main__":
     unittest.main()

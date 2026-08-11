@@ -12,6 +12,10 @@
     </div>
     <ol class="flow-main">
       <li class="flow-node code">
+        <strong>数据预检</strong>
+        <small>结构 · chain 覆盖率</small>
+      </li>
+      <li class="flow-node code">
         <strong>输入清洗</strong>
         <small>格式对齐 · 去重</small>
       </li>
@@ -32,10 +36,6 @@
         <small>LLM · 级联从严</small>
       </li>
       <li class="flow-node code">
-        <strong>简单问句</strong>
-        <small>短决策/承接</small>
-      </li>
-      <li class="flow-node code">
         <strong>质量门</strong>
         <small>完整性/拒/截</small>
       </li>
@@ -54,9 +54,6 @@
       </div>
       <div class="flow-branch branch-verify">
         <span class="branch-label"><b>复判相悖</b>丢弃</span>
-      </div>
-      <div class="flow-branch branch-simple">
-        <span class="branch-label"><b>短决策 / 承接</b>丢弃</span>
       </div>
       <div class="flow-branch branch-answer">
         <span class="branch-label"><b>回答不合格</b>丢弃</span>
@@ -88,6 +85,15 @@
       <span>步骤</span>
       <span>方式</span>
       <span>做什么</span>
+    </div>
+
+    <div class="step-card">
+      <div class="step-card-head">
+        <span class="step-num">precheck</span>
+        <span class="step-name">数据预检</span>
+      </div>
+      <div class="step-tags"><span class="stage-tag code">规则</span></div>
+      <div class="step-rule">在创建 LLM 客户端前检查坏行比例、合格 turn 和 chain 覆盖率；严重结构问题立即中止。</div>
     </div>
 
     <div class="step-card">
@@ -133,15 +139,6 @@
       </div>
       <div class="step-tags"><span class="stage-tag llm">LLM</span></div>
       <div class="step-rule">换一个独立视角再判一次；带前文指代复核；任何一轮与首次判定相悖即丢弃。</div>
-    </div>
-
-    <div class="step-card">
-      <div class="step-card-head">
-        <span class="step-num">simple_gate</span>
-        <span class="step-name">简单问句</span>
-      </div>
-      <div class="step-tags"><span class="stage-tag code">规则</span></div>
-      <div class="step-rule">只查 hard 行：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。</div>
     </div>
 
     <div class="step-card">

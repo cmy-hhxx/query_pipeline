@@ -1,0 +1,7 @@
+{"id":"entity_swap","left":"回测贵州茅台突破20日均线买入跌破卖出的策略","right":"回测宁德时代突破20日均线买入跌破卖出的策略","expected":"template_duplicate"}
+{"id":"date_swap","left":"统计2020年至2024年涨停后次日收益分布","right":"统计2018年至2022年涨停后次日收益分布","expected":"template_duplicate"}
+{"id":"threshold_swap","left":"筛选市盈率低于15且换手率高于3%的股票","right":"筛选市盈率低于20且换手率高于5%的股票","expected":"template_duplicate"}
+{"id":"count_swap","left":"找3只满足条件的主板股票","right":"找10只满足条件的主板股票","expected":"template_duplicate"}
+{"id":"strategy_change","left":"回测突破20日均线买入跌破卖出的策略","right":"回测MACD金叉买入死叉卖出的策略","expected":"distinct"}
+{"id":"operation_change","left":"筛选近20日出现过涨停的股票","right":"回测买入近20日出现过涨停股票的策略","expected":"distinct"}
+{"id":"output_change","left":"统计涨停后次日收益分布","right":"解释涨停后次日高开的主要原因","expected":"distinct"}

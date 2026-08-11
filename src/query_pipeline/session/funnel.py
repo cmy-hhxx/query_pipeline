@@ -8,17 +8,24 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, ClassVar
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
 from openai import APIStatusError
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from query_pipeline.config.models import LLMConfig
 from query_pipeline.llm.cache import make_cache_key, put_cache
 from query_pipeline.llm.client import LLMClient
 from query_pipeline.models.session import parse_json_object
+from query_pipeline.models.complexity import (
+    ComplexFeature,
+    ComplexRoute,
+    ExclusionReason,
+    PolicyEvidence,
+    evidence_is_grounded,
+)
 from query_pipeline.prompts import resolve_prompt
 from query_pipeline.session.judge import build_judge_payload
 from query_pipeline.taxonomy import load_taxonomy
@@ -27,26 +34,129 @@ from query_pipeline.models.turn import Turn
 
 class ValueResult(BaseModel):
     is_valuable: bool
+    has_executable_task: bool = True
+    self_contained: bool = True
+    template_severity: Literal["none", "light", "severe"] = "none"
+    contains_embedded_prompt: bool = False
     reason: str | None = None
+
+    @property
+    def admissible(self) -> bool:
+        """Semantic value admission; no keyword or length heuristics."""
+        return (
+            self.is_valuable
+            and self.has_executable_task
+            and self.self_contained
+            and self.template_severity != "severe"
+            and not self.contains_embedded_prompt
+        )
+
+    @property
+    def rejection_kind(self) -> str:
+        if self.contains_embedded_prompt or self.template_severity == "severe":
+            return "template"
+        if not self.has_executable_task:
+            return "no_task"
+        if not self.self_contained:
+            return "not_self_contained"
+        return "other"
+
+
+class SemanticSignature(BaseModel):
+    """Entity/value-independent description of the task's reasoning program."""
+
+    goal: str
+    subject_type: str
+    operations: list[str] = Field(default_factory=list)
+    data_dimensions: list[str] = Field(default_factory=list)
+    temporal_shape: str
+    output_shape: list[str] = Field(default_factory=list)
+
+    @field_validator("goal", "subject_type", "temporal_shape")
+    @classmethod
+    def validate_scalar(cls, value: str) -> str:
+        text = value.strip().lower()
+        if not text:
+            raise ValueError("semantic signature scalar fields must be non-empty")
+        return text
+
+    @field_validator("operations", "data_dimensions", "output_shape")
+    @classmethod
+    def normalize_list(cls, value: list[str]) -> list[str]:
+        # 排序+去重让同一语义签名稳定序列化；实体/数字由 prompt 负责不写入。
+        return sorted(set(value))
 
 
 class ComplexityResult(BaseModel):
-    is_complex: bool
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    route: ComplexRoute
+    complex_features: list[ComplexFeature] = Field(default_factory=list)
+    exclusion_reasons: list[ExclusionReason] = Field(default_factory=list)
+    evidence: list[PolicyEvidence] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"]
+    question_quality: Literal["low", "medium", "high"]
+    semantic_signature: SemanticSignature
     reason: str | None = None
+
+    @field_validator("complex_features", "exclusion_reasons")
+    @classmethod
+    def normalize_policy_lists(cls, value: list[Any]) -> list[Any]:
+        return sorted(set(value))
+
+    @model_validator(mode="after")
+    def validate_route_consistency(self) -> "ComplexityResult":
+        criteria = {item.criterion for item in self.evidence}
+        required = set(self.complex_features) | set(self.exclusion_reasons)
+        if criteria != required:
+            raise ValueError("evidence criteria must exactly match features/exclusions")
+        if self.route == "complex":
+            if not self.complex_features or self.exclusion_reasons:
+                raise ValueError("complex route requires features and forbids exclusions")
+            if self.confidence == "low" or self.question_quality == "low":
+                raise ValueError("low confidence/quality cannot route to complex")
+        elif self.route == "normal":
+            if self.complex_features or not self.exclusion_reasons:
+                raise ValueError("normal route requires exclusions and forbids complex features")
+            if set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
+                raise ValueError("template/prompt exclusions must route to reject")
+        else:
+            if self.complex_features:
+                raise ValueError("reject route forbids complex features")
+            if not set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
+                raise ValueError("reject route requires eval_template or embedded_prompt")
+        return self
+
+    @property
+    def admissible_hard(self) -> bool:
+        """Business-policy hard admission before source quote containment."""
+        return self.route == "complex"
+
+    def admits_hard_for(self, question: str) -> bool:
+        return self.admissible_hard and self.evidence_is_grounded_for(question)
+
+    def evidence_is_grounded_for(self, question: str) -> bool:
+        return evidence_is_grounded(self.evidence, question)
 
 
 class ClassifyResult(BaseModel):
     category_id: str
-    reason: str | None = None
-
-    OTHER: ClassVar[str] = "other"
+    reason: str
 
     @field_validator("category_id")
     @classmethod
     def validate_category_id(cls, value: str) -> str:
-        if value != ClassifyResult.OTHER and value not in load_taxonomy().complex and value not in load_taxonomy().normal:
+        if value not in load_taxonomy().complex and value not in load_taxonomy().normal:
             raise ValueError(f"invalid category_id: {value}")
         return value
+
+    @field_validator("reason")
+    @classmethod
+    def validate_classify_reason(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("classify reason must be non-empty")
+        return text
 
 
 def _as_dict(raw: str | dict[str, Any]) -> dict[str, Any]:
@@ -66,7 +176,10 @@ def parse_complexity_response(raw: str | dict[str, Any]) -> ComplexityResult:
 
 def parse_classify_response(raw: str | dict[str, Any]) -> ClassifyResult:
     data = _as_dict(raw)
-    return ClassifyResult(category_id=str(data.get("category_id") or ""), reason=data.get("reason"))
+    return ClassifyResult(
+        category_id=str(data.get("category_id") or ""),
+        reason=str(data.get("reason") or ""),
+    )
 
 
 async def _call(
@@ -128,30 +241,55 @@ async def funnel_candidate(
 
     segment = segment_of(segments, idx)
     payload = build_judge_payload(turns, segment, idx)
+    current_only_payload = {"current_question": payload["current_question"]}
+
+    def parse_grounded_complexity(raw: str | dict[str, Any]) -> ComplexityResult:
+        parsed = parse_complexity_response(raw)
+        if not parsed.evidence_is_grounded_for(current_only_payload["current_question"]):
+            raise ValueError("complexity evidence quote must be copied from current_question")
+        return parsed
+
     try:
         value = await _call(
             client, llm_cfg, cache, cache_path, cache_lock,
-            step="value_gate", prompt_id="value_gate", payload=payload, parse=parse_value_response,
+            step="value_gate", prompt_id="value_gate", payload=current_only_payload,
+            parse=parse_value_response,
         )
-        if not value.is_valuable:
+        if not value.admissible:
             return {"idx": idx, "value": value, "dropped": "value", "error": None}
         complexity = await _call(
             client, llm_cfg, cache, cache_path, cache_lock,
-            step="complexity_gate", prompt_id="complexity_gate", payload=payload, parse=parse_complexity_response,
+            step="complexity_gate", prompt_id="complexity_gate", payload=current_only_payload,
+            parse=parse_grounded_complexity,
         )
-        if complexity.is_complex:
+        if complexity.route == "reject":
+            return {
+                "idx": idx,
+                "value": value,
+                "complexity": complexity,
+                "dropped": "complexity_reject",
+                "error": None,
+            }
+        if complexity.admits_hard_for(current_only_payload["current_question"]):
             classify = await _call(
                 client, llm_cfg, cache, cache_path, cache_lock,
-                step="classify_complex", prompt_id="classify_complex", payload=payload, parse=parse_classify_response,
+                step="classify_complex", prompt_id="classify_complex",
+                payload=current_only_payload, parse=parse_classify_response,
             )
-            if classify.category_id == ClassifyResult.OTHER:
-                raise ValueError("classify_complex returned 'other' — complex taxonomy has no fallback")
+            if classify.category_id not in load_taxonomy().complex:
+                raise ValueError(
+                    f"classify_complex returned invalid complex category {classify.category_id!r}"
+                )
             difficulty = "hard"
         else:
             classify = await _call(
                 client, llm_cfg, cache, cache_path, cache_lock,
                 step="classify_normal", prompt_id="classify_normal", payload=payload, parse=parse_classify_response,
             )
+            if classify.category_id not in load_taxonomy().normal:
+                raise ValueError(
+                    f"classify_normal returned invalid normal category {classify.category_id!r}"
+                )
             difficulty = "normal"
         return {
             "idx": idx,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import unittest
 
+from tests._profiles import complexity_label
+
 from query_pipeline.models.session import Segment, parse_segment_response
 from query_pipeline.session.segment import _segments_from_cache
 
@@ -91,13 +93,12 @@ class SegmentParserTest(unittest.TestCase):
         self.assertTrue(valuable.is_valuable)
 
         complex_result = parse_complexity_response(
-            json.dumps({"is_complex": True, "reason": "需要多步分析"}, ensure_ascii=False)
+            json.dumps(complexity_label(True, reason="需要多步分析"), ensure_ascii=False)
         )
-        self.assertTrue(complex_result.is_complex)
+        self.assertEqual(complex_result.route, "complex")
 
         classified = parse_classify_response(json.dumps({"category_id": "03", "reason": "需要多步分析"}, ensure_ascii=False))
         self.assertEqual(classified.category_id, "03")
 
         with self.assertRaises(ValueError):
             parse_classify_response(json.dumps({"category_id": "99", "reason": "x"}))
-

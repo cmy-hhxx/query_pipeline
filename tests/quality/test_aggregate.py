@@ -69,9 +69,9 @@ class AggregateTest(unittest.TestCase):
         per_record = {aggregate.record_key(r): check_record(r) for r in records}
         sample_set = {k[t] for t in ("low", "err", "ok")}
         judge_results = {
-            k["low"]: {"trace_id": k["low"], "question_quality": "low", "label_ok": False, "reason": "低质", "error": None},
-            k["err"]: {"trace_id": k["err"], "question_quality": None, "label_ok": None, "reason": "", "error": "boom"},
-            k["ok"]: {"trace_id": k["ok"], "question_quality": "high", "label_ok": True, "reason": "好", "error": None},
+            k["low"]: {"trace_id": k["low"], "question_quality": "low", "label_ok": False, "difficulty_ok": False, "reason": "低质", "error": None},
+            k["err"]: {"trace_id": k["err"], "question_quality": None, "label_ok": None, "difficulty_ok": None, "reason": "", "error": "boom"},
+            k["ok"]: {"trace_id": k["ok"], "question_quality": "high", "label_ok": True, "difficulty_ok": True, "reason": "好", "error": None},
         }
         results = aggregate.build_results(records, per_record, sample_set, judge_results)
         by_status = {r["trace_id"]: r["status"] for r in results}
@@ -125,4 +125,3 @@ class AggregateTest(unittest.TestCase):
         self.assertEqual(overview["status_counts"]["pass"], 1)
         self.assertEqual(len(overview["flagged"]), 1)
         self.assertEqual(overview["flagged"][0]["trace_id"], "t2")
-

@@ -27,7 +27,7 @@ LLM 阶段；整体缺 chain 的输入（如上游导出不完整）会被拦下
 输入可 `--allow-no-chain`，或 `--skip-precheck` 整体跳过。
 
 常用旋钮：`--min-tool-calls`、`--min-unique-tools`、`--no-reject-rules`、
-`--verify-rounds`、`--dedup-threshold`、`--model`、`--concurrency`、
+`--verify-rounds`、`--dedup-mode`、`--semantic-dedup-threshold`、`--model`、`--concurrency`、
 `--api-key/--base-url`（覆盖 .env）、`--skip-precheck`、`--allow-no-chain`。
 
 Python API（最少参数，其余全部默认）：
@@ -53,7 +53,7 @@ JSONL，一行一条，格式**自动识别**（`format: auto`，可显式覆盖
 ## 流程（stage 可插拔，默认顺序）
 
 ```
-precheck → preclean → segment → rule_gate → judge → verify → simple_gate → answer_gate → post
+precheck → preclean → segment → rule_gate → judge → verify → answer_gate → post
 ```
 
 每个阶段是注册的模块（`register("name")(stage_fn)`），`--stages` / config 可自定义顺序。新增类别 = 改 `templates/` 下的 md；新增阶段 = 实现 `(ctx, client, cache, cache_lock) -> ctx` 并注册。
@@ -62,23 +62,22 @@ precheck → preclean → segment → rule_gate → judge → verify → simple_
 2. **preclean**：格式嗅探 + 坏行落盘 + 输入去重 + adapt 成统一 Session。
 3. **segment**（session，LLM）：按主题切 2-4 段，失败回退整段。
 4. **rule_gate**（规则，双格式生效）：噪声 reject 规则 + 工具门槛（chain 调用 ≥7（session）/ ≥3（chat，分布平坦，≥7 仅覆盖 ~1%）、步骤 ≥1、工具种 ≥2，阈值按数据可调；未显式设置的旋钮按嗅探到的输入格式补默认）。
-5. **judge**（LLM，解耦漏斗，每个候选 2-3 次调用，失败即弃）：
-   - `value_gate`：是否有价值（有任务非闲聊 / 金融相关 / 不依赖不可见上文），无价值丢弃
-   - `complexity_gate`：是否复杂（二分类，与打标签解耦）
+5. **judge**（LLM，解耦漏斗，每个候选 2-3 次调用；调用失败不发布本批并允许重试）：
+   - `value_gate`：输出 `has_executable_task/self_contained/template_severity/contains_embedded_prompt`。只有无任务、依赖不可见上文或严重提示模板才丢弃；泛泛结论、绝对化目标等仍交复杂度门降为 normal
+   - `complexity_gate`：只接收当前问句，输出 `route/complex_features/exclusion_reasons/evidence/confidence/question_quality/semantic_signature`。自然、非模板化的 3+ 实质条件筛选进入 complex；单点、单条件、榜单、单公式、泛泛建议和绝对化目标进入 normal；严重 eval 模板和嵌入提示词进入 reject
    - `classify`：复杂 → 9 类（`complex-topic/{id}-{slug}`，difficulty=hard）；非复杂 → 16 类（`{id}-{slug}`，difficulty=normal）
-6. **verify**（LLM，带前文问题作指代参考，准入标准不放松）：hard 5 轮 / normal 2 轮（可配），级联从严，任一轮与难度相悖即弃；LLM 失败丢弃（fail-closed）。
-7. **simple_gate**（规则，只查 hard 行）：确定性简单问句模式（短决策 / 单步查数 / 纯显式筛选 / 承接前文）直接拒绝——LLM 判定漂移的兜底；normal 行不动。
-8. **answer_gate**（规则）：`meta.last_event_type` 必须为 `runFinished`（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 拒绝）+ 拒绝话术（中英）+ 截断标点 + 回答过短（<50 字）。
-9. **post**：`dedup`（股票名词典槽化 + 同模板等价类合并 + token-Jaccard ≥ 0.80，倒排阻塞，10 万行秒级）→ `translate`（中文占比 < 30% 才翻译，写 `translation`，原文保留）。
+6. **verify**（语料级 + 单问句 LLM 复核）：先用共享长表达、归一化骨架和语义签名生成模板/重复候选；共享 8 词/8 字符只产候选，族级裁决区分整族拒绝、语义重复保留最佳代表、自然共享表达全部保留。随后只把 `input.text` 交给独立复核：complex 保留，normal 重新走 16 类分类，reject 不输出。normal 初判不反向升级。网络、解析或 normal 分类失败会使整批不发布并等待重试，不会固化成业务标签。
+7. **answer_gate**（规则）：`meta.last_event_type` 必须为 `runFinished`（runCancelled/runInterrupted/runFailed/runExpired/feedbackUpsert 拒绝）+ 拒绝话术（中英）+ 截断标点 + 回答过短（<50 字）。
+8. **post**：Verify 已完成语料级去重时不重复执行；仅在自定义 stage 顺序跳过 Verify 时执行所选去重模式。随后按配置执行翻译。
 
 `llm.enabled=false`：跳过所有 LLM 阶段，只跑规则，输出为空属正常。
 
 ## 输出
 
 - `cleaned_queries.jsonl` — 复杂 + 普通问句一行一条（`difficulty_level` 区分）
-- `summary.json` — 各阶段计数（input/bad/dup/empty、candidates、value_rejected、complex/normal、verify、answer_gate、dedup、translate、category 分布）+ success + logs 路径
+- `summary.json` — `complex_rows/normal_rows/category_counts` 是初判统计；复核口径使用 `verify_complex_kept`、`verify_to_normal`、`verify_rejected_template`、`template_family_rejected`、`duplicate_removed`、`verify_uncertain`、`verify_failed`；另含最终 complex/normal 数量、复杂特征和类别分布
 
-输出行字段：`trace_id`、`source_case_id`、`category`、`input.text`、`context`（前文）、`chain`、`tools`、`raw_answer`/`text_answer`、`request_time_ms`、`translation`、`meta.reason`/`meta.run_id`/`meta.last_event_type`。完整口径见 `templates/filter_out.jsonc`；`meta` 是逃生字段区。
+输出行字段：`trace_id`、`source_case_id`、`category`、`input.text`、`context`（前文）、`chain`、`tools`、`raw_answer`/`text_answer`、`request_time_ms`、`translation`、`meta.reason`/`meta.run_id`/`meta.last_event_type`，以及非破坏性扩展 `meta.complexity_profile` / `meta.semantic_signature`。完整口径见 `templates/filter_out.jsonc`。
 
 ## 日志
 
@@ -113,7 +112,7 @@ logging:
   level: INFO                  # INFO | DEBUG
 ```
 
-`success=false`（退出码 1）：discover 层出错（session_errors > 0、无会话）。llm_failed/verify_failed/translate_failed 为 fail-open（不失败）；输入坏行不失败（记入 summary 与 bad_lines.jsonl）。失败且零输出时不覆盖上次产物。
+`success=false`（退出码 1）：无会话，或 `session_errors`、`llm_failed`、`verify_failed`、`template_family_failed`、`semantic_dedup_failed` 任一非零。输入坏行和翻译失败为 fail-open（记入 summary/诊断文件）；失败批次不发布当前结果，也不覆盖上次产物。
 
 ## 断点续跑
 
@@ -127,12 +126,13 @@ logging:
 
 ```bash
 uv run query-pipeline-qc run --dataset aime --date 0806                 # 规则 + LLM 抽检（默认 5%）
+uv run query-pipeline-qc run --dataset aime --date replay-001 --input /isolated/output/cleaned_queries.jsonl --ratio 1 --gold-gate
 uv run query-pipeline-qc run --dataset aime --date 0806 --no-llm
 ```
 
 QC 产物按日期分目录：`outputs/<数据集>/qc/<date>/`（results.jsonl / overview.json / report.md / sampled.jsonl，同一数据集不同日期互不覆盖）。
 
-逐条规则含：结构、问句长度/乱码、分类（complex-topic/ 前缀校验）、chain、回答非空/截断/**拒绝话术**/**last_event_type**、时间与 token、翻译/理由元信息。数据集级规则含近重复（槽化 Jaccard ≥ 0.85）、类别偏斜、空值率、未知字段。
+逐条规则含：结构、问句长度/乱码、分类（complex-topic/ 前缀校验）、chain、回答非空/截断/**拒绝话术**/**last_event_type**、时间与 token、翻译/理由元信息。LLM 抽检额外给出 `difficulty_ok`；数据集级规则含词面近重复、残余语义签名模板家族、类别偏斜、空值率、未知字段。`overview.quality_gate` 要求 hard 误收率 ≤2%、审计错误率 0、残余模板冗余率 ≤2%；发布回放加 `--ratio 1 --gold-gate`，额外要求人工正例召回 100%、已知负例误入 complex 为 0。
 
 ## 模板（可插拔的数据源）
 
@@ -141,6 +141,6 @@ QC 产物按日期分目录：`outputs/<数据集>/qc/<date>/`（results.jsonl /
 | `templates/categories.md` | 分类体系唯一事实源（复杂 9 类 + 普通 16 类），运行时解析 |
 | `templates/complex_few_shot.md` | 复杂 9 类定义与示例，拼装 classify_complex prompt |
 | `templates/normal_few_shot.md` | 普通 16 类定义/适用/排除/边界/易混，拼装 classify_normal prompt |
-| `templates/bad_cases_for_complex.md` | 已确认的复杂误判负例，注入 verify prompt |
-| `templates/stock_names.txt` | 股票名称词典（槽化去重用），一行一个名称 |
+| `templates/complex_quality_policy.md` | complex/normal/reject 的唯一质量口径，供 judge、verify、audit、QC 共用 |
+| `templates/stock_names.txt` | 股票名称词典（仅 lexical fallback 使用），一行一个名称 |
 | `templates/filter_out.jsonc` | 输出行字段口径参考 |

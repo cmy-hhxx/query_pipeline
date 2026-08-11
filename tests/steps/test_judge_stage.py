@@ -78,9 +78,8 @@ class JudgeStageContractTest(unittest.TestCase):
             "complex_rows": 0,
         }
         self.assertTrue(_run_success(clean))
-        # llm_failed is counted, not fatal (deterministic single-candidate failures
-        # must not block delivery); session-level errors still fail the run.
-        self.assertTrue(_run_success({**clean, "llm_failed": 1}))
+        # Infrastructure failures must not publish a partial batch.
+        self.assertFalse(_run_success({**clean, "llm_failed": 1}))
         self.assertFalse(_run_success({**clean, "session_errors": 1}))
         self.assertFalse(_run_success({**clean, "total_sessions": 0}))
         # Bad input lines never fail a run that still adapted sessions — the old
@@ -89,6 +88,7 @@ class JudgeStageContractTest(unittest.TestCase):
         # total_sessions == 0 覆盖；部分坏行走 fail-open（summary/bad_lines 可审计）。
         self.assertTrue(_run_success({**clean, "input_bad_lines": 10}))
         self.assertTrue(_run_success({**clean, "total_sessions": 5, "input_bad_lines": 5}))
-        # fail-open stages and empty-but-clean output do not fail the run.
-        self.assertTrue(_run_success({**clean, "verify_failed": 1, "translate_failed": 1}))
-
+        # Verify/corpus-review failures block publication; translation remains
+        # fail-open and empty-but-clean output is valid.
+        self.assertFalse(_run_success({**clean, "verify_failed": 1}))
+        self.assertTrue(_run_success({**clean, "translate_failed": 1}))
