@@ -115,19 +115,19 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FakeFailingSessionLLMClient):
                 summary = run_pipeline(cfg)
 
-            self.assertFalse(summary.success)  # judge infrastructure failures are fatal
+            self.assertTrue(summary.success)  # llm_failed / verify_failed 均 fail-open
             # segmentation failure -> whole session is one segment; judge failure on turn1 dropped.
             self.assertEqual(summary.stats["segments"], 1)
             self.assertEqual(summary.stats["complex_rows"], 1)
             self.assertEqual(summary.stats["llm_failed"], 1)
-            # Verify is skipped after the upstream failure; the incomplete
-            # batch is not published and no partial verdict is checkpointed.
-            self.assertEqual(summary.stats["verify_failed"], 0)
+            # llm_failed fail-open：verify 不再跳过，照跑复核幸存行；该 stub 的
+            # verify 抛错 → verify_failed=1 → 该行丢弃、批次照常成功（空输出）。
+            self.assertEqual(summary.stats["verify_failed"], 1)
             self.assertEqual(summary.stats["verify_complex_kept"], 0)
             self.assertEqual(summary.stats["verify_to_normal"], 0)
             self.assertEqual(summary.stats["verify_uncertain"], 0)
             out_path = Path(summary.output_files["cleaned_queries"])
-            self.assertFalse(out_path.exists())
+            self.assertTrue(out_path.exists())
 
     def test_end_to_end_value_gate_rejects_context_only_followups(self) -> None:
         # The value gate (first semantic layer) rejects the context-only
@@ -289,7 +289,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             self.assertEqual(summary.stats["verify_failed"], 1)
             self.assertEqual(summary.stats["verify_to_normal"], 0)
             self.assertEqual(summary.stats["verify_uncertain"], 0)
-            self.assertFalse(summary.success)
+            self.assertTrue(summary.success)  # verify_failed fail-open
             self.assertEqual(
                 client.rounds_called,
                 {
@@ -314,7 +314,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             # flaky question; round 1 and the healthy row replay from llm_cache)
             self.assertEqual(len(clients2[0].calls), 1)
 
-            self.assertFalse(Path(summary.output_files["cleaned_queries"]).exists())
+            self.assertTrue(Path(summary.output_files["cleaned_queries"]).exists())
 
     def _corrupt_cache_entry(self, cache_path: Path, step_prefix: str, label: dict[str, Any]) -> None:
         """把 cache 文件中指定 step 的第一个 label 替换为坏值。"""
@@ -570,7 +570,8 @@ class SessionPipelineContractTest(unittest.TestCase):
 
     def test_unexpected_candidate_error_fails_batch_without_session_crash(self) -> None:
         # 兜底网返回 None（如 cache 磁盘 OSError）：单候选按 llm_failed 计，
-        # debug 推导不得再对 None 崩溃 → 会话不变成 session_error，但批次不得发布。
+        # debug 推导不得再对 None 崩溃 → 会话不变成 session_error；llm_failed
+        # fail-open，批次照常成功（失败候选丢弃、失败数留 summary）。
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             session = {"thread_id": "t1", "context": _sample_turns()}
@@ -582,13 +583,13 @@ class SessionPipelineContractTest(unittest.TestCase):
             ):
                 summary = run_pipeline(cfg)
 
-            self.assertFalse(summary.success)
+            self.assertTrue(summary.success)
             self.assertEqual(summary.stats["session_errors"], 0)
             self.assertGreater(summary.stats["llm_failed"], 0)
 
     def test_api_4xx_in_funnel_drops_candidate_not_session(self) -> None:
         # fix #9 让 4xx 立即抛出；funnel 必须捕获 APIStatusError 按候选失败处理
-        # 并记录 llm_failed；会话不崩溃，但整批不发布并可重试。
+        # 并记录 llm_failed；会话不崩溃，llm_failed fail-open → 批次照常成功。
         import httpx
         from openai import BadRequestError
 
@@ -609,7 +610,7 @@ class SessionPipelineContractTest(unittest.TestCase):
             with patch("query_pipeline.pipeline.runner.LLMClient", FourHundredClient):
                 summary = run_pipeline(cfg)
 
-            self.assertFalse(summary.success)
+            self.assertTrue(summary.success)
             self.assertEqual(summary.stats["session_errors"], 0)
             self.assertEqual(summary.stats["llm_failed"], 2)  # 两个候选均 400 → 丢弃
             self.assertEqual(summary.stats["complex_rows"], 0)

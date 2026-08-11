@@ -12,6 +12,10 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
+# 模型输出是概率性的：解析/校验失败（非 API 错误）重调，避免一次坏输出就 fail-closed 丢候选。
+# 语义上等于"请按契约重新输出"，与 segment 的解析自愈一致。
+PARSE_MAX_ATTEMPTS = 5
+
 from openai import APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,6 +28,7 @@ from query_pipeline.models.complexity import (
     ComplexRoute,
     ExclusionReason,
     PolicyEvidence,
+    clean_policy_fields,
     evidence_is_grounded,
 )
 from query_pipeline.prompts import resolve_prompt
@@ -107,19 +112,21 @@ class ComplexityResult(BaseModel):
     @model_validator(mode="after")
     def validate_route_consistency(self) -> "ComplexityResult":
         criteria = {item.criterion for item in self.evidence}
-        required = set(self.complex_features) | set(self.exclusion_reasons)
-        if criteria != required:
-            raise ValueError("evidence criteria must exactly match features/exclusions")
         if self.route == "complex":
             if not self.complex_features or self.exclusion_reasons:
                 raise ValueError("complex route requires features and forbids exclusions")
             if self.confidence == "low" or self.question_quality == "low":
                 raise ValueError("low confidence/quality cannot route to complex")
+            # 覆盖匹配：每条声明的 feature 都要有对应证据，容忍多余的 evidence
+            # （精确集合相等对模型过于苛刻，任何多/漏都会 fail-closed 丢候选）。
+            if set(self.complex_features) - criteria:
+                raise ValueError("every complex feature requires matching evidence")
         elif self.route == "normal":
             if self.complex_features or not self.exclusion_reasons:
                 raise ValueError("normal route requires exclusions and forbids complex features")
             if set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
                 raise ValueError("template/prompt exclusions must route to reject")
+            # 负向声明（排除原因）不强制证据：路由本身已是权威判定。
         else:
             if self.complex_features:
                 raise ValueError("reject route forbids complex features")
@@ -136,6 +143,9 @@ class ComplexityResult(BaseModel):
         return self.admissible_hard and self.evidence_is_grounded_for(question)
 
     def evidence_is_grounded_for(self, question: str) -> bool:
+        # 只有 complex 的正向声明要求逐字证据；normal/reject 的排除原因为负向声明，不强制。
+        if self.route != "complex":
+            return True
         return evidence_is_grounded(self.evidence, question)
 
 
@@ -171,7 +181,7 @@ def parse_value_response(raw: str | dict[str, Any]) -> ValueResult:
 
 
 def parse_complexity_response(raw: str | dict[str, Any]) -> ComplexityResult:
-    return ComplexityResult.model_validate(_as_dict(raw))
+    return ComplexityResult.model_validate(clean_policy_fields(_as_dict(raw)))
 
 
 def parse_classify_response(raw: str | dict[str, Any]) -> ClassifyResult:
@@ -207,8 +217,21 @@ async def _call(
             # （与 segment 的自愈策略一致）。
             logger.warning("cached %s label invalid, re-calling LLM: %s", step, str(exc)[:120])
             cache.pop(cache_key, None)
-    raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
-    parsed = parse(raw)
+    parsed: Any | None = None
+    for attempt in range(1, PARSE_MAX_ATTEMPTS + 1):
+        raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+        try:
+            parsed = parse(raw)
+            break
+        except (ValueError, RuntimeError) as exc:
+            if attempt == PARSE_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "%s label invalid (attempt %d/%d), re-calling LLM: %s",
+                step, attempt, PARSE_MAX_ATTEMPTS, str(exc)[:120],
+            )
+    # 循环内要么成功赋值要么 raise，不可能走到这里仍为 None
+    assert parsed is not None
     await put_cache(
         cache,
         cache_path,

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import heapq
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+logger = logging.getLogger(__name__)
 
 from query_pipeline.config.models import DedupConfig, LLMConfig
 from query_pipeline.llm.cache import make_cache_key, put_cache
@@ -422,8 +425,13 @@ async def review_template_families(
 def _parse_batch(raw: str, expected_ids: set[str]) -> dict[str, DedupPairVerdict]:
     parsed = DedupBatchVerdicts.model_validate(parse_json_object(raw))
     by_id = {item.id: item for item in parsed.items}
-    if len(by_id) != len(parsed.items) or set(by_id) != expected_ids:
-        raise ValueError("dedup response ids must match the complete input batch")
+    if len(by_id) != len(parsed.items):
+        raise ValueError("dedup response has duplicate ids")
+    missing = expected_ids - set(by_id)
+    if missing:
+        # 模型偶发遗漏个别 pair：缺的按"保留两条"（判不了重复就都保留）处理，
+        # 不让整个 batch 判失败。这是天然的 fail-open。
+        logger.warning("dedup response missing %d pair(s) (%d total), keeping them as distinct", len(missing), len(parsed.items))
     return by_id
 
 

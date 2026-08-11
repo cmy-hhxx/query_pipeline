@@ -67,6 +67,7 @@ def run(
     reject_rules: bool = True,
     api_key: str | None = None,
     base_url: str | None = None,
+    llm_extra_body: dict | None = None,
     verbose: bool = False,
 ) -> dict:
     """Run the cleaning/annotation pipeline with defaults for everything else.
@@ -148,6 +149,7 @@ def run(
             model=model,
             concurrency=concurrency,
             cache=work / "runtime" / "cache" / "llm_cache.jsonl",
+            extra_body=llm_extra_body,
         ),
         post=PostConfig(
             enabled=post_enabled,

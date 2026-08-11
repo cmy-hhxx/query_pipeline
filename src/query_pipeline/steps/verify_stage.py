@@ -18,7 +18,7 @@ from query_pipeline.models.session import parse_verify_payload, parse_verify_res
 from query_pipeline.pipeline.context import PipelineContext
 from query_pipeline.post.dedup import review_template_families, semantic_dedup_rows
 from query_pipeline.prompts import resolve_prompt
-from query_pipeline.session.funnel import _call, parse_classify_response
+from query_pipeline.session.funnel import PARSE_MAX_ATTEMPTS, _call, parse_classify_response
 from query_pipeline.taxonomy import load_taxonomy
 
 
@@ -62,13 +62,9 @@ async def run_verify_stage(
     # intermediate dumping is enabled and the current run produces zero rows.
     for name in ("verified.jsonl", "deduped.jsonl", "complex_policy_rejected.jsonl"):
         ctx.path(name).unlink(missing_ok=True)
-    if (
-        not cfg.verify.enabled
-        or client is None
-        or not ctx.rows
-        or ctx.stats.get("llm_failed", 0) > 0
-        or ctx.stats.get("session_errors", 0) > 0
-    ):
+    if not cfg.verify.enabled or client is None or not ctx.rows:
+        # llm_failed 不跳过 verify：个别候选 judge 失败只丢弃自身，其余行仍可复核
+        # （fail-open，回到 pre-91cfeb2 语义）。
         return ctx
 
     checkpoint = stage_checkpoint(cfg, "verify")
@@ -232,10 +228,23 @@ async def run_verify_stage(
                         )
                         cache.pop(cache_key, None)
                 if parsed is None:
-                    raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
-                    parsed = parse_verify_response(raw)
-                    if not parsed.evidence_is_grounded_for(question):
-                        raise ValueError("verify evidence quote must be copied from question")
+                    # 模型输出概率性：解析/校验失败重调（与 funnel._call 同一口径）。
+                    for attempt in range(1, PARSE_MAX_ATTEMPTS + 1):
+                        raw = await client.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+                        try:
+                            parsed = parse_verify_response(raw)
+                            if not parsed.evidence_is_grounded_for(question):
+                                raise ValueError("verify evidence quote must be copied from question")
+                            break
+                        except (ValueError, RuntimeError) as exc:
+                            if attempt == PARSE_MAX_ATTEMPTS:
+                                raise
+                            logger.warning(
+                                "verify label invalid (attempt %d/%d), re-calling LLM: %s",
+                                attempt, PARSE_MAX_ATTEMPTS, str(exc)[:120],
+                            )
+                    # 循环内要么成功赋值要么 raise，不可能走到这里仍为 None
+                    assert parsed is not None
                     await put_cache(
                         cache,
                         cfg.cache_path,

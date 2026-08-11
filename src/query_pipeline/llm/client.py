@@ -32,16 +32,19 @@ class LLMClient:
                 # （5 次 ≈ 7.5min），429/5xx 风暴时全部 permit 被睡觉/挂起请求占死，
                 # 健康请求队头阻塞、吞吐归零，风暴后逐个超时才恢复。
                 async with self._semaphore:
-                    response = await self.client.chat.completions.create(
-                        model=self.config.model,
-                        messages=[
+                    request: dict[str, Any] = {
+                        "model": self.config.model,
+                        "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
-                        response_format=cast(Any, {"type": self.config.response_format}),
-                        temperature=0,
-                        timeout=self.config.timeout_seconds,
-                    )
+                        "response_format": cast(Any, {"type": self.config.response_format}),
+                        "temperature": 0,
+                        "timeout": self.config.timeout_seconds,
+                    }
+                    if self.config.extra_body:
+                        request["extra_body"] = self.config.extra_body
+                    response = await self.client.chat.completions.create(**request)
                 if not response.choices:
                     raise ValueError("empty response choices")
                 content = response.choices[0].message.content

@@ -12,6 +12,8 @@ from query_pipeline.config.models import LLMConfig
 from query_pipeline.models.session import Segment
 from query_pipeline.models.turn import Turn
 from query_pipeline.session.funnel import (
+    PARSE_MAX_ATTEMPTS,
+    _call,
     funnel_candidate,
     parse_complexity_response,
     parse_value_response,
@@ -156,7 +158,7 @@ class FunnelParseTest(unittest.TestCase):
             {"prior_questions": ["前文问题"], "current_question": "当前金融问题"},
         )
 
-    def test_ungrounded_evidence_fails_all_routes(self) -> None:
+    def test_ungrounded_evidence_fails_only_complex_route(self) -> None:
         question = "当前金融问题"
 
         class UngroundedClient:
@@ -189,11 +191,101 @@ class FunnelParseTest(unittest.TestCase):
                     cache_lock=asyncio.Lock(),
                 )
 
-        for route in ("complex", "normal", "reject"):
+        # complex：逐字证据缺失 → 仍 fail-closed（质量闸门只对正向声明生效）
+        result = asyncio.run(run_case("complex"))
+        self.assertIn("evidence quote must be copied", result["error"])
+        self.assertNotIn("dropped", result)
+
+        # reject：负向声明不强制证据 → 正常按模板排除 dropped，不再报错
+        result = asyncio.run(run_case("reject"))
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["dropped"], "complexity_reject")
+
+    def test_normal_reject_routes_tolerate_missing_evidence(self) -> None:
+        # ③ normal/reject 不再要求每条 exclusion 都有证据：空/乱证据也能通过
+        for route in ("normal", "reject"):
             with self.subTest(route=route):
-                result = asyncio.run(run_case(route))
-                self.assertIn("evidence quote must be copied", result["error"])
-                self.assertNotIn("dropped", result)
+                profile = parse_complexity_response(
+                    complexity_label(
+                        False,
+                        route=route,
+                        evidence_quote="问句中不存在的证据",
+                    )
+                )
+                self.assertTrue(profile.evidence_is_grounded_for("当前金融问题"))
+
+    def test_complex_route_requires_evidence_for_each_feature(self) -> None:
+        # ② 覆盖匹配：声明两个 feature 但只给一条证据 → 必须失败
+        label = complexity_label(
+            True,
+            complex_features=["multi_dimension_attribution", "cross_period_entity_research"],
+        )
+        label["evidence"] = [
+            {"criterion": "multi_dimension_attribution", "quote": label["evidence"][0]["quote"]}
+        ]
+        with self.assertRaises(ValueError):
+            parse_complexity_response(label)
+
+    def test_stray_evidence_is_tolerated(self) -> None:
+        # ② 多余的 evidence（不在声明的 feature 里）不再导致失败
+        label = complexity_label(True, complex_features=["multi_dimension_attribution"])
+        label["evidence"].append(
+            {"criterion": "cross_period_entity_research", "quote": label["evidence"][0]["quote"]}
+        )
+        profile = parse_complexity_response(label)
+        self.assertTrue(profile.admissible_hard)
+
+    def test_invalid_enum_values_are_filtered(self) -> None:
+        # 模型偶发输出非法枚举：清洗后过滤，路由自洽即可解析（不再 fail-closed 丢候选）
+        label = complexity_label(True, complex_features=["multi_dimension_attribution"])
+        label["complex_features"].append("不存在的特征")
+        label["evidence"].append({"criterion": "不存在的特征", "quote": "问句"})
+        profile = parse_complexity_response(label)
+        self.assertEqual(profile.complex_features, ["multi_dimension_attribution"])
+
+    def test_grounding_tolerates_whitespace_and_fullwidth(self) -> None:
+        # 逐字证据的空白/全半角差异不算失配（LLM 常见行为）
+        profile = parse_complexity_response(
+            complexity_label(True, evidence_quote="8月7股价跌")
+        )
+        self.assertTrue(profile.evidence_is_grounded_for("8月7 股价跌 且放量"))  # 空白差异
+        profile2 = parse_complexity_response(
+            complexity_label(True, evidence_quote="8月7，股价跌")
+        )
+        self.assertTrue(profile2.evidence_is_grounded_for("8月7,股价跌且放量"))  # 全角→半角
+
+    def test_parse_failure_retries_llm(self) -> None:
+        # ① 解析/校验失败重调：首次坏输出 → 重调返回合法值
+        class FlakyClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+                self.calls += 1
+                if self.calls == 1:
+                    return json.dumps({"is_valuable": "garbage"})
+                return json.dumps({"is_valuable": True})
+
+        async def run() -> tuple:
+            client = FlakyClient()
+            with tempfile.TemporaryDirectory() as tmp:
+                parsed = await _call(
+                    client=client,  # type: ignore[arg-type]
+                    llm_cfg=LLMConfig(model="fake"),
+                    cache={},
+                    cache_path=Path(tmp) / "cache.jsonl",
+                    cache_lock=asyncio.Lock(),
+                    step="value_gate",
+                    prompt_id="value_gate",
+                    payload={"current_question": "q"},
+                    parse=parse_value_response,
+                )
+            return parsed, client.calls
+
+        parsed, calls = asyncio.run(run())
+        self.assertTrue(parsed.is_valuable)
+        self.assertEqual(calls, 2)
+        self.assertLessEqual(calls, PARSE_MAX_ATTEMPTS)
 
 
 if __name__ == "__main__":

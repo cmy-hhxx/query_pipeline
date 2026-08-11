@@ -42,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dedup-threshold", type=float, default=None, help="lexical 回退 Jaccard 阈值（默认 0.80）")
     run_parser.add_argument("--api-key", default=None, help="OPENAI_API_KEY 覆盖（默认读 .env）")
     run_parser.add_argument("--base-url", default=None, help="OPENAI_BASE_URL 覆盖（默认读 .env）")
+    run_parser.add_argument("--no-reasoning", action="store_true", help="关闭模型推理（extra_body thinking disabled，省 token/成本）")
     _add_log_args(run_parser)
 
     suggest_parser = sub.add_parser(
@@ -99,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             verify_rounds_hard=args.verify_rounds,
             api_key=args.api_key,
             base_url=args.base_url,
+            llm_extra_body=({"thinking": {"type": "disabled"}} if args.no_reasoning else None),
             verbose=args.verbose,
         )
         print(json.dumps(summary, ensure_ascii=False, indent=2))

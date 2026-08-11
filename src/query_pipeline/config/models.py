@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -89,6 +90,8 @@ class LLMConfig(ConfigModel):
     timeout_seconds: float = 90.0
     response_format: str = "json_object"
     cache: Path | None = None  # None -> <work_dir>/runtime/cache/llm_cache.jsonl
+    # 透传给 OpenAI 兼容接口的附加请求体（如 deepseek 关推理 {"thinking": {"type": "disabled"}}）
+    extra_body: dict[str, Any] | None = None
 
 
 class VerifyConfig(ConfigModel):

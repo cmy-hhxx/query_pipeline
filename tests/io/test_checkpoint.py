@@ -220,16 +220,17 @@ class SessionResumeTest(unittest.TestCase):
 
             # Run 1: session t1's judge call fails (outage). Its session is
             # NOT checkpointed so it retries; t0/t2 are checkpointed.
+            # llm_failed fail-open：幸存行照常复核（verify 不再整体跳过）。
             summary1, _ = run_pipeline_with_fakes(cfg, session_fail={"S1 complex query"})
             self.assertEqual(summary1.stats["llm_failed"], 1)
             self.assertEqual(summary1.stats["complex_rows"], 2)
+            self.assertEqual(summary1.stats["verify_complex_kept"], 2)
             self.assertEqual(summary1.stats["final_complex_rows"], 2)
             cp_path = tmp_path / "work" / "runtime" / "checkpoints" / "judge.jsonl"
             self.assertEqual(len(_checkpoint_keys(cp_path)), 2)
 
             # Run 2: only t1's judge re-runs; t0/t2 replay from judge cache.
-            # Run 1 skipped Verify because the judge batch was incomplete, so
-            # all three rows now receive their first independent verification.
+            # t0/t2 已在 run 1 复核并 checkpoint，run 2 只有 t1 首次复核。
             summary2, client2 = run_pipeline_with_fakes(cfg)
             self.assertEqual(summary2.stats["llm_failed"], 0)
             self.assertEqual(summary2.stats["complex_rows"], 3)
@@ -242,7 +243,7 @@ class SessionResumeTest(unittest.TestCase):
             )
             self.assertEqual(
                 [c["question"] for c in client2.calls if "question" in c and "current_question" not in c and "questions" not in c and "text" not in c],
-                ["S0 complex query", "S1 complex query", "S2 complex query"],
+                ["S1 complex query"],
             )
             self.assertEqual(len(_checkpoint_keys(cp_path)), 3)
 
@@ -257,8 +258,8 @@ class VerifyResumeTest(unittest.TestCase):
             _write_jsonl(tmp_path / "input.jsonl", sessions)
             cfg = load_pipeline_config(_write_config(tmp_path, post_enabled=False))
 
-            # Run 1: verify for V1 fails. The run is not published and the
-            # failure is not checkpointed, so it retries on the next run.
+            # Run 1: verify for V1 fails. verify_failed fail-open → V1 行丢弃，
+            # 批次照常成功并发布 V0/V2；失败不 checkpoint，下次 run 重试 V1。
             summary1, _ = run_pipeline_with_fakes(cfg, verify_fail={"V1 complex query"})
             self.assertEqual(summary1.stats["verify_complex_kept"], 2)
             self.assertEqual(summary1.stats["verify_failed"], 1)
@@ -266,7 +267,7 @@ class VerifyResumeTest(unittest.TestCase):
             self.assertEqual(summary1.stats["verify_to_normal"], 0)
             self.assertEqual(summary1.stats["complex_rows"], 3)
             self.assertEqual(summary1.stats["final_complex_rows"], 2)
-            self.assertFalse(summary1.success)
+            self.assertTrue(summary1.success)
 
             # Run 2: V0/V2 replay from checkpoints (zero LLM); V1's failure is
             # retried and succeeds — a transient failure must not be sticky.

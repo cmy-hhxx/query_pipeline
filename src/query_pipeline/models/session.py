@@ -12,6 +12,7 @@ from query_pipeline.models.complexity import (
     ComplexRoute,
     ExclusionReason,
     PolicyEvidence,
+    clean_policy_fields,
     evidence_is_grounded,
 )
 
@@ -81,19 +82,20 @@ class VerifyResult(BaseModel):
     @model_validator(mode="after")
     def validate_route_consistency(self) -> "VerifyResult":
         criteria = {item.criterion for item in self.evidence}
-        required = set(self.complex_features) | set(self.exclusion_reasons)
-        if criteria != required:
-            raise ValueError("evidence criteria must exactly match features/exclusions")
         if self.route == "complex":
             if not self.complex_features or self.exclusion_reasons:
                 raise ValueError("complex route requires features and forbids exclusions")
             if self.confidence == "low":
                 raise ValueError("low confidence cannot route to complex")
+            # 覆盖匹配：每条声明的 feature 都要有对应证据，容忍多余的 evidence。
+            if set(self.complex_features) - criteria:
+                raise ValueError("every complex feature requires matching evidence")
         elif self.route == "normal":
             if self.complex_features or not self.exclusion_reasons:
                 raise ValueError("normal route requires exclusions and forbids complex features")
             if set(self.exclusion_reasons) & {"eval_template", "embedded_prompt"}:
                 raise ValueError("template/prompt exclusions must route to reject")
+            # 负向声明（排除原因）不强制证据。
         else:
             if self.complex_features:
                 raise ValueError("reject route forbids complex features")
@@ -125,15 +127,18 @@ class VerifyResult(BaseModel):
         return self.route == "complex" and self.evidence_is_grounded_for(question)
 
     def evidence_is_grounded_for(self, question: str) -> bool:
+        # 只有 complex 的正向声明要求逐字证据；normal/reject 的排除原因为负向声明，不强制。
+        if self.route != "complex":
+            return True
         return evidence_is_grounded(self.evidence, question)
 
 
 def parse_verify_response(raw: str) -> VerifyResult:
-    return VerifyResult.model_validate(parse_json_object(raw))
+    return VerifyResult.model_validate(clean_policy_fields(parse_json_object(raw)))
 
 
 def parse_verify_payload(data: dict[str, Any]) -> VerifyResult:
-    return VerifyResult.model_validate(data)
+    return VerifyResult.model_validate(clean_policy_fields(dict(data)))
 
 
 def parse_segment_response(raw: str, *, num_turns: int) -> list[Segment]:

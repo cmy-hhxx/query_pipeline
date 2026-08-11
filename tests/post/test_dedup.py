@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 import unittest
 from typing import Any
 
 from query_pipeline.config.models import DedupConfig
-from query_pipeline.post.dedup import dedup_rows
+from query_pipeline.post.dedup import _parse_batch, dedup_rows
 from query_pipeline.rules.normalize import exact_token_jaccard, tokenize_question
 
 _BASE = "how does the fed rate hike affect bond prices this year and what should investors watch for"
@@ -52,6 +53,12 @@ class DedupTest(unittest.TestCase):
         kept, dropped = dedup_rows(rows, DedupConfig())
         self.assertEqual(len(kept), 2)
         self.assertEqual(dropped, [])
+
+    def test_parse_batch_missing_pair_is_tolerated(self) -> None:
+        # 模型遗漏个别 pair：缺的按"保留两条"处理，不让整批判失败
+        raw = json.dumps({"items": [{"id": "0:1", "label": "distinct", "reason": "不同"}]})
+        verdicts = _parse_batch(raw, {"0:1", "0:2"})  # 0:2 缺失
+        self.assertEqual(set(verdicts), {"0:1"})
 
     def test_empty_text_never_dropped(self) -> None:
         rows = [_row("", "r1"), _row("", "r2"), _row("   ", "r3")]

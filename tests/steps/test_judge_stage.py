@@ -78,8 +78,13 @@ class JudgeStageContractTest(unittest.TestCase):
             "complex_rows": 0,
         }
         self.assertTrue(_run_success(clean))
-        # Infrastructure failures must not publish a partial batch.
-        self.assertFalse(_run_success({**clean, "llm_failed": 1}))
+        # llm_failed / verify_failed / dedup 失败都是 fail-open：单个 flaky LLM
+        # 输出不阻止其余交付（失败候选丢弃、去重失败保留行；失败数留 summary）。
+        # 会话级错误仍致命。
+        self.assertTrue(_run_success({**clean, "llm_failed": 1}))
+        self.assertTrue(_run_success({**clean, "verify_failed": 1}))
+        self.assertTrue(_run_success({**clean, "template_family_failed": 1}))
+        self.assertTrue(_run_success({**clean, "semantic_dedup_failed": 1}))
         self.assertFalse(_run_success({**clean, "session_errors": 1}))
         self.assertFalse(_run_success({**clean, "total_sessions": 0}))
         # Bad input lines never fail a run that still adapted sessions — the old
@@ -88,7 +93,5 @@ class JudgeStageContractTest(unittest.TestCase):
         # total_sessions == 0 覆盖；部分坏行走 fail-open（summary/bad_lines 可审计）。
         self.assertTrue(_run_success({**clean, "input_bad_lines": 10}))
         self.assertTrue(_run_success({**clean, "total_sessions": 5, "input_bad_lines": 5}))
-        # Verify/corpus-review failures block publication; translation remains
-        # fail-open and empty-but-clean output is valid.
-        self.assertFalse(_run_success({**clean, "verify_failed": 1}))
+        # 翻译 fail-open，空但干净的输出合法。
         self.assertTrue(_run_success({**clean, "translate_failed": 1}))

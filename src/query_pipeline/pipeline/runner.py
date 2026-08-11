@@ -21,16 +21,14 @@ from query_pipeline.pipeline.stages import DEFAULT_STAGES, get_stage, stage_name
 
 
 def _run_success(stats: dict[str, Any]) -> bool:
-    """A run fails when discovery or complex verification is unresolved."""
+    """A run fails only when discovery is unresolved or nothing adapted.
+
+    llm_failed / verify_failed / template_family_failed / semantic_dedup_failed
+    都是 fail-open：单个候选/批次的 flaky LLM 输出不能阻止其余结果交付——失败
+    候选 fail-closed 丢弃（去重失败则 fail-open 保留行、只是去重更保守），失败数
+    留在 summary。会话级错误仍致命。
+    """
     if stats.get("session_errors", 0) > 0:
-        return False
-    if stats.get("llm_failed", 0) > 0:
-        return False
-    if stats.get("verify_failed", 0) > 0:
-        return False
-    if stats.get("template_family_failed", 0) > 0:
-        return False
-    if stats.get("semantic_dedup_failed", 0) > 0:
         return False
     if stats.get("total_sessions", 0) == 0:
         return False

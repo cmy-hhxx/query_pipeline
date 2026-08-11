@@ -167,23 +167,25 @@ class VerifyStageTest(unittest.TestCase):
         self.assertEqual(summary.stats["verify_to_normal"], 1)
         self.assertEqual(summary.stats["verify_failed"], 0)
 
-    def test_ungrounded_verify_evidence_fails_the_batch(self) -> None:
+    def test_ungrounded_verify_evidence_drops_row_fail_open(self) -> None:
+        # 逐字证据闸门只对 complex 正向声明生效：complex 复核返回转述证据 →
+        # 该行 verify 失败被丢弃；verify_failed fail-open → 批次照常成功。
         class UngroundedVerifyClient(RecordingClient):
             async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
                 payload = json.loads(user_prompt.split("\n", 1)[1])
                 if "question" in payload:
                     return json.dumps(
                         verify_label(
-                            False,
-                            route="reject",
-                            reason="模板",
+                            True,
+                            route="complex",
+                            reason="复杂",
                             evidence_quote="问句中不存在的证据",
                         )
                     )
                 return await super().complete(system_prompt=system_prompt, user_prompt=user_prompt)
 
         summary = self._run(UngroundedVerifyClient)
-        self.assertFalse(summary.success)
+        self.assertTrue(summary.success)
         self.assertEqual(summary.stats["verify_failed"], 2)
         self.assertEqual(summary.stats["verify_rejected_template"], 0)
         self.assertEqual(summary.stats["output_rows"], 0)
